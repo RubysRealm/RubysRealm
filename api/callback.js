@@ -1,19 +1,26 @@
 export default async function handler(req, res) {
-  const { code } = req.query;
+  const { code, error, error_description } = req.query;
+
+  if (error) {
+    return res.status(400).send(
+      `TikTok connection failed: ${error_description || error}`
+    );
+  }
 
   if (!code) {
     return res.status(400).send("Missing TikTok authorization code.");
   }
 
   try {
-    const redirectUri = "https://rubys-realm.vercel.app/api/callback";
+    const redirectUri =
+      "https://rubys-realm.vercel.app/api/callback";
 
     const body = new URLSearchParams({
       client_key: process.env.TIKTOK_CLIENT_KEY,
       client_secret: process.env.TIKTOK_CLIENT_SECRET,
-      code: code,
+      code,
       grant_type: "authorization_code",
-      redirect_uri: redirectUri,
+      redirect_uri: redirectUri
     });
 
     const response = await fetch(
@@ -21,36 +28,38 @@ export default async function handler(req, res) {
       {
         method: "POST",
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
+          "Content-Type": "application/x-www-form-urlencoded"
         },
-        body: body.toString(),
+        body: body.toString()
       }
     );
 
     const data = await response.json();
 
-    if (!response.ok || data.error) {
-      console.error("TikTok token error:", data);
-      return res.status(400).json({
-        success: false,
-        error: data,
-      });
+    if (!response.ok || !data.access_token) {
+      console.error("TikTok OAuth error:", data);
+      return res.status(400).send(
+        "TikTok authorization failed. Please reconnect the account."
+      );
     }
 
-    return res.status(200).send(`
-      <html>
-        <body style="background:#111;color:white;font-family:Arial;text-align:center;padding:60px 20px;">
-          <h1>TikTok Connected ✓</h1>
-          <p>RubysRealm successfully connected to your TikTok account.</p>
-          <p>You can close this page.</p>
-        </body>
-      </html>
-    `);
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({
-      success: false,
-      error: "TikTok connection failed.",
+    res.setHeader(
+      "Set-Cookie",
+      `tiktok_access_token=${encodeURIComponent(
+        data.access_token
+      )}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${
+        data.expires_in || 86400
+      }`
+    );
+
+    res.writeHead(302, {
+      Location: "/?connected=1"
     });
+
+    return res.end();
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).send("TikTok connection failed.");
   }
 }
