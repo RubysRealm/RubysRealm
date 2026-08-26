@@ -101,6 +101,101 @@
     window.location.href = authUrl;
   };
 </script>
+<hr style="margin:40px 0;border-color:#333;">
 
+<h2>Post to TikTok</h2>
+
+<input
+  type="file"
+  id="videoFile"
+  accept="video/mp4,video/quicktime,video/webm"
+  style="margin:15px 0;"
+>
+
+<br>
+
+<textarea
+  id="caption"
+  placeholder="TikTok caption..."
+  maxlength="2200"
+  style="width:90%;max-width:500px;height:100px;padding:12px;margin:15px 0;"
+></textarea>
+
+<br>
+
+<button id="postTikTok" style="padding:15px 30px;">
+  Post to TikTok
+</button>
+
+<p id="postStatus"></p>
+
+<script>
+document.getElementById("postTikTok").onclick = async function () {
+  const file = document.getElementById("videoFile").files[0];
+  const caption = document.getElementById("caption").value;
+  const status = document.getElementById("postStatus");
+
+  if (!file) {
+    status.textContent = "Choose a video first.";
+    return;
+  }
+
+  status.textContent = "Preparing TikTok post...";
+
+  try {
+    const initResponse = await fetch("/api/post", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        title: caption,
+        video_size: file.size,
+        privacy_level: "SELF_ONLY"
+      })
+    });
+
+    const result = await initResponse.json();
+
+    if (!initResponse.ok || result.error?.code !== "ok") {
+      throw new Error(
+        result.error?.message ||
+        result.error ||
+        "Could not initialize TikTok post."
+      );
+    }
+
+    const uploadUrl = result.data?.upload_url;
+
+    if (!uploadUrl) {
+      throw new Error("TikTok did not return an upload URL.");
+    }
+
+    status.textContent = "Uploading video to TikTok...";
+
+    const uploadResponse = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Type": file.type || "video/mp4",
+        "Content-Length": String(file.size),
+        "Content-Range":
+          "bytes 0-" + (file.size - 1) + "/" + file.size
+      },
+      body: file
+    });
+
+    if (!uploadResponse.ok) {
+      throw new Error("Video upload failed.");
+    }
+
+    status.textContent =
+      "Video sent to TikTok successfully. Publish ID: " +
+      result.data.publish_id;
+
+  } catch (error) {
+    status.textContent = "Error: " + error.message;
+  }
+};
+</script>
 </body>
 </html>
