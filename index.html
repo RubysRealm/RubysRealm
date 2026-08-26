@@ -8,49 +8,58 @@
   <style>
     body {
       font-family: Arial, sans-serif;
-      max-width: 800px;
-      margin: 60px auto;
-      padding: 20px;
       background: #111;
-      color: white;
+      color: #fff;
+      margin: 0;
+      padding: 50px 25px;
       text-align: center;
+    }
+
+    .container {
+      max-width: 700px;
+      margin: auto;
     }
 
     h1 {
       font-size: 42px;
+      margin-bottom: 25px;
     }
 
     p {
+      color: #ddd;
       font-size: 18px;
       line-height: 1.6;
-      color: #ddd;
     }
 
-    button {
+    #tiktokLogin {
+      display: inline-block;
       background: #fe2c55;
       color: white;
-      border: none;
-      border-radius: 8px;
+      border: 0;
+      border-radius: 10px;
       padding: 16px 28px;
+      margin: 25px 0;
       font-size: 18px;
       font-weight: bold;
       cursor: pointer;
-      margin: 20px;
     }
 
     a {
-      color: #ff4d67;
-      margin: 10px;
+      color: #fe5b72;
+      margin: 0 10px;
     }
   </style>
 </head>
 
 <body>
 
+<div class="container">
+
   <h1>RubysRealm</h1>
 
   <p>
-    RubysRealm is a short-form entertainment publishing application.
+    RubysRealm is a short-form entertainment content creation and
+    publishing application.
   </p>
 
   <p>
@@ -58,7 +67,7 @@
     original entertainment content.
   </p>
 
-  <button id="tiktokLogin">
+  <button type="button" id="tiktokLogin">
     Continue with TikTok
   </button>
 
@@ -67,31 +76,31 @@
     <a href="privacy.html">Privacy Policy</a>
   </p>
 
-  <script>
-    document.getElementById("tiktokLogin").addEventListener("click", function () {
+</div>
 
-      const clientKey = "sbawhv40x6exj1qwu9";
+<script>
+  const clientKey = "sbawhv40x6exj1qwu9";
+  const redirectUri = "https://rubysrealm.github.io/RubysRealm/";
 
-      const redirectUri =
-        "https://rubysrealm.github.io/RubysRealm/";
+  document.getElementById("tiktokLogin").onclick = function () {
 
-      const state =
-        Math.random().toString(36).substring(2) +
-        Date.now().toString(36);
+    const state =
+      Math.random().toString(36).substring(2) +
+      Date.now().toString(36);
 
-      sessionStorage.setItem("tiktok_oauth_state", state);
+    sessionStorage.setItem("tiktok_oauth_state", state);
 
-      const authUrl =
-        "https://www.tiktok.com/v2/auth/authorize/" +
-        "?client_key=" + encodeURIComponent(clientKey) +
-        "&scope=" + encodeURIComponent("user.info.basic") +
-        "&response_type=code" +
-        "&redirect_uri=" + encodeURIComponent(redirectUri) +
-        "&state=" + encodeURIComponent(state);
+    const authUrl =
+      "https://www.tiktok.com/v2/auth/authorize/?" +
+      "client_key=" + encodeURIComponent(clientKey) +
+      "&scope=" + encodeURIComponent("user.info.basic") +
+      "&response_type=code" +
+      "&redirect_uri=" + encodeURIComponent(redirectUri) +
+      "&state=" + encodeURIComponent(state);
 
-      window.location.href = authUrl;
-    });
-  </script>
+    window.location.href = authUrl;
+  };
+</script>
 
 </body>
 </html>
