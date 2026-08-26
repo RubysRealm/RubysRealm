@@ -4,21 +4,94 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>RubysRealm</title>
+
   <style>
-    body{font-family:Arial,sans-serif;max-width:800px;margin:60px auto;padding:20px;background:#111;color:#fff}
-    h1{font-size:42px}
-    p{font-size:18px;line-height:1.6;color:#ddd}
-    a{color:#ff4d67;margin-right:20px}
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 60px auto;
+      padding: 20px;
+      background: #111;
+      color: white;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: 42px;
+    }
+
+    p {
+      font-size: 18px;
+      line-height: 1.6;
+      color: #ddd;
+    }
+
+    button {
+      background: #fe2c55;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 16px 28px;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      margin: 20px;
+    }
+
+    a {
+      color: #ff4d67;
+      margin: 10px;
+    }
   </style>
 </head>
+
 <body>
+
   <h1>RubysRealm</h1>
-  <p>RubysRealm is a short-form entertainment content creation and publishing application.</p>
-  <p>It helps authorized users create and publish original entertainment content to their TikTok accounts.</p>
+
+  <p>
+    RubysRealm is a short-form entertainment publishing application.
+  </p>
+
+  <p>
+    Authorized users can connect their TikTok account and publish
+    original entertainment content.
+  </p>
+
+  <button id="tiktokLogin">
+    Continue with TikTok
+  </button>
 
   <p>
     <a href="terms.html">Terms of Service</a>
     <a href="privacy.html">Privacy Policy</a>
   </p>
+
+  <script>
+    document.getElementById("tiktokLogin").addEventListener("click", function () {
+
+      const clientKey = "sbawhv40x6exj1qwu9";
+
+      const redirectUri =
+        "https://rubysrealm.github.io/RubysRealm/";
+
+      const state =
+        Math.random().toString(36).substring(2) +
+        Date.now().toString(36);
+
+      sessionStorage.setItem("tiktok_oauth_state", state);
+
+      const authUrl =
+        "https://www.tiktok.com/v2/auth/authorize/" +
+        "?client_key=" + encodeURIComponent(clientKey) +
+        "&scope=" + encodeURIComponent("user.info.basic") +
+        "&response_type=code" +
+        "&redirect_uri=" + encodeURIComponent(redirectUri) +
+        "&state=" + encodeURIComponent(state);
+
+      window.location.href = authUrl;
+    });
+  </script>
+
 </body>
 </html>
