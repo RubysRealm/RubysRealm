@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
   <title>RubysRealm</title>
 
   <style>
@@ -11,8 +12,7 @@
       background: #111;
       color: #fff;
       margin: 0;
-      padding: 50px 25px;
-      text-align: center;
+      padding: 40px 20px 80px;
     }
 
     .container {
@@ -21,32 +21,79 @@
     }
 
     h1 {
-      font-size: 42px;
-      margin-bottom: 25px;
+      font-size: 44px;
+      text-align: center;
+    }
+
+    h2 {
+      margin-top: 45px;
     }
 
     p {
+      line-height: 1.5;
       color: #ddd;
-      font-size: 18px;
-      line-height: 1.6;
     }
 
-    #tiktokLogin {
-      display: inline-block;
+    button {
       background: #fe2c55;
       color: white;
-      border: 0;
-      border-radius: 10px;
-      padding: 16px 28px;
-      margin: 25px 0;
-      font-size: 18px;
+      border: none;
+      border-radius: 9px;
+      padding: 15px 24px;
+      font-size: 17px;
       font-weight: bold;
       cursor: pointer;
+      margin: 10px 0;
+    }
+
+    input,
+    textarea,
+    select {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      margin: 8px 0 18px;
+    }
+
+    input[type="checkbox"] {
+      width: auto;
+      margin-right: 8px;
+    }
+
+    video {
+      width: 100%;
+      max-height: 420px;
+      background: black;
+      margin: 10px 0 20px;
+    }
+
+    .panel {
+      border: 1px solid #444;
+      border-radius: 12px;
+      padding: 20px;
+      margin-top: 25px;
+    }
+
+    .option {
+      margin: 10px 0;
+    }
+
+    .muted {
+      color: #aaa;
+      font-size: 14px;
+    }
+
+    .error {
+      color: #ff758c;
+    }
+
+    .success {
+      color: #65e68a;
     }
 
     a {
-      color: #fe5b72;
-      margin: 0 10px;
+      color: #ff607d;
     }
   </style>
 </head>
@@ -58,144 +105,514 @@
   <h1>RubysRealm</h1>
 
   <p>
-    RubysRealm is a short-form entertainment content creation and
-    publishing application.
+    RubysRealm allows authorized creators to prepare and publish
+    original short-form entertainment content to TikTok.
   </p>
 
-  <p>
-    Authorized users can connect their TikTok account and publish
-    original entertainment content.
-  </p>
-
-  <button type="button" id="tiktokLogin">
+  <button id="tiktokLogin">
     Continue with TikTok
   </button>
 
   <p>
     <a href="terms.html">Terms of Service</a>
+    |
     <a href="privacy.html">Privacy Policy</a>
   </p>
+
+  <div class="panel">
+
+    <h2>Post to TikTok</h2>
+
+    <div id="creatorArea">
+      Loading TikTok creator information...
+    </div>
+
+    <label for="videoFile">Video</label>
+
+    <input
+      type="file"
+      id="videoFile"
+      accept="video/mp4,video/quicktime,video/webm"
+    >
+
+    <video
+      id="preview"
+      controls
+      playsinline
+      style="display:none;"
+    ></video>
+
+    <label for="caption">Caption</label>
+
+    <textarea
+      id="caption"
+      maxlength="2200"
+      placeholder="Write your TikTok caption..."
+    ></textarea>
+
+    <label for="privacy">
+      Privacy
+    </label>
+
+    <select id="privacy">
+      <option value="">
+        Select privacy
+      </option>
+    </select>
+
+    <div class="option">
+      <label>
+        <input type="checkbox" id="allowComment">
+        Allow comments
+      </label>
+    </div>
+
+    <div class="option">
+      <label>
+        <input type="checkbox" id="allowDuet">
+        Allow Duet
+      </label>
+    </div>
+
+    <div class="option">
+      <label>
+        <input type="checkbox" id="allowStitch">
+        Allow Stitch
+      </label>
+    </div>
+
+    <hr>
+
+    <div class="option">
+      <label>
+        <input type="checkbox" id="commercialToggle">
+        This content promotes myself, a brand, product, or service
+      </label>
+    </div>
+
+    <div id="commercialOptions" style="display:none;">
+
+      <div class="option">
+        <label>
+          <input type="checkbox" id="yourBrand">
+          Your Brand
+        </label>
+        <div class="muted">
+          Promoting yourself or your own business.
+        </div>
+      </div>
+
+      <div class="option">
+        <label>
+          <input type="checkbox" id="brandedContent">
+          Branded Content
+        </label>
+        <div class="muted">
+          Paid partnership or third-party promotion.
+        </div>
+      </div>
+
+    </div>
+
+    <div class="option">
+      <label>
+        <input type="checkbox" id="isAigc">
+        This video contains AI-generated content
+      </label>
+    </div>
+
+    <hr>
+
+    <div class="option">
+      <label>
+        <input type="checkbox" id="consent">
+        By posting, you agree to TikTok's Music Usage Confirmation
+      </label>
+    </div>
+
+    <p class="muted">
+      After publishing, TikTok may take a few minutes to process
+      the video before it appears on your profile.
+    </p>
+
+    <button id="postTikTok">
+      Post to TikTok
+    </button>
+
+    <p id="postStatus"></p>
+
+  </div>
 
 </div>
 
 <script>
   const clientKey = "sbawhv40x6exj1qwu9";
-  const redirectUri = "https://rubys-realm.vercel.app/api/callback";
 
-  document.getElementById("tiktokLogin").onclick = function () {
+  const redirectUri =
+    "https://rubys-realm.vercel.app/api/callback";
 
-    const state =
-      Math.random().toString(36).substring(2) +
-      Date.now().toString(36);
+  const creatorArea =
+    document.getElementById("creatorArea");
 
-    sessionStorage.setItem("tiktok_oauth_state", state);
+  const privacy =
+    document.getElementById("privacy");
 
-    const authUrl =
-      "https://www.tiktok.com/v2/auth/authorize/?" +
-      "client_key=" + encodeURIComponent(clientKey) +
-      "&scope=" + encodeURIComponent("user.info.basic,video.publish") +
-      "&response_type=code" +
-      "&redirect_uri=" + encodeURIComponent(redirectUri) +
-      "&state=" + encodeURIComponent(state);
+  const allowComment =
+    document.getElementById("allowComment");
 
-    window.location.href = authUrl;
-  };
-</script>
-<hr style="margin:40px 0;border-color:#333;">
+  const allowDuet =
+    document.getElementById("allowDuet");
 
-<h2>Post to TikTok</h2>
+  const allowStitch =
+    document.getElementById("allowStitch");
 
-<input
-  type="file"
-  id="videoFile"
-  accept="video/mp4,video/quicktime,video/webm"
-  style="margin:15px 0;"
->
+  const videoFile =
+    document.getElementById("videoFile");
 
-<br>
+  const preview =
+    document.getElementById("preview");
 
-<textarea
-  id="caption"
-  placeholder="TikTok caption..."
-  maxlength="2200"
-  style="width:90%;max-width:500px;height:100px;padding:12px;margin:15px 0;"
-></textarea>
+  const commercialToggle =
+    document.getElementById("commercialToggle");
 
-<br>
+  const commercialOptions =
+    document.getElementById("commercialOptions");
 
-<button id="postTikTok" style="padding:15px 30px;">
-  Post to TikTok
-</button>
+  let creatorInfo = null;
+  let selectedDuration = 0;
 
-<p id="postStatus"></p>
+  document
+    .getElementById("tiktokLogin")
+    .onclick = function () {
 
-<script>
-document.getElementById("postTikTok").onclick = async function () {
-  const file = document.getElementById("videoFile").files[0];
-  const caption = document.getElementById("caption").value;
-  const status = document.getElementById("postStatus");
+      const state =
+        Math.random().toString(36).substring(2) +
+        Date.now().toString(36);
 
-  if (!file) {
-    status.textContent = "Choose a video first.";
-    return;
-  }
-
-  status.textContent = "Preparing TikTok post...";
-
-  try {
-    const initResponse = await fetch("/api/post", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        title: caption,
-        video_size: file.size,
-        privacy_level: "SELF_ONLY"
-      })
-    });
-
-    const result = await initResponse.json();
-
-    if (!initResponse.ok || result.error?.code !== "ok") {
-      throw new Error(
-        result.error?.message ||
-        result.error ||
-        "Could not initialize TikTok post."
+      sessionStorage.setItem(
+        "tiktok_oauth_state",
+        state
       );
+
+      const authUrl =
+        "https://www.tiktok.com/v2/auth/authorize/?" +
+        "client_key=" +
+        encodeURIComponent(clientKey) +
+        "&scope=" +
+        encodeURIComponent(
+          "user.info.basic,video.publish"
+        ) +
+        "&response_type=code" +
+        "&redirect_uri=" +
+        encodeURIComponent(redirectUri) +
+        "&state=" +
+        encodeURIComponent(state);
+
+      window.location.href = authUrl;
+    };
+
+  commercialToggle.onchange = function () {
+    commercialOptions.style.display =
+      this.checked ? "block" : "none";
+
+    if (!this.checked) {
+      document.getElementById("yourBrand").checked =
+        false;
+
+      document.getElementById(
+        "brandedContent"
+      ).checked = false;
     }
+  };
 
-    const uploadUrl = result.data?.upload_url;
+  videoFile.onchange = function () {
+    const file = this.files[0];
 
-    if (!uploadUrl) {
-      throw new Error("TikTok did not return an upload URL.");
+    if (!file) return;
+
+    const url = URL.createObjectURL(file);
+
+    preview.src = url;
+    preview.style.display = "block";
+
+    preview.onloadedmetadata = function () {
+      selectedDuration = preview.duration;
+    };
+  };
+
+  async function loadCreator() {
+    try {
+      const response =
+        await fetch("/api/post");
+
+      const result =
+        await response.json();
+
+      if (
+        !response.ok ||
+        result.error?.code !== "ok"
+      ) {
+        throw new Error(
+          result.error?.message ||
+          "Connect your TikTok account first."
+        );
+      }
+
+      creatorInfo = result.data;
+
+      creatorArea.innerHTML =
+        "<strong>Posting to:</strong> " +
+        creatorInfo.creator_nickname +
+        "<br><span class='muted'>@" +
+        creatorInfo.creator_username +
+        "</span>";
+
+      privacy.innerHTML =
+        '<option value="">Select privacy</option>';
+
+      creatorInfo
+        .privacy_level_options
+        .forEach(function (level) {
+
+          const option =
+            document.createElement("option");
+
+          option.value = level;
+
+          const labels = {
+            PUBLIC_TO_EVERYONE:
+              "Everyone",
+            MUTUAL_FOLLOW_FRIENDS:
+              "Friends",
+            FOLLOWER_OF_CREATOR:
+              "Followers",
+            SELF_ONLY:
+              "Only me"
+          };
+
+          option.textContent =
+            labels[level] || level;
+
+          privacy.appendChild(option);
+        });
+
+      allowComment.disabled =
+        creatorInfo.comment_disabled;
+
+      allowDuet.disabled =
+        creatorInfo.duet_disabled;
+
+      allowStitch.disabled =
+        creatorInfo.stitch_disabled;
+
+    } catch (error) {
+      creatorArea.innerHTML =
+        "<span class='error'>" +
+        error.message +
+        "</span>";
     }
-
-    status.textContent = "Uploading video to TikTok...";
-
-    const uploadResponse = await fetch(uploadUrl, {
-      method: "PUT",
-      headers: {
-        "Content-Type": file.type || "video/mp4",
-        "Content-Length": String(file.size),
-        "Content-Range":
-          "bytes 0-" + (file.size - 1) + "/" + file.size
-      },
-      body: file
-    });
-
-    if (!uploadResponse.ok) {
-      throw new Error("Video upload failed.");
-    }
-
-    status.textContent =
-      "Video sent to TikTok successfully. Publish ID: " +
-      result.data.publish_id;
-
-  } catch (error) {
-    status.textContent = "Error: " + error.message;
   }
-};
+
+  document
+    .getElementById("postTikTok")
+    .onclick = async function () {
+
+      const status =
+        document.getElementById("postStatus");
+
+      const file =
+        videoFile.files[0];
+
+      const caption =
+        document.getElementById("caption").value;
+
+      const selectedPrivacy =
+        privacy.value;
+
+      const consent =
+        document.getElementById("consent").checked;
+
+      const commercial =
+        commercialToggle.checked;
+
+      const yourBrand =
+        document.getElementById("yourBrand").checked;
+
+      const brandedContent =
+        document.getElementById(
+          "brandedContent"
+        ).checked;
+
+      const isAigc =
+        document.getElementById("isAigc").checked;
+
+      status.className = "";
+
+      if (!creatorInfo) {
+        status.textContent =
+          "TikTok creator information is not loaded.";
+        return;
+      }
+
+      if (!file) {
+        status.textContent =
+          "Choose a video.";
+        return;
+      }
+
+      if (!selectedPrivacy) {
+        status.textContent =
+          "Choose a privacy setting.";
+        return;
+      }
+
+      if (!consent) {
+        status.textContent =
+          "Confirm TikTok's Music Usage Confirmation.";
+        return;
+      }
+
+      if (
+        creatorInfo.max_video_post_duration_sec &&
+        selectedDuration >
+        creatorInfo.max_video_post_duration_sec
+      ) {
+        status.textContent =
+          "This video is too long. Maximum: " +
+          creatorInfo.max_video_post_duration_sec +
+          " seconds.";
+        return;
+      }
+
+      if (
+        commercial &&
+        !yourBrand &&
+        !brandedContent
+      ) {
+        status.textContent =
+          "Select Your Brand, Branded Content, or both.";
+        return;
+      }
+
+      if (
+        brandedContent &&
+        selectedPrivacy === "SELF_ONLY"
+      ) {
+        status.textContent =
+          "Branded Content cannot use Only Me visibility.";
+        return;
+      }
+
+      status.textContent =
+        "Preparing TikTok post...";
+
+      try {
+        const response =
+          await fetch("/api/post", {
+            method: "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json"
+            },
+
+            body: JSON.stringify({
+              title: caption,
+
+              privacy_level:
+                selectedPrivacy,
+
+              allow_comment:
+                allowComment.checked,
+
+              allow_duet:
+                allowDuet.checked,
+
+              allow_stitch:
+                allowStitch.checked,
+
+              commercial_content:
+                commercial,
+
+              your_brand:
+                yourBrand,
+
+              branded_content:
+                brandedContent,
+
+              is_aigc:
+                isAigc,
+
+              video_size:
+                file.size
+            })
+          });
+
+        const result =
+          await response.json();
+
+        if (
+          !response.ok ||
+          result.error?.code !== "ok"
+        ) {
+          throw new Error(
+            result.error?.message ||
+            "TikTok rejected the post."
+          );
+        }
+
+        status.textContent =
+          "Uploading video to TikTok...";
+
+        const uploadUrl =
+          result.data.upload_url;
+
+        const uploadResponse =
+          await fetch(uploadUrl, {
+            method: "PUT",
+
+            headers: {
+              "Content-Type":
+                file.type ||
+                "video/mp4",
+
+              "Content-Length":
+                String(file.size),
+
+              "Content-Range":
+                "bytes 0-" +
+                (file.size - 1) +
+                "/" +
+                file.size
+            },
+
+            body: file
+          });
+
+        if (!uploadResponse.ok) {
+          throw new Error(
+            "TikTok video upload failed."
+          );
+        }
+
+        status.className =
+          "success";
+
+        status.textContent =
+          "Video sent to TikTok successfully. " +
+          "TikTok may need a few minutes to process it.";
+
+      } catch (error) {
+        status.className =
+          "error";
+
+        status.textContent =
+          "Error: " + error.message;
+      }
+    };
+
+  loadCreator();
 </script>
+
 </body>
 </html>
