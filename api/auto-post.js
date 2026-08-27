@@ -14,10 +14,8 @@ function scheduledSlots(now = new Date()) {
   const base = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
   let slots = SLOT_HOURS_UTC.map(hour => new Date(base.getTime() + hour * 3600000));
 
-  // Manual runs later in the day still get six future slots rather than creating past-due posts.
   while (slots.filter(d => d.getTime() > now.getTime() + 10 * 60000).length < DAILY_POSTS) {
-    const next = new Date(slots[slots.length - 1].getTime() + 3 * 3600000);
-    slots.push(next);
+    slots.push(new Date(slots[slots.length - 1].getTime() + 3 * 3600000));
   }
 
   return slots.filter(d => d.getTime() > now.getTime() + 10 * 60000).slice(0, DAILY_POSTS);
@@ -44,7 +42,7 @@ export default async function handler(req, res) {
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      const videoUrl = `${origin}/videos/${item.id}.mp4`;
+      const videoUrl = `${origin}/api/video?id=${encodeURIComponent(item.id)}`;
       const dueAt = slots[i].toISOString();
 
       const post = await createBufferVideoPost({
@@ -54,24 +52,17 @@ export default async function handler(req, res) {
         dueAt
       });
 
-      created.push({
-        contentId: item.id,
-        format: item.format,
-        videoUrl,
-        dueAt,
-        postId: post.id,
-        status: post.status
-      });
+      created.push({ contentId:item.id, format:item.format, videoUrl, dueAt, postId:post.id, status:post.status });
     }
 
     return res.status(200).json({
-      ok: true,
-      dailyPosts: DAILY_POSTS,
-      channel: { id: target.channel.id, name: target.channel.displayName || target.channel.name },
+      ok:true,
+      dailyPosts:DAILY_POSTS,
+      channel:{ id:target.channel.id, name:target.channel.displayName || target.channel.name },
       created
     });
   } catch (error) {
     console.error('auto-post failed', error);
-    return res.status(500).json({ ok: false, error: error.message });
+    return res.status(500).json({ ok:false, error:error.message });
   }
 }
