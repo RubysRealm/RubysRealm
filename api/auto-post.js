@@ -3,6 +3,7 @@ import { getBufferTikTokChannel, createBufferVideoPost } from '../lib/buffer.js'
 
 const DAILY_POSTS = 6;
 const SLOT_HOURS_UTC = [13, 16, 19, 22, 25, 28]; // 9am, noon, 3pm, 6pm, 9pm, midnight ET during EDT
+const LONG_SLOT_INDEX = 4; // one long-form compilation each day, currently the 9pm ET slot
 
 function isAuthorized(req) {
   const cronSecret = process.env.CRON_SECRET;
@@ -27,6 +28,11 @@ function contentForToday() {
   return Array.from({ length: DAILY_POSTS }, (_, i) => contentBank[(start + i) % contentBank.length]);
 }
 
+function captionFor(item, isLong) {
+  if (!isLong) return item.caption;
+  return `9+ minutes of weird stories, mysteries, comedy and what-if chaos. Stay for the one that gets you 👀 #RubysRealm #StoryTok #Funny #Mystery #WhatIf`;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
   if (!isAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
@@ -42,22 +48,32 @@ export default async function handler(req, res) {
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      const videoUrl = `${origin}/api/video?id=${encodeURIComponent(item.id)}`;
+      const isLong = i === LONG_SLOT_INDEX;
+      const videoUrl = `${origin}/api/video?id=${encodeURIComponent(item.id)}${isLong ? '&long=1' : ''}`;
       const dueAt = slots[i].toISOString();
 
       const post = await createBufferVideoPost({
         channelId: target.channel.id,
-        caption: item.caption,
+        caption: captionFor(item, isLong),
         videoUrl,
         dueAt
       });
 
-      created.push({ contentId:item.id, format:item.format, videoUrl, dueAt, postId:post.id, status:post.status });
+      created.push({
+        contentId:item.id,
+        format:item.format,
+        lengthClass:isLong ? 'long' : 'format-adaptive',
+        videoUrl,
+        dueAt,
+        postId:post.id,
+        status:post.status
+      });
     }
 
     return res.status(200).json({
       ok:true,
       dailyPosts:DAILY_POSTS,
+      longPostsPerDay:1,
       channel:{ id:target.channel.id, name:target.channel.displayName || target.channel.name },
       created
     });
