@@ -10,7 +10,7 @@ export const config = { maxDuration: 300 };
 
 const WIDTH = 540;
 const HEIGHT = 960;
-const FPS = 15;
+const FPS = 30;
 
 // Do not publish tiny clips anymore. The reference TikToks we are modeling are
 // generally around a minute or longer, so every normal render now clears 60s.
@@ -29,7 +29,7 @@ const FORMAT_SECONDS = {
 };
 
 function esc(s='') {
-  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&apos;'}[c]));
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
 }
 
 function runtimeFor(item, requestLong = false) {
