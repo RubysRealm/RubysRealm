@@ -1,74 +1,50 @@
 export const contentBank = [
-  {
-    id: "marble-city",
-    format: "visual_twist",
-    lines: ["WHAT IF A CITY", "FIT INSIDE", "ONE MARBLE?", "WOULD YOU GO IN?"],
-    caption: "A whole city in one marble… are you going in? 👀 #RubysRealm #WhatIf #MindBending #TikTokStory"
-  },
-  {
-    id: "elevator-13",
-    format: "mini_mystery",
-    lines: ["THE ELEVATOR", "SKIPPED FLOOR 13", "UNTIL TONIGHT…", "THEN IT OPENED."],
-    caption: "The button wasn't there yesterday. Part 1. 👀 #RubysRealm #Mystery #ShortStory #Part1"
-  },
-  {
-    id: "dog-boss",
-    format: "comedy",
-    lines: ["MY DOG JOINED", "THE ZOOM CALL", "HE GOT PROMOTED", "I GOT MUTED."],
-    caption: "He has more leadership experience apparently 😂 #RubysRealm #Funny #Comedy #DogTok"
-  },
-  {
-    id: "last-text",
-    format: "twist_story",
-    lines: ["MY PHONE DIED", "AT 11:59 PM", "AT MIDNIGHT IT TEXTED:", "'DON'T TURN AROUND.'"],
-    caption: "And yes… I turned around. #RubysRealm #StoryTok #PlotTwist #ShortStory"
-  },
-  {
-    id: "time-freeze",
-    format: "what_if",
-    lines: ["YOU CAN FREEZE TIME", "FOR 10 SECONDS", "ONCE PER DAY", "WHAT'S YOUR FIRST MOVE?"],
-    caption: "Ten seconds. Once a day. Choose wisely. #RubysRealm #WhatIf #QuestionTok #Imagine"
-  },
-  {
-    id: "ghost-roommate",
-    format: "comedy_story",
-    lines: ["MY ROOMMATE", "IS A GHOST", "HE NEVER PAYS RENT", "BUT HE DOES DISHES."],
-    caption: "Honestly… decent roommate. 😂 #RubysRealm #FunnyStory #Ghost #Comedy"
-  },
-  {
-    id: "door-part1",
-    format: "serial_story",
-    lines: ["A NEW DOOR", "APPEARED IN MY HALL", "IT HAS MY NAME ON IT", "PART 1"],
-    caption: "There was no door there when I went to sleep. Part 1. #RubysRealm #StorySeries #Mystery #Part1"
-  },
-  {
-    id: "door-part2",
-    format: "serial_story",
-    lines: ["I OPENED IT", "MY HOUSE WAS INSIDE", "BUT 20 YEARS OLDER", "PART 2"],
-    caption: "Opening it was mistake number one. Part 2. #RubysRealm #StorySeries #Mystery #Part2"
-  },
-  {
-    id: "door-part3",
-    format: "serial_story",
-    lines: ["AN OLDER ME", "WAS WAITING THERE", "HE ONLY SAID:", "'CLOSE THE DOOR.'"],
-    caption: "I finally met whoever was leaving the notes. Part 3. #RubysRealm #StorySeries #PlotTwist #Part3"
-  },
-  {
-    id: "npc-day",
-    format: "comedy",
-    lines: ["TODAY I ACTED", "LIKE AN NPC", "SAME 3 SENTENCES", "ALL DAY."],
-    caption: "Quest unavailable. Come back tomorrow. 😂 #RubysRealm #NPC #Funny #ComedyTok"
-  },
-  {
-    id: "moon-window",
-    format: "surreal_story",
-    lines: ["THE MOON", "LOOKED TOO CLOSE", "THEN SOMEONE", "KNOCKED FROM IT."],
-    caption: "Nope. Absolutely not answering that. #RubysRealm #Surreal #ShortStory #Creepy"
-  },
-  {
-    id: "future-receipt",
-    format: "twist_story",
-    lines: ["I FOUND A RECEIPT", "DATED TOMORROW", "IT LISTED ONE ITEM:", "'SECOND CHANCE.'"],
-    caption: "Would you go to the store? #RubysRealm #PlotTwist #StoryTok #Mystery"
-  }
+  { id:'marble-city', format:'visual_twist', lines:['WHAT IF A CITY','FIT INSIDE','ONE MARBLE?','WOULD YOU GO IN?'], caption:"A whole city in one marble… are you going in? 👀 #RubysRealm #WhatIf #MindBending #TikTokStory" },
+  { id:'elevator-13', format:'mini_mystery', lines:['THE ELEVATOR','SKIPPED FLOOR 13','UNTIL TONIGHT…','THEN IT OPENED.'], caption:"The button wasn't there yesterday. 👀 #RubysRealm #Mystery #ShortStory #StoryTok" },
+  { id:'dog-boss', format:'comedy', lines:['MY DOG JOINED','THE ZOOM CALL','HE GOT PROMOTED','I GOT MUTED.'], caption:'He has more leadership experience apparently 😂 #RubysRealm #Funny #Comedy #DogTok' },
+  { id:'last-text', format:'twist_story', lines:['MY PHONE DIED','AT 11:59 PM','AT MIDNIGHT IT TEXTED:','DON’T TURN AROUND.'], caption:'And yes… I turned around. #RubysRealm #StoryTok #PlotTwist #ShortStory' },
+  { id:'time-freeze', format:'what_if', lines:['YOU CAN FREEZE TIME','FOR 10 SECONDS','ONCE PER DAY','WHAT’S YOUR FIRST MOVE?'], caption:'Ten seconds. Once a day. Choose wisely. #RubysRealm #WhatIf #QuestionTok #Imagine' },
+  { id:'ghost-roommate', format:'comedy_story', lines:['MY ROOMMATE','IS A GHOST','HE NEVER PAYS RENT','BUT HE DOES DISHES.'], caption:'Honestly… decent roommate. 😂 #RubysRealm #FunnyStory #Ghost #Comedy' },
+
+  { id:'door-part1', format:'serial_story', lines:['A NEW DOOR','APPEARED IN MY HALL','IT HAS MY NAME ON IT','PART 1'], caption:'There was no door there when I went to sleep. Part 1. #RubysRealm #StorySeries #Mystery #Part1' },
+  { id:'door-part2', format:'serial_story', lines:['I OPENED IT','MY HOUSE WAS INSIDE','BUT 20 YEARS OLDER','PART 2'], caption:'Opening it was mistake number one. Part 2. #RubysRealm #StorySeries #Mystery #Part2' },
+  { id:'door-part3', format:'serial_story', lines:['AN OLDER ME','WAS WAITING THERE','HE ONLY SAID:','CLOSE THE DOOR.'], caption:'I finally met whoever was leaving the notes. Part 3. #RubysRealm #StorySeries #PlotTwist #Part3' },
+  { id:'npc-day', format:'comedy', lines:['TODAY I ACTED','LIKE AN NPC','SAME 3 SENTENCES','ALL DAY.'], caption:'Quest unavailable. Come back tomorrow. 😂 #RubysRealm #NPC #Funny #ComedyTok' },
+  { id:'moon-window', format:'surreal_story', lines:['THE MOON','LOOKED TOO CLOSE','THEN SOMEONE','KNOCKED FROM IT.'], caption:'Nope. Absolutely not answering that. #RubysRealm #Surreal #ShortStory #Creepy' },
+  { id:'future-receipt', format:'twist_story', lines:['I FOUND A RECEIPT','DATED TOMORROW','IT LISTED ONE ITEM:','SECOND CHANCE.'], caption:'Would you go to the store? #RubysRealm #PlotTwist #StoryTok #Mystery' },
+
+  { id:'cat-landlord', format:'comedy', lines:['MY CAT STARTED','CHARGING RENT','ONE TREAT A DAY','LATE FEES ARE WORSE.'], caption:'I somehow owe the cat money now. 😂 #RubysRealm #CatTok #Comedy #Funny' },
+  { id:'mirror-delay', format:'creepy_short', lines:['MY REFLECTION','MOVED 2 SECONDS LATE','THEN IT STOPPED','COPYING ME.'], caption:'The mirror gets covered tonight. #RubysRealm #CreepyTok #Mystery #ShortStory' },
+  { id:'one-button', format:'interactive', lines:['ONE BUTTON GIVES','YOU $1 MILLION','BUT A RANDOM DUCK','FOLLOWS YOU FOREVER.'], caption:'I’m pressing it. No hesitation. 🦆 #RubysRealm #WouldYouRather #Funny #QuestionTok' },
+  { id:'wrong-planet', format:'absurd_story', lines:['I MISSED MY EXIT','ON THE HIGHWAY','GPS SAID:','WELCOME TO MARS.'], caption:'The toll road got out of hand. #RubysRealm #Absurd #FunnyStory #PlotTwist' },
+  { id:'alarm-clock', format:'comedy', lines:['MY ALARM SAID','GET UP','I SAID FIVE MINUTES','IT CALLED MY MOM.'], caption:'Technology has gone too far. 😂 #RubysRealm #Funny #Relatable #ComedyTok' },
+  { id:'tiny-sun', format:'visual_twist', lines:['I FOUND A SUN','THE SIZE OF A COIN','IT WAS WARM','AND FOLLOWED ME HOME.'], caption:'Pocket sunshine sounds great until bedtime. #RubysRealm #WhatIf #Surreal #StoryTok' },
+
+  { id:'voicemail-part1', format:'serial_story', lines:['I GOT A VOICEMAIL','FROM MY OWN NUMBER','IT WAS ME WHISPERING','DON’T ANSWER AT 3:17.'], caption:'My phone says the message arrives tomorrow. Part 1. #RubysRealm #Mystery #Part1 #StorySeries' },
+  { id:'voicemail-part2', format:'serial_story', lines:['AT 3:17','MY PHONE RANG','CALLER ID SAID','ME — 10 YEARS LATER.'], caption:'I stared at it until the last ring. Part 2. #RubysRealm #Mystery #Part2 #StorySeries' },
+  { id:'voicemail-part3', format:'serial_story', lines:['I ANSWERED','OLDER ME SAID','YOU HAVE 30 SECONDS','THEN THE LIGHTS DIED.'], caption:'That was when I heard the front door unlock. Part 3. #RubysRealm #Mystery #Part3 #StorySeries' },
+  { id:'fridge-lawyer', format:'comedy', lines:['MY FRIDGE','HIRED A LAWYER','IT CLAIMS I OPEN IT','WITHOUT CAUSE.'], caption:'The midnight snack case is going to court. 😂 #RubysRealm #Comedy #Funny #Random' },
+  { id:'memory-market', format:'what_if', lines:['YOU CAN SELL','ONE MEMORY','FOR $100,000','WHICH ONE GOES?'], caption:'Easy money or impossible choice? #RubysRealm #WhatIf #QuestionTok #DeepThoughts' },
+  { id:'cloud-door', format:'surreal_story', lines:['A DOOR APPEARED','IN THE CLOUDS','A LADDER DROPPED','WITH MY NAME ON IT.'], caption:'Are you climbing? #RubysRealm #Surreal #StoryTok #WhatIf' },
+
+  { id:'wifi-ghost', format:'comedy_story', lines:['THE GHOST','IN MY HOUSE','ONLY HAUNTS ME','WHEN WIFI IS SLOW.'], caption:'Honestly I understand the frustration. 😂 #RubysRealm #Ghost #Comedy #FunnyStory' },
+  { id:'red-light', format:'mini_mystery', lines:['EVERY RED LIGHT','TURNED GREEN FOR ME','THEN ONE DISPLAYED','RUN.'], caption:'I stopped feeling lucky pretty fast. #RubysRealm #Mystery #ShortStory #CreepyTok' },
+  { id:'pause-button', format:'interactive', lines:['YOU GET A PAUSE BUTTON','FOR REAL LIFE','BUT ONLY 5 USES','WHEN DO YOU PRESS IT?'], caption:'Five pauses for your entire life. #RubysRealm #WhatIf #QuestionTok #Imagine' },
+  { id:'boss-clone', format:'comedy', lines:['I CLONED MYSELF','TO GO TO WORK','HE GOT A RAISE','I GOT REPLACED.'], caption:'My clone is apparently a team player. 😂 #RubysRealm #Comedy #Funny #PlotTwist' },
+  { id:'rain-up', format:'visual_twist', lines:['IT STARTED RAINING','UPWARD','EVERY DROP','FELL INTO THE SKY.'], caption:'Imagine stepping outside to this. #RubysRealm #MindBending #Surreal #VisualStory' },
+  { id:'empty-train', format:'creepy_short', lines:['THE LAST TRAIN','WAS COMPLETELY EMPTY','EXCEPT ONE NOTE:','DON’T MISS YOUR STOP.'], caption:'There was no stop listed after mine. #RubysRealm #CreepyTok #Mystery #ShortStory' },
+
+  { id:'hotel-part1', format:'serial_story', lines:['THE HOTEL CLERK','GAVE ME ROOM 404','THEN WHISPERED','THAT ROOM DOESN’T EXIST.'], caption:'The key worked anyway. Part 1. #RubysRealm #StorySeries #Mystery #Part1' },
+  { id:'hotel-part2', format:'serial_story', lines:['ROOM 404','LOOKED LIKE MY BEDROOM','EVEN MY PHOTOS','WERE ON THE WALL.'], caption:'I should have left immediately. Part 2. #RubysRealm #StorySeries #Mystery #Part2' },
+  { id:'hotel-part3', format:'serial_story', lines:['THE PHONE RANG','FRONT DESK SAID','CHECKOUT WAS','20 YEARS AGO.'], caption:'Then someone knocked from inside the closet. Part 3. #RubysRealm #StorySeries #PlotTwist #Part3' },
+  { id:'duck-detective', format:'comedy', lines:['A DUCK FOLLOWED ME','FOR THREE DAYS','TODAY HE SHOWED ME','A DETECTIVE BADGE.'], caption:'Apparently I’m part of an investigation. 🦆 #RubysRealm #Funny #Absurd #ComedyTok' },
+  { id:'perfect-copy', format:'twist_story', lines:['I MET SOMEONE','WHO LOOKED EXACTLY LIKE ME','HE SAID RELAX','I’M THE BACKUP.'], caption:'I suddenly had several questions. #RubysRealm #PlotTwist #StoryTok #Mystery' },
+  { id:'million-years', format:'what_if', lines:['YOU LIVE FOREVER','BUT EVERY 100 YEARS','YOU FORGET EVERYTHING','DO YOU ACCEPT?'], caption:'Immortality with a reset button. Yes or no? #RubysRealm #WhatIf #QuestionTok #Imagine' },
+
+  { id:'robot-grandma', format:'comedy_story', lines:['GRANDMA GOT','A ROBOT VACUUM','SHE NAMED IT GARY','NOW GARY HAS CHORES.'], caption:'Gary did not agree to this household. 😂 #RubysRealm #FunnyStory #Comedy #Robot' },
+  { id:'star-fell', format:'surreal_story', lines:['A STAR FELL','INTO MY BACKYARD','IT WAS STILL GLOWING','AND IT WAS BREATHING.'], caption:'Do you touch it or call somebody? #RubysRealm #Surreal #Mystery #ShortStory' },
+  { id:'wrong-shadow', format:'creepy_short', lines:['MY SHADOW','WAVED AT SOMEONE','I LOOKED OVER','NO ONE WAS THERE.'], caption:'Then the other shadow waved back. #RubysRealm #CreepyTok #Mystery #StoryTok' },
+  { id:'free-pizza', format:'interactive', lines:['FREE PIZZA FOREVER','BUT EVERY SLICE','HAS ONE RANDOM TOPPING','DEAL?'], caption:'There are some dangerous possibilities here. 😂 #RubysRealm #WouldYouRather #Funny #QuestionTok' },
+  { id:'brain-update', format:'comedy', lines:['MY BRAIN SAID','UPDATE AVAILABLE','I HIT REMIND ME LATER','FOR 12 YEARS.'], caption:'Explains a lot actually. 😂 #RubysRealm #Relatable #Comedy #Funny' },
+  { id:'tomorrow-box', format:'twist_story', lines:['A BOX ARRIVED','FROM TOMORROW','INSIDE WAS A NOTE:','DO NOT OPEN THIS.'], caption:'Too late. Obviously. #RubysRealm #PlotTwist #Mystery #ShortStory' }
 ];
