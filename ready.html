@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Ruby's Realm Ready Post</title>
+  <style>
+    body{font-family:Arial,sans-serif;background:#111;color:#fff;margin:0;padding:24px}
+    .wrap{max-width:680px;margin:auto}.panel{border:1px solid #444;border-radius:14px;padding:20px;margin-top:18px}
+    video{width:100%;max-height:620px;background:#000;border-radius:10px}textarea,select{width:100%;box-sizing:border-box;padding:12px;margin:8px 0 16px;font-size:16px}
+    button{background:#fe2c55;color:#fff;border:0;border-radius:9px;padding:15px 22px;font-weight:700;font-size:17px;cursor:pointer}.row{margin:10px 0}.muted{color:#aaa;font-size:14px}.bad{color:#ff758c}.good{color:#65e68a}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Ruby's Realm — Ready Post</h1>
+  <div class="panel">
+    <div id="creator">Loading TikTok account…</div>
+    <video id="preview" controls playsinline src="https://d2ol7oe51mr4n9.cloudfront.net/user_3IVucXuJl5D3y0NqtFPdYP7zZMV/fc6e5744-85cf-4d0d-b989-6b5c3946935b.mp4"></video>
+    <label>Caption</label>
+    <textarea id="caption" maxlength="2200">The cube was hiding an entire world 👀 Would you step inside? #RubysRealm #Surreal #OddlySatisfying #AIArt</textarea>
+    <label>Privacy</label>
+    <select id="privacy"><option value="">Select privacy</option></select>
+    <div class="row"><label><input type="checkbox" id="comment"> Allow comments</label></div>
+    <div class="row"><label><input type="checkbox" id="duet"> Allow Duet</label></div>
+    <div class="row"><label><input type="checkbox" id="stitch"> Allow Stitch</label></div>
+    <div class="row"><label><input type="checkbox" id="aigc" checked> AI-generated content</label></div>
+    <div class="row"><label><input type="checkbox" id="consent"> I agree to TikTok's Music Usage Confirmation</label></div>
+    <p class="muted">Video is already loaded from the Ruby's Realm queue. No download or file selection needed.</p>
+    <button id="post">Post this video to TikTok</button>
+    <p id="status"></p>
+  </div>
+</div>
+<script>
+const VIDEO_URL='https://d2ol7oe51mr4n9.cloudfront.net/user_3IVucXuJl5D3y0NqtFPdYP7zZMV/fc6e5744-85cf-4d0d-b989-6b5c3946935b.mp4';
+const VIDEO_SIZE=3362038;
+let creatorInfo=null;
+const creator=document.getElementById('creator');
+const privacy=document.getElementById('privacy');
+const labels={PUBLIC_TO_EVERYONE:'Everyone',MUTUAL_FOLLOW_FRIENDS:'Friends',FOLLOWER_OF_CREATOR:'Followers',SELF_ONLY:'Only me'};
+async function loadCreator(){
+  try{
+    const r=await fetch('/api/post');const j=await r.json();
+    if(!r.ok||j.error?.code!=='ok')throw new Error(j.error?.message||'Connect TikTok first.');
+    creatorInfo=j.data;
+    creator.innerHTML='<strong>Posting to:</strong> '+creatorInfo.creator_nickname+' <span class="muted">@'+creatorInfo.creator_username+'</span>';
+    creatorInfo.privacy_level_options.forEach(level=>{const o=document.createElement('option');o.value=level;o.textContent=labels[level]||level;privacy.appendChild(o)});
+    document.getElementById('comment').disabled=creatorInfo.comment_disabled;
+    document.getElementById('duet').disabled=creatorInfo.duet_disabled;
+    document.getElementById('stitch').disabled=creatorInfo.stitch_disabled;
+  }catch(e){creator.innerHTML='<span class="bad">'+e.message+'</span>'}
+}
+document.getElementById('post').onclick=async()=>{
+  const status=document.getElementById('status');status.className='';
+  if(!creatorInfo){status.textContent='Connect TikTok first.';return}
+  if(!privacy.value){status.textContent='Choose privacy.';return}
+  if(!document.getElementById('consent').checked){status.textContent='Confirm TikTok Music Usage Confirmation.';return}
+  status.textContent='Sending video to TikTok…';
+  try{
+    const r=await fetch('/api/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      title:document.getElementById('caption').value,
+      privacy_level:privacy.value,
+      allow_comment:document.getElementById('comment').checked,
+      allow_duet:document.getElementById('duet').checked,
+      allow_stitch:document.getElementById('stitch').checked,
+      commercial_content:false,your_brand:false,branded_content:false,
+      is_aigc:document.getElementById('aigc').checked,
+      video_size:VIDEO_SIZE,video_url:VIDEO_URL
+    })});
+    const j=await r.json();
+    if(!r.ok||j.error?.code!=='ok')throw new Error(j.error?.message||'TikTok rejected the post.');
+    status.className='good';status.textContent='Sent to TikTok successfully. Processing may take a few minutes.';
+  }catch(e){status.className='bad';status.textContent='Error: '+e.message}
+};
+loadCreator();
+</script>
+</body>
+</html>
