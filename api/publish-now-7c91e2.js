@@ -48,7 +48,7 @@ export default async function handler(req, res) {
       assets: [
         {
           video: {
-            url: 'https://rubys-realm.vercel.app/api/video?id=mirror-delay&v=audio2',
+            url: 'https://rubys-realm.vercel.app/api/video?id=mirror-delay&v=audio3',
             metadata: { thumbnailOffset: 1200 }
           }
         }
