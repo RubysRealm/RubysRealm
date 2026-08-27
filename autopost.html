@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ruby's Realm Auto Post</title>
+  <style>
+    body{font-family:Arial,sans-serif;background:#111;color:#fff;margin:0;padding:40px 20px}
+    main{max-width:640px;margin:auto}
+    .box{border:1px solid #444;border-radius:12px;padding:22px}
+    .ok{color:#65e68a}.err{color:#ff758c}.muted{color:#aaa}
+    a{color:#ff607d}
+  </style>
+</head>
+<body>
+<main>
+  <div class="box">
+    <h1>Ruby's Realm</h1>
+    <p id="status">Sending finished video to TikTok…</p>
+    <p class="muted">This page does not display or download the generated video.</p>
+  </div>
+</main>
+<script>
+(async function(){
+  const status=document.getElementById('status');
+  const q=new URLSearchParams(location.search);
+  const video=q.get('video');
+  const caption=q.get('caption')||'';
+  if(!video){status.className='err';status.textContent='Missing queued video.';return;}
+  try{
+    const r=await fetch('/api/post-heygen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({video_url:video,caption})});
+    const data=await r.json();
+    if(!r.ok||!data.ok) throw new Error(data?.error?.message||data?.error||'TikTok rejected the post.');
+    status.className='ok';
+    status.textContent='Sent to TikTok successfully. TikTok may take a few minutes to process it.';
+  }catch(e){
+    status.className='err';
+    status.textContent='TikTok connection needs attention: '+e.message;
+  }
+})();
+</script>
+</body>
+</html>
