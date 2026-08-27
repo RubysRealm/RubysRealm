@@ -148,7 +148,8 @@ export default async function handler(req, res) {
         video_url,
         caption = "",
         due_at = null,
-        thumbnail_offset_ms = 1000
+        thumbnail_offset_ms = 1000,
+        publish_now = false
       } = req.body || {};
 
       if (!validateVideoUrl(video_url)) {
@@ -160,6 +161,7 @@ export default async function handler(req, res) {
 
       const channel = await discoverTikTokChannel(apiKey);
       const scheduled = Boolean(due_at);
+      const publishNow = Boolean(publish_now);
 
       if (scheduled && Number.isNaN(Date.parse(due_at))) {
         return res.status(400).json({
@@ -172,7 +174,8 @@ export default async function handler(req, res) {
         text: String(caption),
         channelId: channel.id,
         schedulingType: "automatic",
-        mode: scheduled ? "customScheduled" : "addToQueue",
+        mode: publishNow ? "shareNow" : (scheduled ? "customScheduled" : "addToQueue"),
+        aiAssisted: true,
         assets: [
           {
             video: {
