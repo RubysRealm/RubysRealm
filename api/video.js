@@ -12,27 +12,30 @@ const WIDTH = 540;
 const HEIGHT = 960;
 const FPS = 15;
 
+// Do not publish tiny clips anymore. The reference TikToks we are modeling are
+// generally around a minute or longer, so every normal render now clears 60s.
 const FORMAT_SECONDS = {
-  comedy: 16,
-  visual_twist: 18,
-  interactive: 22,
-  what_if: 28,
-  creepy_short: 30,
-  mini_mystery: 38,
-  comedy_story: 42,
-  surreal_story: 48,
-  twist_story: 55,
-  absurd_story: 45,
-  serial_story: 85
+  comedy: 60,
+  visual_twist: 60,
+  interactive: 65,
+  what_if: 70,
+  creepy_short: 70,
+  mini_mystery: 75,
+  comedy_story: 75,
+  surreal_story: 80,
+  twist_story: 85,
+  absurd_story: 75,
+  serial_story: 100
 };
 
 function esc(s='') {
-  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&apos;'}[c]));
 }
 
 function runtimeFor(item, requestLong = false) {
-  if (requestLong) return 570; // selected long-form compilation: 9:30
-  return FORMAT_SECONDS[item.format] || 35;
+  // Stay inside the Vercel function ceiling so long renders actually complete.
+  if (requestLong) return 240;
+  return Math.max(60, FORMAT_SECONDS[item.format] || 70);
 }
 
 function svgFrame(item, line, lineIndex, storyIndex, totalStories) {
@@ -61,7 +64,7 @@ function run(args) {
     let err = '';
     p.stderr.on('data', d => { err += d.toString(); });
     p.on('error', reject);
-    p.on('exit', code => code === 0 ? resolve() : reject(new Error(`ffmpeg ${code}: ${err.slice(-1400)}`)));
+    p.on('exit', code => code === 0 ? resolve() : reject(new Error(`ffmpeg ${code}: ${err.slice(-1800)}`)));
   });
 }
 
@@ -73,20 +76,27 @@ function rotatedBank(id) {
 function selectStories(item, targetSeconds, requestLong) {
   if (requestLong) return rotatedBank(item.id);
 
-  // Quick clips stay focused on one concept. Longer formats pull in related/adjacent ideas
-  // so cards change every few seconds instead of stretching four lines unnaturally.
-  if (targetSeconds <= 22) return [item];
   if (item.format === 'serial_story') {
     const stem = item.id.replace(/-part\d+$/, '');
     const series = contentBank.filter(x => x.id.startsWith(stem + '-part'));
     if (series.length > 1) return series;
   }
 
-  const desiredStories = targetSeconds <= 35 ? 2 : targetSeconds <= 50 ? 3 : targetSeconds <= 65 ? 4 : 5;
+  const desiredStories = targetSeconds <= 65 ? 4 : targetSeconds <= 80 ? 5 : 6;
   const bank = rotatedBank(item.id);
   const related = [item, ...bank.filter(x => x.id !== item.id && x.format === item.format), ...bank.filter(x => x.id !== item.id && x.format !== item.format)];
   const seen = new Set();
   return related.filter(x => !seen.has(x.id) && seen.add(x.id)).slice(0, desiredStories);
+}
+
+function soundtrackFilter(targetSeconds) {
+  const fadeOutStart = Math.max(0, targetSeconds - 1.5).toFixed(2);
+  return [
+    '[1:a]volume=0.14[a1]',
+    '[2:a]volume=0.045[a2]',
+    '[3:a]volume=0.022,highpass=f=80,lowpass=f=1800[a3]',
+    `[a1][a2][a3]amix=inputs=3:duration=longest:normalize=0,alimiter=limit=0.85,afade=t=in:st=0:d=0.8,afade=t=out:st=${fadeOutStart}:d=1.5[aout]`
+  ].join(';');
 }
 
 export default async function handler(req, res) {
@@ -100,8 +110,9 @@ export default async function handler(req, res) {
 
   if (req.method === 'HEAD') {
     res.setHeader('Content-Type', 'video/mp4');
-    res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=31536000, immutable');
+    res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=60');
     res.setHeader('X-Rubys-Realm-Duration', String(targetSeconds));
+    res.setHeader('X-Rubys-Realm-Audio', 'required');
     return res.status(200).end();
   }
 
@@ -135,21 +146,30 @@ export default async function handler(req, res) {
 
     const output = path.join(dir, `${id}.mp4`);
     await run([
-      '-y','-f','concat','-safe','0','-i',concatFile,
+      '-y',
+      '-f','concat','-safe','0','-i',concatFile,
+      '-f','lavfi','-i',`sine=frequency=58:sample_rate=44100:duration=${targetSeconds}`,
+      '-f','lavfi','-i',`sine=frequency=174:sample_rate=44100:duration=${targetSeconds}`,
+      '-f','lavfi','-i',`anoisesrc=color=pink:amplitude=0.35:sample_rate=44100:duration=${targetSeconds}`,
+      '-filter_complex',soundtrackFilter(targetSeconds),
+      '-map','0:v:0','-map','[aout]',
       '-vf',`scale=${WIDTH}:${HEIGHT}:flags=fast_bilinear,format=yuv420p`,
-      '-r',String(FPS),'-t',String(targetSeconds),'-an',
-      '-c:v','libx264','-preset','ultrafast','-crf','30','-pix_fmt','yuv420p','-movflags','+faststart',output
+      '-r',String(FPS),'-t',String(targetSeconds),'-shortest',
+      '-c:v','libx264','-preset','ultrafast','-crf','29','-pix_fmt','yuv420p',
+      '-c:a','aac','-b:a','128k','-ar','44100','-ac','2',
+      '-movflags','+faststart',output
     ]);
 
     const video = await fs.readFile(output);
     res.setHeader('Content-Type','video/mp4');
     res.setHeader('Content-Length', String(video.length));
-    res.setHeader('Cache-Control','public, max-age=86400, s-maxage=31536000, immutable');
+    res.setHeader('Cache-Control','public, max-age=60, s-maxage=60');
     res.setHeader('X-Rubys-Realm-Duration', String(targetSeconds));
+    res.setHeader('X-Rubys-Realm-Audio', 'aac');
     return res.status(200).send(video);
   } catch (error) {
     console.error('video render failed', error);
-    return res.status(500).json({ error: 'Video render failed' });
+    return res.status(500).json({ error: 'Video render failed', detail: error.message });
   } finally {
     await fs.rm(dir, { recursive:true, force:true }).catch(()=>{});
   }
