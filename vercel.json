@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build",
+  "fluid": true,
   "crons": [
     {
       "path": "/api/auto-post",
@@ -8,6 +9,9 @@
     }
   ],
   "functions": {
+    "api/video.js": {
+      "maxDuration": 300
+    },
     "api/*.js": {
       "maxDuration": 60
     }
