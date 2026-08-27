@@ -143,6 +143,65 @@ async function requestWithRefresh(req, res, url, options = {}) {
   };
 }
 
+function allowedQueuedVideo(urlString) {
+  try {
+    const url = new URL(urlString);
+    return (
+      url.protocol === "https:" &&
+      [
+        "d2ol7oe51mr4n9.cloudfront.net",
+        "d8j0ntlcm91z4.cloudfront.net"
+      ].includes(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function uploadQueuedVideo(uploadUrl, videoUrl, expectedSize) {
+  if (!allowedQueuedVideo(videoUrl)) {
+    const error = new Error("Queued video host is not allowed.");
+    error.status = 400;
+    throw error;
+  }
+
+  const sourceResponse = await fetch(videoUrl);
+
+  if (!sourceResponse.ok) {
+    const error = new Error("Could not load the queued Ruby's Realm video.");
+    error.status = 502;
+    throw error;
+  }
+
+  const video = Buffer.from(await sourceResponse.arrayBuffer());
+  const size = video.length;
+
+  if (expectedSize && Number(expectedSize) !== size) {
+    console.warn("Queued video size changed", {
+      expected: Number(expectedSize),
+      actual: size
+    });
+  }
+
+  const uploadResponse = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "video/mp4",
+      "Content-Length": String(size),
+      "Content-Range": `bytes 0-${size - 1}/${size}`
+    },
+    body: video
+  });
+
+  if (!uploadResponse.ok) {
+    const error = new Error("TikTok video upload failed.");
+    error.status = 502;
+    throw error;
+  }
+
+  return size;
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method === "GET") {
@@ -173,7 +232,8 @@ export default async function handler(req, res) {
         your_brand = false,
         branded_content = false,
         is_aigc = false,
-        video_size
+        video_size,
+        video_url = ""
       } = req.body || {};
 
       if (!privacy_level) {
@@ -282,9 +342,30 @@ export default async function handler(req, res) {
         }
       );
 
-      return res
-        .status(publishResult.response.ok ? 200 : publishResult.response.status)
-        .json(publishResult.data);
+      if (
+        !publishResult.response.ok ||
+        publishResult.data?.error?.code !== "ok"
+      ) {
+        return res
+          .status(publishResult.response.status || 400)
+          .json(publishResult.data);
+      }
+
+      if (video_url) {
+        const uploadedSize = await uploadQueuedVideo(
+          publishResult.data.data.upload_url,
+          video_url,
+          video_size
+        );
+
+        return res.status(200).json({
+          ...publishResult.data,
+          server_uploaded: true,
+          uploaded_size: uploadedSize
+        });
+      }
+
+      return res.status(200).json(publishResult.data);
     }
 
     return res.status(405).json({
