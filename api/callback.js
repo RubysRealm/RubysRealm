@@ -1,3 +1,7 @@
+function serializeCookie(name, value, maxAge) {
+  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${Math.max(0, Number(maxAge) || 0)}`;
+}
+
 export default async function handler(req, res) {
   const { code, error, error_description } = req.query;
 
@@ -43,14 +47,25 @@ export default async function handler(req, res) {
       );
     }
 
-    res.setHeader(
-      "Set-Cookie",
-      `tiktok_access_token=${encodeURIComponent(
-        data.access_token
-      )}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${
+    const cookies = [
+      serializeCookie(
+        "tiktok_access_token",
+        data.access_token,
         data.expires_in || 86400
-      }`
-    );
+      )
+    ];
+
+    if (data.refresh_token) {
+      cookies.push(
+        serializeCookie(
+          "tiktok_refresh_token",
+          data.refresh_token,
+          data.refresh_expires_in || 31536000
+        )
+      );
+    }
+
+    res.setHeader("Set-Cookie", cookies);
 
     res.writeHead(302, {
       Location: "/?connected=1"
