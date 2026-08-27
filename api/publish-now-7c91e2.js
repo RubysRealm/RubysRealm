@@ -40,7 +40,7 @@ export default async function handler(req, res) {
     if (!channel) return res.status(404).json({ ok: false, error: 'No TikTok channel connected in Buffer.' });
 
     const input = {
-      text: "POV: you realize the ocean was never empty. 🌊👁️ #deepsea #horror #liminal #aivideo #rubysrealm",
+      text: "Your reflection is supposed to stop when you do. Mine didn't. 👁️ #creepy #horror #mystery #storytok #rubysrealm",
       channelId: channel.id,
       schedulingType: 'automatic',
       mode: 'shareNow',
@@ -48,8 +48,8 @@ export default async function handler(req, res) {
       assets: [
         {
           video: {
-            url: "https://d8j0ntlcm91z4.cloudfront.net/user_3IVucXuJl5D3y0NqtFPdYP7zZMV/hf_20260827_220042_e0bd2e4a-1005-48df-b406-bd04d931c9cb.mp4",
-            metadata: { thumbnailOffset: 500 }
+            url: 'https://rubys-realm.vercel.app/api/video?id=mirror-delay&v=audio2',
+            metadata: { thumbnailOffset: 1200 }
           }
         }
       ]
