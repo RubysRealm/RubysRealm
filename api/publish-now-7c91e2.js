@@ -40,7 +40,7 @@ export default async function handler(req, res) {
     if (!channel) return res.status(404).json({ ok: false, error: 'No TikTok channel connected in Buffer.' });
 
     const input = {
-      text: "That one second after work when you finally sit down… and your brain remembers EVERYTHING 😭 #relatable #afterwork #adulting #rubysrealm",
+      text: "POV: you realize the ocean was never empty. 🌊👁️ #deepsea #horror #liminal #aivideo #rubysrealm",
       channelId: channel.id,
       schedulingType: 'automatic',
       mode: 'shareNow',
@@ -48,8 +48,8 @@ export default async function handler(req, res) {
       assets: [
         {
           video: {
-            url: "https://resource2.heygen.ai/aws_pacific/avatar_tmp/1592f1dded57439e808601ba8fbe8818/v19532a7a5136405597ae05ad88727b9f/caption_484da3cd2a0c4e56acc2b9aca12d6cef.mp4",
-            metadata: { thumbnailOffset: 1000 }
+            url: "https://d8j0ntlcm91z4.cloudfront.net/user_3IVucXuJl5D3y0NqtFPdYP7zZMV/hf_20260827_220042_e0bd2e4a-1005-48df-b406-bd04d931c9cb.mp4",
+            metadata: { thumbnailOffset: 500 }
           }
         }
       ]
