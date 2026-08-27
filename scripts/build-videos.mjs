@@ -44,7 +44,7 @@ function svgFrame(line, index, format) {
     </foreignObject>
     <rect x="110" y="1020" width="500" height="8" rx="4" fill="#FFFFFF" opacity="0.12"/>
     <rect x="110" y="1020" width="${125 * (index + 1)}" height="8" rx="4" fill="${accent}"/>
-    <text x="360" y="1115" fill="#FFFFFF" opacity="0.6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="21">@rubysrealm</text>
+    <text x="360" y="1115" fill="#FFFFFF" opacity="0.6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="21">RUBY'S REALM</text>
   </svg>`;
 }
 
@@ -65,16 +65,19 @@ for (const item of contentBank) {
   }
 
   const output = path.join(OUT, `${item.id}.mp4`);
-  const inputArgs = frames.flatMap(f => ['-loop', '1', '-t', '2', '-i', f]);
-  const filter = frames.map((_, i) => `[${i}:v]scale=720:1280,zoompan=z='min(zoom+0.0012,1.08)':d=60:s=720x1280:fps=30,setsar=1[v${i}]`).join(';') + ';' + frames.map((_, i) => `[v${i}]`).join('') + `concat=n=${frames.length}:v=1:a=0[v]`;
+  const inputArgs = frames.flatMap(f => ['-loop', '1', '-framerate', '30', '-t', '2', '-i', f]);
+  const filter = frames
+    .map((_, i) => `[${i}:v]scale=720:1280,setsar=1,format=yuv420p,trim=duration=2,setpts=PTS-STARTPTS[v${i}]`)
+    .join(';') + ';' + frames.map((_, i) => `[v${i}]`).join('') + `concat=n=${frames.length}:v=1:a=0[v]`;
 
   await run(ffmpegPath, [
     '-y', ...inputArgs,
     '-filter_complex', filter,
     '-map', '[v]',
+    '-r', '30',
     '-c:v', 'libx264',
-    '-preset', 'veryfast',
-    '-crf', '24',
+    '-preset', 'ultrafast',
+    '-crf', '25',
     '-pix_fmt', 'yuv420p',
     '-movflags', '+faststart',
     output
