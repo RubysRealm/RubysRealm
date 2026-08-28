@@ -89,3 +89,10 @@ jobs:
             gh release create "$TAG" --title "Ruby's Realm Stories ${DAY}" --notes "Automated long-form TikTok story renders for ${DAY}."
           fi
           gh release upload "$TAG" rendered/manifest.json rendered/slot-1.mp4 rendered/slot-2.mp4 rendered/slot-3.mp4 rendered/slot-4.mp4 rendered/slot-5.mp4 rendered/slot-6.mp4 --clobber
+
+      - name: Schedule verified stories to TikTok
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 4 --retry-all-errors --connect-timeout 20 --max-time 300 \
+            "https://rubys-realm.vercel.app/api/rebuild-long-queue-8d441a7f?mode=rebuild"
