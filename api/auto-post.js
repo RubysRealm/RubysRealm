@@ -1,9 +1,9 @@
-import { contentBank } from '../content/content-bank.js';
+import { previewStory } from '../content/story-engine.js';
 import { getBufferTikTokChannel, createBufferVideoPost } from '../lib/buffer.js';
 
 const DAILY_POSTS = 6;
 const SLOT_HOURS_UTC = [13, 16, 19, 22, 25, 28]; // 9am, noon, 3pm, 6pm, 9pm, midnight ET during EDT
-const LONG_SLOT_INDEX = 4; // one long-form compilation each day, currently the 9pm ET slot
+const LONG_SLOT_INDEX = 4; // one extended story each day, currently the 9pm ET slot
 
 function isAuthorized(req) {
   const cronSecret = process.env.CRON_SECRET;
@@ -22,15 +22,19 @@ function scheduledSlots(now = new Date()) {
   return slots.filter(d => d.getTime() > now.getTime() + 10 * 60000).slice(0, DAILY_POSTS);
 }
 
-function contentForToday() {
-  const epochDay = Math.floor(Date.now() / 86400000);
-  const start = (epochDay * DAILY_POSTS) % contentBank.length;
-  return Array.from({ length: DAILY_POSTS }, (_, i) => contentBank[(start + i) % contentBank.length]);
+function storiesForToday(now = new Date()) {
+  const day = now.toISOString().slice(0,10);
+  return Array.from({ length: DAILY_POSTS }, (_, slot) => {
+    const seed = `${day}-slot-${slot + 1}`;
+    const isLong = slot === LONG_SLOT_INDEX;
+    return { seed, isLong, preview:previewStory(seed,{ long:isLong }) };
+  });
 }
 
-function captionFor(item, isLong) {
-  if (!isLong) return item.caption;
-  return `9+ minutes of weird stories, mysteries, comedy and what-if chaos. Stay for the one that gets you 👀 #RubysRealm #StoryTok #Funny #Mystery #WhatIf`;
+function captionFor(item) {
+  const genre = item.preview.genre.replaceAll('-',' ');
+  const lengthNote = item.isLong ? ' Extended story.' : '';
+  return `${item.preview.title}. An animated ${genre} story with a twist.${lengthNote} Watch to the end. #RubysRealm #AnimatedStory #TalkingCharacters #StoryTok #AIGenerated`;
 }
 
 export default async function handler(req, res) {
@@ -42,27 +46,33 @@ export default async function handler(req, res) {
     if (!target) return res.status(404).json({ error: 'No TikTok channel connected in Buffer.' });
 
     const origin = process.env.PUBLIC_BASE_URL || 'https://rubys-realm.vercel.app';
-    const items = contentForToday();
+    const items = storiesForToday();
     const slots = scheduledSlots();
     const created = [];
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      const isLong = i === LONG_SLOT_INDEX;
-      const videoUrl = `${origin}/api/video?id=${encodeURIComponent(item.id)}${isLong ? '&long=1' : ''}`;
+      const videoUrl = `${origin}/api/story-video?seed=${encodeURIComponent(item.seed)}${item.isLong ? '&long=1' : ''}`;
       const dueAt = slots[i].toISOString();
+
+      const preflight = await fetch(videoUrl,{ method:'HEAD' });
+      if (!preflight.ok || preflight.headers.get('x-rubys-realm-format') !== 'animated-story-v2') {
+        throw new Error(`Animated video preflight failed for ${item.seed}.`);
+      }
 
       const post = await createBufferVideoPost({
         channelId: target.channel.id,
-        caption: captionFor(item, isLong),
+        caption: captionFor(item),
         videoUrl,
         dueAt
       });
 
       created.push({
-        contentId:item.id,
-        format:item.format,
-        lengthClass:isLong ? 'long' : 'format-adaptive',
+        seed:item.seed,
+        title:item.preview.title,
+        genre:item.preview.genre,
+        renderer:'animated-story-v2',
+        lengthClass:item.isLong ? 'extended-story' : 'story',
         videoUrl,
         dueAt,
         postId:post.id,
@@ -73,7 +83,15 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok:true,
       dailyPosts:DAILY_POSTS,
-      longPostsPerDay:1,
+      extendedStoriesPerDay:1,
+      format:{
+        animatedAdults:true,
+        distinctVoices:true,
+        visibleTalking:true,
+        physicalActions:true,
+        captions:true,
+        branding:'Ruby\'s Realm only'
+      },
       channel:{ id:target.channel.id, name:target.channel.displayName || target.channel.name },
       created
     });
