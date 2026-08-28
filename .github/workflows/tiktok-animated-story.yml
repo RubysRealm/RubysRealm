@@ -1,4 +1,4 @@
-name: Generate animated TikTok story
+name: Generate and publish animated TikTok story
 
 on:
   workflow_dispatch:
@@ -7,10 +7,15 @@ on:
       - 'tiktok_animator/**'
       - '.github/workflows/tiktok-animated-story.yml'
   schedule:
-    - cron: '17 */6 * * *'
+    - cron: '0 4 * * *'   # 12:00 AM ET during EDT
+    - cron: '0 13 * * *'  # 9:00 AM ET during EDT
+    - cron: '0 16 * * *'  # 12:00 PM ET during EDT
+    - cron: '0 19 * * *'  # 3:00 PM ET during EDT
+    - cron: '0 22 * * *'  # 6:00 PM ET during EDT
+    - cron: '0 1 * * *'   # 9:00 PM ET during EDT
 
 jobs:
-  render:
+  render-and-publish:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -24,9 +29,14 @@ jobs:
           sudo apt-get install -y ffmpeg espeak-ng fonts-dejavu-core
       - name: Install renderer dependency
         run: pip install -r tiktok_animator/requirements.txt
-      - name: Generate true animated story video
+      - name: Generate animated story video
         run: python tiktok_animator/story_factory.py
-      - name: Upload generated MP4
+      - name: Publish directly to TikTok
+        env:
+          TT_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
+        run: python tiktok_animator/publisher.py
+      - name: Upload generated MP4 backup
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: animated-tiktok-story-${{ github.run_number }}
