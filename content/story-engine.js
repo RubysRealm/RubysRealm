@@ -1,351 +1,52 @@
 import { generateStoryJson, hasGatewayAuth } from '../lib/ai-gateway.js';
 
 const CHARACTER_PAIRS = [
-  [
-    { id:'A', name:'Marcus', voice:'onyx', skin:'#8B5E3C', hair:'#161616', shirt:'#5B5FEF', pants:'#20283A' },
-    { id:'B', name:'Nia', voice:'nova', skin:'#6E432D', hair:'#25150F', shirt:'#E94F8A', pants:'#252B3D' }
-  ],
-  [
-    { id:'A', name:'Eli', voice:'echo', skin:'#C98F68', hair:'#3A2419', shirt:'#008E9B', pants:'#263247' },
-    { id:'B', name:'Tessa', voice:'shimmer', skin:'#D9A37C', hair:'#6D2E1C', shirt:'#8A5CF6', pants:'#2D3144' }
-  ],
-  [
-    { id:'A', name:'Andre', voice:'onyx', skin:'#70452E', hair:'#121212', shirt:'#D97706', pants:'#20283A' },
-    { id:'B', name:'Maya', voice:'nova', skin:'#A86F4B', hair:'#1A1210', shirt:'#16A085', pants:'#293044' }
-  ],
-  [
-    { id:'A', name:'Caleb', voice:'echo', skin:'#E0AD86', hair:'#4B2F21', shirt:'#2563EB', pants:'#252B3D' },
-    { id:'B', name:'Renee', voice:'shimmer', skin:'#7D4E35', hair:'#20140F', shirt:'#DB2777', pants:'#283248' }
-  ]
+  [{id:'A',name:'Marcus',voice:'onyx'},{id:'B',name:'Nia',voice:'nova'}],
+  [{id:'A',name:'Eli',voice:'echo'},{id:'B',name:'Tessa',voice:'shimmer'}],
+  [{id:'A',name:'Andre',voice:'onyx'},{id:'B',name:'Maya',voice:'nova'}],
+  [{id:'A',name:'Caleb',voice:'echo'},{id:'B',name:'Renee',voice:'shimmer'}]
 ];
 
-const SAFE_ACTIONS = new Set(['point','step-back','reach','knock','open-door','slam-door','look','turn','phone','run','freeze','hand-object','pull','gesture','laugh','handshake','hide','walk','wave']);
-const SAFE_SETTINGS = new Set(['hallway','kitchen','apartment','laundromat','elevator','lobby','bus','street','shop','office','garage','cafe','motel','bedroom','park']);
-const DAILY_DURATION_MINUTES = [2.5, 3.25, 4.25, 5.25, 6.75, 8.5];
-const TARGET_WORDS_PER_SCENE = 19;
+const SAFE_ACTIONS = ['point','step-back','reach','knock','open-door','slam-door','look','turn','phone','run','freeze','hand-object','pull','gesture','laugh','handshake','hide','walk','wave'];
+const SAFE_SETTINGS = ['hallway','kitchen','apartment','laundromat','elevator','lobby','bus','street','shop','office','garage','cafe','motel','bedroom','park'];
+const DAILY_DURATION_MINUTES = [2.5,3.25,4.25,5.25,6.75,8.5];
 
-const PLOTS = [
-  {
-    genre:'horror', title:'The Elevator Found Floor Zero', settings:['elevator','lobby','hallway'],
-    inciting:'the elevator has a glowing floor-zero button that was never there before',
-    clue:'two visitor badges are waiting downstairs with our names and tomorrow’s date',
-    danger:'a knocking sound follows the elevator and matches every floor we pass',
-    consequence:'the building above us begins disappearing from the security monitors one floor at a time',
-    twist:'floor zero is not underground; it is a copy of the building trying to replace the original',
-    finale:'the elevator opens upstairs again, but one of our reflections steps out before either of us moves'
-  },
-  {
-    genre:'comedy', title:'My Refrigerator Sued Me', settings:['kitchen','apartment','hallway'],
-    inciting:'a tiny attorney has arrived to represent the refrigerator in a lawsuit against me',
-    clue:'the evidence includes weeks of footage showing me opening the door with no actual snack plan',
-    danger:'the freezer has hired separate counsel and the microwave is recording every word we say',
-    consequence:'every appliance in the apartment joins the case and starts demanding weekends, breaks, and back pay',
-    twist:'the refrigerator does not want money; it wants legal ownership of every leftover after midnight',
-    finale:'we settle the case, then the coffee maker slides a brand-new lawsuit across the counter'
-  },
-  {
-    genre:'thriller', title:'Tomorrow Called Twice', settings:['apartment','hallway','street'],
-    inciting:'my phone is calling from tomorrow even though the phone itself is sitting in my hand',
-    clue:'the voice predicts each blackout and tells us which hallway camera will fail next',
-    danger:'the caller begins counting down to something that happens every time the number reaches zero',
-    consequence:'security footage shows us leaving the building tomorrow while we are still standing inside tonight',
-    twist:'the future caller is not warning us about the building; it is warning us about the versions of us outside',
-    finale:'the call ends, then both of our phones ring from the exact same number at the exact same time'
-  },
-  {
-    genre:'mystery', title:'The Store That Sold My Memory', settings:['shop','street','apartment'],
-    inciting:'a receipt says I sold a childhood memory here ten minutes from now',
-    clue:'the clerk has an object from my childhood that nobody outside my family should recognize',
-    danger:'each minute inside the store removes another detail from why we came here in the first place',
-    consequence:'a second version of me appears outside holding the same receipt and begging us not to finish the sale',
-    twist:'one of us is not a customer at all; one of us is the memory listed as merchandise',
-    finale:'the store closes and only one of us remembers ever knowing the other'
-  },
-  {
-    genre:'comedy-thriller', title:'My Replacement Arrived Early', settings:['office','elevator','hallway'],
-    inciting:'an exact copy of me is already at my desk finishing work I have avoided for three weeks',
-    clue:'management has records proving the copy has worked here longer than I have',
-    danger:'more copies keep arriving from the elevator and every one remembers a different version of my life',
-    consequence:'the building locks down while human resources tries to decide which employee is legally original',
-    twist:'the first copy claims the real me escaped months ago and everyone still working here is a replacement',
-    finale:'the doors finally unlock, but the name on my badge changes before I can leave'
-  },
-  {
-    genre:'horror', title:'My Shadow Parked First', settings:['garage','street','hallway'],
-    inciting:'my shadow is standing beside the car while I am still several steps away from it',
-    clue:'the shadow is holding keys that are physically still in your hand',
-    danger:'every time a garage light flickers, both shadows move closer to the driver and passenger doors',
-    consequence:'the dashboard counts two passengers inside even though the real car is visibly empty',
-    twist:'the shadows are not copying us anymore; they are rehearsing what they plan to do after leaving',
-    finale:'the garage lights return and our shadows are normal again, except the car is suddenly gone'
-  },
-  {
-    genre:'mystery', title:'The Dryer Returned Tomorrow', settings:['laundromat','street','apartment'],
-    inciting:'a dryer contains clothes we are both still wearing right now',
-    clue:'a receipt in the pocket is dated tomorrow and carries a warning in my handwriting',
-    danger:'every washer starts counting down together even though nobody touched their controls',
-    consequence:'the front windows show an empty laundromat while we can still see ourselves trapped inside',
-    twist:'the machines are not showing the future; they are swapping objects between two versions of tonight',
-    finale:'the doors finally open and we step outside carrying one jacket that neither of us remembers owning'
-  },
-  {
-    genre:'thriller', title:'The Bus Stop After the Last Stop', settings:['bus','street','apartment'],
-    inciting:'the bus has passed our stop three times and keeps returning to the same empty street',
-    clue:'the route display has erased every destination and now shows only our two names',
-    danger:'each time we pull the stop cord, another passenger silently disappears',
-    consequence:'the driver says one of us can leave but the other must finish the route',
-    twist:'every house outside belongs to someone who once disappeared from this bus',
-    finale:'the doors open at my childhood home and somebody with your face is already waiting on the porch'
-  },
-  {
-    genre:'horror', title:'Room 404 Was My Bedroom', settings:['motel','bedroom','hallway'],
-    inciting:'a motel key marked 404 opens a room identical to my childhood bedroom',
-    clue:'every photograph on the wall includes you even though we did not meet until years later',
-    danger:'the hallway outside grows longer every time we try to leave',
-    consequence:'the room begins changing to match memories I have never told anyone about',
-    twist:'the motel is not recreating my past; it is testing which memories belong to the person who entered',
-    finale:'we escape to the parking lot and find room 404 reflected in every dark window around us'
-  },
-  {
-    genre:'comedy-mystery', title:'The Duck Detective Hired Me', settings:['park','street','cafe'],
-    inciting:'a duck wearing a tiny detective hat has dropped a case file at my feet',
-    clue:'the file contains photographs of our lunch disappearing before we even bought it',
-    danger:'every pigeon in the park starts following us like an organized surveillance team',
-    consequence:'the duck leads us through clues pointing to a snack-smuggling operation under the café patio',
-    twist:'the missing food was never stolen; the detective has been planting evidence to keep himself employed',
-    finale:'we expose the scheme and the duck immediately hands us a bill for professional investigative services'
-  }
+const PREMISES = [
+  {genre:'horror',title:'The Elevator Found Floor Zero',setting:'elevator',hook:'A floor-zero button appears in an office elevator after midnight.',beats:['They press it by accident.','The doors open to a duplicate lobby with no people.','Two visitor badges show their names and tomorrow’s date.','Security monitors show the real building losing floors one by one.','They realize the duplicate building is replacing the original.','They return upstairs, but a reflection exits the elevator before they do.']},
+  {genre:'mystery',title:'The Dryer Returned Tomorrow',setting:'laundromat',hook:'A dryer contains the exact clothes they are currently wearing.',beats:['A receipt inside is dated tomorrow.','One jacket pocket contains a warning in familiar handwriting.','Every machine starts counting down together.','The windows show the laundromat as empty even though they are still inside.','They learn the machines are swapping objects between two versions of the same night.','They escape carrying one jacket neither person recognizes.']},
+  {genre:'thriller',title:'Tomorrow Called Twice',setting:'apartment',hook:'A phone receives a call from its own number dated tomorrow.',beats:['The caller predicts a blackout.','The next prediction is a hallway camera failure.','Security footage shows the two characters leaving the building tomorrow.','The future voice warns them not about the building, but about copies waiting outside.','Both phones ring from the same number.','Someone knocks using the exact rhythm heard on the call.']},
+  {genre:'horror',title:'Room 404 Was My Bedroom',setting:'motel',hook:'A motel room is an exact copy of one character’s childhood bedroom.',beats:['Old photographs include the other character years before they met.','The hallway grows longer each time they leave.','Objects in the room change to match private memories.','They realize the room is testing which memories belong to the person inside.','They force the door open and reach the parking lot.','Room 404 appears reflected in every dark car window.']},
+  {genre:'comedy-mystery',title:'The Duck Detective Hired Me',setting:'park',hook:'A duck in a tiny detective hat drops a case file at their feet.',beats:['The file contains photos of their lunch before they bought it.','Pigeons begin following them like surveillance.','The clues lead under a café patio.','They discover a fake snack-smuggling operation.','The duck planted the evidence to keep the investigation alive.','The duck hands them an invoice for solving its own case.']},
+  {genre:'thriller',title:'The Bus Stop After the Last Stop',setting:'bus',hook:'A city bus passes the same empty street for the third time.',beats:['The route display changes to the characters’ names.','Each pull of the stop cord makes another passenger disappear.','The driver says only one person can leave.','Every house outside belongs to someone who vanished from the bus.','The bus stops at one character’s childhood home.','A person with the other character’s face is waiting on the porch.']},
+  {genre:'horror',title:'Someone Keeps Using My Doorbell Camera',setting:'apartment',hook:'The doorbell app records a visitor who only appears when nobody is home.',beats:['The visitor never faces the camera.','A package arrives containing a photo taken from inside the apartment.','The camera history shows a clip that has not happened yet.','The future clip shows one character opening the door.','They disable the camera, but notifications continue.','The final alert says the visitor is already inside.']},
+  {genre:'mystery',title:'The Apartment Across From Mine Is Empty',setting:'apartment',hook:'A supposedly vacant apartment has someone copying their nightly routine.',beats:['The copy turns lights on seconds after they do.','The leasing office says the unit has been empty for years.','A note appears under their door describing tomorrow morning.','They watch the empty unit and see themselves watching back.','The note predicts one person will cross the hall.','The opposite door opens before either of them moves.']},
+  {genre:'horror',title:'The Voice in My GPS Knows My Name',setting:'street',hook:'A navigation app starts giving directions using one character’s first name.',beats:['It sends them away from the normal route.','The map shows a road that does not exist.','The voice mentions something private from childhood.','Turning the app off does not stop the directions.','They realize the destination is their current location.','The final instruction tells them not to look in the back seat.']},
+  {genre:'comedy-thriller',title:'My Replacement Arrived Early',setting:'office',hook:'An exact copy of one character is already at their desk doing their job.',beats:['Coworkers insist the copy has always worked there.','HR records show both employees have the same ID.','More copies arrive from the elevator.','Each copy remembers a different version of the character’s life.','The first copy claims the original left months ago.','The office badge changes names before anyone can leave.']}
 ];
 
-const ACTION_CYCLE = ['point','look','gesture','step-back','phone','reach','walk','turn','hand-object','freeze','run','open-door'];
-const END_PHRASES = [
-  'Stay with me, because this is getting worse.',
-  'Do not touch anything until we know why.',
-  'Keep watching; something changed again.',
-  'Tell me you noticed that too.',
-  'We need to think before we move.',
-  'Whatever happens, do not split up.',
-  'That detail was not there a minute ago.',
-  'I am starting to understand what this wants.'
-];
+function hashSeed(value){let h=2166136261;for(const c of String(value)){h^=c.charCodeAt(0);h=Math.imul(h,16777619);}return h>>>0;}
+function pick(list,seed,offset=0){return list[((seed+Math.imul(offset+1,2654435761))>>>0)%list.length];}
+function wordCount(s){return String(s||'').trim().split(/\s+/).filter(Boolean).length;}
+function durationForSeed(seedValue){const m=String(seedValue).match(/^(.*)-slot-(\d+)$/);if(m){const rot=hashSeed(`${m[1]}:duration`)%DAILY_DURATION_MINUTES.length;return DAILY_DURATION_MINUTES[(Math.max(0,Number(m[2])-1)+rot)%DAILY_DURATION_MINUTES.length];}return DAILY_DURATION_MINUTES[hashSeed(`${seedValue}:duration`)%DAILY_DURATION_MINUTES.length];}
+function normalize(s){return String(s||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();}
+function tokens(s){return new Set(normalize(s).split(' ').filter(w=>w.length>3));}
+function similarity(a,b){const A=tokens(a),B=tokens(b);if(!A.size||!B.size)return 0;let both=0;for(const x of A)if(B.has(x))both++;return both/Math.max(A.size,B.size);}
+function repeatedOpening(a,b){const x=normalize(a).split(' ').slice(0,4).join(' ');const y=normalize(b).split(' ').slice(0,4).join(' ');return x&&x===y;}
+function dialogueIsFresh(line,previous){if(!line||wordCount(line)<4)return false;for(const old of previous){if(normalize(line)===normalize(old))return false;if(similarity(line,old)>0.64)return false;if(repeatedOpening(line,old))return false;}return true;}
+function tidyLine(line){let s=String(line||'').replace(/\s+/g,' ').trim();if(wordCount(s)>28)s=s.split(/\s+/).slice(0,28).join(' ');if(!/[.!?]$/.test(s))s+='.';return s;}
 
-function hashSeed(value) {
-  let hash = 2166136261;
-  for (const character of String(value)) {
-    hash ^= character.charCodeAt(0);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
+const REACTIONS = ['No. That was not there before.','Check the time on it.','Don’t touch it yet.','I’m checking the hallway.','That makes no sense.','Show me exactly what you saw.','Okay, now I’m worried.','I heard it too.','Back up. Give me a second.','That changed while we were looking at it.','We should leave. Now.','Wait. Look at the reflection.','The door just locked.','Call somebody.','No signal. Of course.','I have an idea, but you’re not going to like it.','Then we do it together.','Something is moving outside.','That is definitely our address.','Read the last line again.'];
+const OBSERVATIONS = ['The timestamp is one day ahead.','The lights only flicker when we speak.','There are fresh footprints on the floor.','The camera feed is delayed by exactly ten seconds.','The handle is warm.','The screen just changed by itself.','There is another sound behind the wall.','The same number appears on both phones.','That photo was taken from inside this room.','The exit sign is pointing the wrong way.','The clock stopped at the same minute as the message.','Someone erased the last camera clip.','The elevator indicator skipped a floor.','The shadow moved before you did.','The address on this receipt is ours.','That handwriting looks like mine.','The door across the hall is open now.','The map says we are already at the destination.','The reflection is missing one of us.','The last message was sent from this room.'];
+const DECISIONS = ['We take the stairs.','Keep the phone recording.','Leave the lights on.','Do not answer it.','I’ll check the door; you watch the camera.','We are not splitting up.','Take a picture before it changes again.','Put the keys in your pocket.','Call the front desk and say nothing else.','We leave everything and go.','Wait for the next notification.','Cover the mirror.','Lock the second door.','Turn the sound off and watch the screen.','Do exactly what the note says for one minute.','If it moves again, we run.','Stay where I can see you.','Do not look behind us yet.','We need proof before we leave.','One more minute, then we’re gone.'];
 
-function pick(list, seed, offset = 0) {
-  return list[((seed + Math.imul(offset + 1, 2654435761)) >>> 0) % list.length];
-}
+function fallbackDialogue(premise,beat,index,speaker,other,seed,previous){const choices=[];if(index===0){choices.push(`${other.name}, ${premise.hook}`,'Look at this. Something is wrong here.','I need you to see this before I touch anything.');}else{choices.push(beat,pick(OBSERVATIONS,seed,index),pick(REACTIONS,seed,index),pick(DECISIONS,seed,index),`${other.name}, ${pick(REACTIONS,seed,index+3)}`,`${pick(OBSERVATIONS,seed,index+5)} ${pick(DECISIONS,seed,index+7)}`);}for(let k=0;k<choices.length;k++){const line=tidyLine(choices[(k+(seed%choices.length))%choices.length]);if(dialogueIsFresh(line,previous))return line;}return tidyLine(`${pick(OBSERVATIONS,seed,index+11)} ${pick(DECISIONS,seed,index+13)}`);}
 
-function words(value) {
-  return String(value).trim().split(/\s+/).filter(Boolean);
-}
+function proceduralStory(seedValue){const seed=hashSeed(seedValue);const pair=CHARACTER_PAIRS[seed%CHARACTER_PAIRS.length].map(x=>({...x}));const premise=pick(PREMISES,seed,2);const targetMinutes=durationForSeed(seedValue);const targetWords=Math.round(targetMinutes*148);const sceneCount=Math.max(16,Math.round(targetWords/18));const scenes=[];const previous=[];for(let i=0;i<sceneCount;i++){const speaker=pair[i%2];const other=pair[(i+1)%2];const progress=i/Math.max(1,sceneCount-1);const beatIndex=Math.min(premise.beats.length-1,Math.floor(progress*premise.beats.length));const beat=premise.beats[beatIndex];let dialogue=fallbackDialogue(premise,beat,i,speaker,other,seed,previous);previous.push(dialogue);if(previous.length>10)previous.shift();scenes.push({speaker:speaker.id,dialogue,setting:SAFE_SETTINGS.includes(premise.setting)?premise.setting:pick(SAFE_SETTINGS,seed,i),action:pick(SAFE_ACTIONS,seed,i),mood:premise.genre.includes('comedy')?'funny':'tense'});}return {title:premise.title,genre:premise.genre,characters:pair,scenes,targetMinutes,targetSeconds:Math.round(targetMinutes*60),sceneCount:scenes.length,spokenWords:scenes.reduce((n,s)=>n+wordCount(s.dialogue),0),durationRange:'2-9 minutes',sourceStyle:'original-reddit-inspired'};}
 
-function fitDialogue(value, seed, index) {
-  let parts = words(value);
-  if (parts.length > 23) parts = parts.slice(0, 23);
-  let text = parts.join(' ');
-  let guard = 0;
-  while (words(text).length < 17 && guard < 4) {
-    text += ` ${pick(END_PHRASES, seed, index + guard)}`;
-    guard++;
-  }
-  parts = words(text);
-  if (parts.length > 23) parts = parts.slice(0, 23);
-  text = parts.join(' ');
-  if (!/[.!?]$/.test(text)) text += '.';
-  return text;
-}
+function sanitizeGenerated(raw,seedValue){if(!raw||!Array.isArray(raw.scenes))return null;const seed=hashSeed(seedValue);const pair=CHARACTER_PAIRS[seed%CHARACTER_PAIRS.length].map(x=>({...x}));const targetMinutes=durationForSeed(seedValue);const desired=Math.max(16,Math.round(targetMinutes*7.2));const out=[];const history=[];for(let i=0;i<raw.scenes.length&&out.length<desired;i++){const s=raw.scenes[i]||{};const line=tidyLine(s.dialogue);if(!dialogueIsFresh(line,history))continue;history.push(line);if(history.length>12)history.shift();out.push({speaker:s.speaker==='B'?'B':'A',dialogue:line,setting:SAFE_SETTINGS.includes(s.setting)?s.setting:pick(SAFE_SETTINGS,seed,i),action:SAFE_ACTIONS.includes(s.action)?s.action:pick(SAFE_ACTIONS,seed,i),mood:s.mood==='funny'?'funny':'tense'});}if(out.length<Math.min(14,desired*0.7))return null;while(out.length<desired){const p=proceduralStory(`${seedValue}:fill:${out.length}`);const candidate=p.scenes[out.length%p.scenes.length];if(dialogueIsFresh(candidate.dialogue,history)){out.push(candidate);history.push(candidate.dialogue);if(history.length>12)history.shift();}else{candidate.dialogue=tidyLine(pick(OBSERVATIONS,seed,out.length)+' '+pick(DECISIONS,seed,out.length+5));out.push(candidate);}}return {title:String(raw.title||'Ruby’s Realm Story').slice(0,80),genre:String(raw.genre||'thriller').slice(0,30),characters:pair,scenes:out,targetMinutes,targetSeconds:Math.round(targetMinutes*60),sceneCount:out.length,spokenWords:out.reduce((n,s)=>n+wordCount(s.dialogue),0),durationRange:'2-9 minutes',sourceStyle:'original-reddit-inspired'};}
 
-function durationForSeed(seedValue) {
-  const slotMatch = String(seedValue).match(/^(.*)-slot-(\d+)$/);
-  if (slotMatch) {
-    const dayRotation = hashSeed(`${slotMatch[1]}:duration`) % DAILY_DURATION_MINUTES.length;
-    const slot = Math.max(0, Number(slotMatch[2]) - 1);
-    return DAILY_DURATION_MINUTES[(slot + dayRotation) % DAILY_DURATION_MINUTES.length];
-  }
-  return DAILY_DURATION_MINUTES[hashSeed(`${seedValue}:duration`) % DAILY_DURATION_MINUTES.length];
-}
+async function aiStory(seedValue){const targetMinutes=durationForSeed(seedValue);const targetScenes=Math.max(16,Math.round(targetMinutes*7.2));const premise=pick(PREMISES,hashSeed(seedValue),4);const prompt=`Write an ORIGINAL ${targetMinutes}-minute vertical story loosely inspired by the conversational realism of internet first-person story posts, but do not copy, quote, paraphrase, or adapt any identifiable Reddit post. Premise: ${premise.hook} Genre: ${premise.genre}. Return JSON with title, genre, and scenes. Each scene needs speaker A or B, dialogue, setting, action, mood. Produce about ${targetScenes} scenes. Dialogue must sound like two normal adults speaking plainly under pressure. HARD RULES: no filler, no repeated catchphrases, do not repeatedly say the other person's name, do not restate the same clue, do not start multiple lines the same way, do not use motivational narration, keep each line 5-24 words, every line must add a new fact/reaction/decision/action, alternate observation/reaction/action naturally, build a complete plot with hook, escalation, twist, climax, ending. Allowed settings: ${SAFE_SETTINGS.join(', ')}. Allowed actions: ${SAFE_ACTIONS.join(', ')}.`;const raw=await generateStoryJson(prompt);return sanitizeGenerated(raw,seedValue);}
 
-function phaseFor(index, count) {
-  const progress = count <= 1 ? 1 : index / (count - 1);
-  if (progress < 0.12) return 'hook';
-  if (progress < 0.28) return 'investigate';
-  if (progress < 0.48) return 'escalate';
-  if (progress < 0.66) return 'consequence';
-  if (progress < 0.82) return 'twist';
-  if (progress < 0.95) return 'climax';
-  return 'finale';
-}
+export async function createStory(seedValue){if(hasGatewayAuth()){try{const story=await aiStory(seedValue);if(story)return story;}catch(e){console.warn('AI story generation failed; using original procedural story',e.message);}}return proceduralStory(seedValue);}
 
-function lineForPhase(plot, phase, speakerName, otherName, seed, index) {
-  const variants = {
-    hook: [
-      `${otherName}, I need you to look at this carefully: ${plot.inciting}.`,
-      `I thought I imagined it, ${otherName}, but ${plot.inciting}.`,
-      `${otherName}, this started like a normal night, then ${plot.inciting}.`,
-      `Before we do anything else, explain why ${plot.inciting}.`
-    ],
-    investigate: [
-      `Look closer, ${otherName}. ${plot.clue}, and that cannot be an accident.`,
-      `I checked twice, ${otherName}. ${plot.clue}, which means somebody expected us here.`,
-      `${otherName}, the strangest part is this: ${plot.clue}.`,
-      `That gives us our first real clue, ${otherName}: ${plot.clue}.`
-    ],
-    escalate: [
-      `${otherName}, stop for a second. ${plot.danger}, and it is happening faster now.`,
-      `This is not random anymore, ${otherName}. ${plot.danger}, exactly when we move.`,
-      `I was hoping this would calm down, but ${plot.danger}.`,
-      `${otherName}, whatever started this is reacting to us because ${plot.danger}.`
-    ],
-    consequence: [
-      `We waited too long, ${otherName}. ${plot.consequence}, so our choices are getting smaller.`,
-      `${otherName}, this just became serious: ${plot.consequence}.`,
-      `Every clue points the same direction now. ${plot.consequence}, and we are running out of room.`,
-      `I think our last decision triggered it, ${otherName}. ${plot.consequence}.`
-    ],
-    twist: [
-      `${otherName}, I finally see the pattern. ${plot.twist}, which changes everything we thought we knew.`,
-      `Wait, ${otherName}. The clues only make sense if ${plot.twist}.`,
-      `I was looking at this backward. ${plot.twist}, and that means the danger is much closer.`,
-      `${otherName}, the answer was in front of us the whole time: ${plot.twist}.`
-    ],
-    climax: [
-      `Then we act now, ${otherName}. We use what we learned, stay together, and force this thing to reveal itself.`,
-      `${otherName}, no more waiting. We know the pattern now, so we move before it gets another chance.`,
-      `I have one plan left, ${otherName}. It is risky, but doing nothing is exactly what this expects.`,
-      `${otherName}, follow my lead. If the pattern repeats once more, we use that moment to break it.`
-    ],
-    finale: [
-      `${otherName}, we almost made it, but ${plot.finale}.`,
-      `I thought it was over, ${otherName}. Then ${plot.finale}.`,
-      `${otherName}, remember everything we just learned, because ${plot.finale}.`,
-      `We got our answer, ${otherName}, and I wish we had not: ${plot.finale}.`
-    ]
-  };
-  return pick(variants[phase], seed, index);
-}
-
-function proceduralStory(seedValue) {
-  const seed = hashSeed(seedValue);
-  const pair = CHARACTER_PAIRS[seed % CHARACTER_PAIRS.length].map(character => ({ ...character }));
-  const slotMatch = String(seedValue).match(/^(.*)-slot-(\d+)$/);
-  const plotIndex = slotMatch
-    ? (hashSeed(slotMatch[1]) + Math.max(0, Number(slotMatch[2]) - 1)) % PLOTS.length
-    : (seed >>> 3) % PLOTS.length;
-  const plot = PLOTS[plotIndex];
-  const targetMinutes = durationForSeed(seedValue);
-  const sceneCount = Math.max(16, Math.round(targetMinutes * 7.2));
-  const scenes = [];
-
-  for (let index = 0; index < sceneCount; index++) {
-    const speaker = index % 2 === 0 ? pair[0] : pair[1];
-    const other = index % 2 === 0 ? pair[1] : pair[0];
-    const phase = phaseFor(index, sceneCount);
-    const dialogue = fitDialogue(lineForPhase(plot, phase, speaker.name, other.name, seed, index), seed, index);
-    const phasePosition = index / Math.max(1, sceneCount - 1);
-    const settingIndex = Math.min(plot.settings.length - 1, Math.floor(phasePosition * plot.settings.length));
-    scenes.push({
-      speaker:speaker.id,
-      dialogue,
-      action:pick(ACTION_CYCLE, seed, index),
-      setting:plot.settings[settingIndex],
-      mood:plot.genre.includes('comedy') ? 'funny' : 'tense'
-    });
-  }
-
-  const spokenWords = scenes.reduce((sum, item) => sum + words(item.dialogue).length, 0);
-  return {
-    id:`${plotIndex}-${seedValue}`,
-    title:plot.title,
-    genre:plot.genre,
-    characters:pair,
-    scenes,
-    targetMinutes,
-    targetSeconds:Math.round(targetMinutes * 60),
-    spokenWords,
-    sceneCount,
-    durationRange:'2-9 minutes',
-    caption:`${plot.title}. Full animated ${plot.genre.replaceAll('-',' ')} story with talking characters. Watch to the end. #RubysRealm #AnimatedStory #StoryTok #AIGenerated`
-  };
-}
-
-function normalizeGeneratedStory(generated, base) {
-  if (!generated || typeof generated !== 'object') throw new Error('Generated story is not an object.');
-  if (!Array.isArray(generated.scenes) || generated.scenes.length < Math.floor(base.sceneCount * 0.8)) {
-    throw new Error('Generated story did not contain enough scenes.');
-  }
-
-  const scenes = generated.scenes.slice(0, base.sceneCount).map((item, index) => {
-    const speaker = item.speaker === 'B' ? 'B' : 'A';
-    const dialogue = fitDialogue(String(item.dialogue || '').trim(), hashSeed(base.id), index);
-    if (dialogue.length < 8) throw new Error(`Generated scene ${index + 1} has no dialogue.`);
-    return {
-      speaker,
-      dialogue,
-      action:SAFE_ACTIONS.has(item.action) ? item.action : base.scenes[index]?.action || 'gesture',
-      setting:SAFE_SETTINGS.has(item.setting) ? item.setting : base.scenes[index]?.setting || 'hallway',
-      mood:item.mood === 'funny' ? 'funny' : base.scenes[index]?.mood || 'tense'
-    };
-  });
-
-  if (scenes.length < base.sceneCount) {
-    scenes.push(...base.scenes.slice(scenes.length));
-  }
-
-  const spokenWords = scenes.reduce((sum, item) => sum + words(item.dialogue).length, 0);
-  return {
-    ...base,
-    title:String(generated.title || base.title).trim().slice(0, 80),
-    genre:String(generated.genre || base.genre).trim().slice(0, 30),
-    scenes,
-    spokenWords,
-    caption:`${String(generated.title || base.title).trim().slice(0, 80)}. Full animated story with talking characters. Watch to the end. #RubysRealm #AnimatedStory #StoryTok #AIGenerated`
-  };
-}
-
-async function aiStory(seedValue, base) {
-  const [first, second] = base.characters;
-  const approximateWords = base.sceneCount * TARGET_WORDS_PER_SCENE;
-  const prompt = `Create one original ${base.genre} TikTok story inspired by the title "${base.title}".
-
-Requirements:
-- Exactly two visible ADULT characters: ${first.name} (speaker A) and ${second.name} (speaker B).
-- Exactly ${base.sceneCount} chronological dialogue scenes.
-- Target about ${approximateWords} total spoken words so the finished video lands near ${base.targetMinutes} minutes.
-- Each scene should be roughly 17-23 spoken words.
-- Build a complete beginning, escalation, investigation, twist, climax, and payoff or cliffhanger.
-- Every scene must have one character speaking to the other. No narrator and no silent scenes.
-- Characters must physically react and move throughout the story.
-- Keep it PG-13: no gore, hate, sexual content, real-person impersonation, or copyrighted characters.
-- action must be one of: ${[...SAFE_ACTIONS].join(', ')}.
-- setting must be one of: ${[...SAFE_SETTINGS].join(', ')}.
-- mood must be "tense" or "funny".
-- Do not include hashtags, stage directions inside dialogue, or watermarks.
-- Seed: ${seedValue}.
-
-Return only JSON in this shape:
-{"title":"...","genre":"...","scenes":[{"speaker":"A","dialogue":"...","action":"point","setting":"hallway","mood":"tense"}]}`;
-  const generated = await generateStoryJson(prompt);
-  return normalizeGeneratedStory(generated, base);
-}
-
-export async function createStory(seedValue, options = {}) {
-  const base = proceduralStory(seedValue, options);
-  if (!hasGatewayAuth() || process.env.AI_STORY_GENERATION === 'off') return base;
-  try {
-    return await aiStory(seedValue, base);
-  } catch (error) {
-    console.warn('AI story generation failed; using deterministic duration-driven story', error.message);
-    return base;
-  }
-}
-
-export function previewStory(seedValue, options = {}) {
-  return proceduralStory(seedValue, options);
-}
+export function previewStory(seedValue){const story=proceduralStory(seedValue);return {title:story.title,genre:story.genre,targetMinutes:story.targetMinutes,targetSeconds:story.targetSeconds,sceneCount:story.sceneCount,spokenWords:story.spokenWords,durationRange:story.durationRange,sourceStyle:story.sourceStyle};}
