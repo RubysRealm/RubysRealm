@@ -19,6 +19,116 @@ const CHARACTER_PAIRS = [
   ]
 ];
 
+const SAFE_ACTIONS = new Set(['point','step-back','reach','knock','open-door','slam-door','look','turn','phone','run','freeze','hand-object','pull','gesture','laugh','handshake','hide','walk','wave']);
+const SAFE_SETTINGS = new Set(['hallway','kitchen','apartment','laundromat','elevator','lobby','bus','street','shop','office','garage','cafe','motel','bedroom','park']);
+const DAILY_DURATION_MINUTES = [2.5, 3.25, 4.25, 5.25, 6.75, 8.5];
+const TARGET_WORDS_PER_SCENE = 19;
+
+const PLOTS = [
+  {
+    genre:'horror', title:'The Elevator Found Floor Zero', settings:['elevator','lobby','hallway'],
+    inciting:'the elevator has a glowing floor-zero button that was never there before',
+    clue:'two visitor badges are waiting downstairs with our names and tomorrow’s date',
+    danger:'a knocking sound follows the elevator and matches every floor we pass',
+    consequence:'the building above us begins disappearing from the security monitors one floor at a time',
+    twist:'floor zero is not underground; it is a copy of the building trying to replace the original',
+    finale:'the elevator opens upstairs again, but one of our reflections steps out before either of us moves'
+  },
+  {
+    genre:'comedy', title:'My Refrigerator Sued Me', settings:['kitchen','apartment','hallway'],
+    inciting:'a tiny attorney has arrived to represent the refrigerator in a lawsuit against me',
+    clue:'the evidence includes weeks of footage showing me opening the door with no actual snack plan',
+    danger:'the freezer has hired separate counsel and the microwave is recording every word we say',
+    consequence:'every appliance in the apartment joins the case and starts demanding weekends, breaks, and back pay',
+    twist:'the refrigerator does not want money; it wants legal ownership of every leftover after midnight',
+    finale:'we settle the case, then the coffee maker slides a brand-new lawsuit across the counter'
+  },
+  {
+    genre:'thriller', title:'Tomorrow Called Twice', settings:['apartment','hallway','street'],
+    inciting:'my phone is calling from tomorrow even though the phone itself is sitting in my hand',
+    clue:'the voice predicts each blackout and tells us which hallway camera will fail next',
+    danger:'the caller begins counting down to something that happens every time the number reaches zero',
+    consequence:'security footage shows us leaving the building tomorrow while we are still standing inside tonight',
+    twist:'the future caller is not warning us about the building; it is warning us about the versions of us outside',
+    finale:'the call ends, then both of our phones ring from the exact same number at the exact same time'
+  },
+  {
+    genre:'mystery', title:'The Store That Sold My Memory', settings:['shop','street','apartment'],
+    inciting:'a receipt says I sold a childhood memory here ten minutes from now',
+    clue:'the clerk has an object from my childhood that nobody outside my family should recognize',
+    danger:'each minute inside the store removes another detail from why we came here in the first place',
+    consequence:'a second version of me appears outside holding the same receipt and begging us not to finish the sale',
+    twist:'one of us is not a customer at all; one of us is the memory listed as merchandise',
+    finale:'the store closes and only one of us remembers ever knowing the other'
+  },
+  {
+    genre:'comedy-thriller', title:'My Replacement Arrived Early', settings:['office','elevator','hallway'],
+    inciting:'an exact copy of me is already at my desk finishing work I have avoided for three weeks',
+    clue:'management has records proving the copy has worked here longer than I have',
+    danger:'more copies keep arriving from the elevator and every one remembers a different version of my life',
+    consequence:'the building locks down while human resources tries to decide which employee is legally original',
+    twist:'the first copy claims the real me escaped months ago and everyone still working here is a replacement',
+    finale:'the doors finally unlock, but the name on my badge changes before I can leave'
+  },
+  {
+    genre:'horror', title:'My Shadow Parked First', settings:['garage','street','hallway'],
+    inciting:'my shadow is standing beside the car while I am still several steps away from it',
+    clue:'the shadow is holding keys that are physically still in your hand',
+    danger:'every time a garage light flickers, both shadows move closer to the driver and passenger doors',
+    consequence:'the dashboard counts two passengers inside even though the real car is visibly empty',
+    twist:'the shadows are not copying us anymore; they are rehearsing what they plan to do after leaving',
+    finale:'the garage lights return and our shadows are normal again, except the car is suddenly gone'
+  },
+  {
+    genre:'mystery', title:'The Dryer Returned Tomorrow', settings:['laundromat','street','apartment'],
+    inciting:'a dryer contains clothes we are both still wearing right now',
+    clue:'a receipt in the pocket is dated tomorrow and carries a warning in my handwriting',
+    danger:'every washer starts counting down together even though nobody touched their controls',
+    consequence:'the front windows show an empty laundromat while we can still see ourselves trapped inside',
+    twist:'the machines are not showing the future; they are swapping objects between two versions of tonight',
+    finale:'the doors finally open and we step outside carrying one jacket that neither of us remembers owning'
+  },
+  {
+    genre:'thriller', title:'The Bus Stop After the Last Stop', settings:['bus','street','apartment'],
+    inciting:'the bus has passed our stop three times and keeps returning to the same empty street',
+    clue:'the route display has erased every destination and now shows only our two names',
+    danger:'each time we pull the stop cord, another passenger silently disappears',
+    consequence:'the driver says one of us can leave but the other must finish the route',
+    twist:'every house outside belongs to someone who once disappeared from this bus',
+    finale:'the doors open at my childhood home and somebody with your face is already waiting on the porch'
+  },
+  {
+    genre:'horror', title:'Room 404 Was My Bedroom', settings:['motel','bedroom','hallway'],
+    inciting:'a motel key marked 404 opens a room identical to my childhood bedroom',
+    clue:'every photograph on the wall includes you even though we did not meet until years later',
+    danger:'the hallway outside grows longer every time we try to leave',
+    consequence:'the room begins changing to match memories I have never told anyone about',
+    twist:'the motel is not recreating my past; it is testing which memories belong to the person who entered',
+    finale:'we escape to the parking lot and find room 404 reflected in every dark window around us'
+  },
+  {
+    genre:'comedy-mystery', title:'The Duck Detective Hired Me', settings:['park','street','cafe'],
+    inciting:'a duck wearing a tiny detective hat has dropped a case file at my feet',
+    clue:'the file contains photographs of our lunch disappearing before we even bought it',
+    danger:'every pigeon in the park starts following us like an organized surveillance team',
+    consequence:'the duck leads us through clues pointing to a snack-smuggling operation under the café patio',
+    twist:'the missing food was never stolen; the detective has been planting evidence to keep himself employed',
+    finale:'we expose the scheme and the duck immediately hands us a bill for professional investigative services'
+  }
+];
+
+const ACTION_CYCLE = ['point','look','gesture','step-back','phone','reach','walk','turn','hand-object','freeze','run','open-door'];
+const END_PHRASES = [
+  'Stay with me, because this is getting worse.',
+  'Do not touch anything until we know why.',
+  'Keep watching; something changed again.',
+  'Tell me you noticed that too.',
+  'We need to think before we move.',
+  'Whatever happens, do not split up.',
+  'That detail was not there a minute ago.',
+  'I am starting to understand what this wants.'
+];
+
 function hashSeed(value) {
   let hash = 2166136261;
   for (const character of String(value)) {
@@ -29,302 +139,209 @@ function hashSeed(value) {
 }
 
 function pick(list, seed, offset = 0) {
-  return list[(seed + offset * 2654435761 >>> 0) % list.length];
+  return list[((seed + Math.imul(offset + 1, 2654435761)) >>> 0) % list.length];
 }
 
-function scene(speaker, dialogue, action, setting, mood = 'tense') {
-  return { speaker, dialogue, action, setting, mood };
+function words(value) {
+  return String(value).trim().split(/\s+/).filter(Boolean);
 }
 
-const PLOTS = [
-  {
-    id:'door-knocked-back', genre:'mystery', title:'The Door That Knocked Back',
-    build:({A,B,place,time}) => [
-      scene('A',`${B}, was this door here when we came home? It has our apartment number on both sides.`,'point','hallway'),
-      scene('B',`No. And do not touch it, ${A}. Nothing normal appears in a wall at ${time}.`,'step-back','hallway'),
-      scene('A',`I only raised my hand. I never knocked, but something on the other side just did.`,'knock','hallway'),
-      scene('B',`It knocked three times, exactly like you always do. Back away from that handle right now.`,'reach','hallway'),
-      scene('A',`The handle is turning by itself. I can hear our refrigerator running behind the door.`,'open-door','hallway'),
-      scene('B',`That is our kitchen in there, but look at the calendar. It says next Thursday.`,'point','kitchen'),
-      scene('A',`There is someone sitting at our table. He looks like me, and he is holding this key.`,'look','kitchen'),
-      scene('B',`He just mouthed, close it. ${A}, why is something knocking from behind us now?`,'turn','kitchen'),
-      scene('A',`Because the first door was not trying to get in. It was trying to warn us.`,'slam-door','hallway')
-    ]
-  },
-  {
-    id:'tomorrow-call', genre:'thriller', title:'Tomorrow Called Twice',
-    build:({A,B,time}) => [
-      scene('B',`${A}, your phone keeps calling mine, but your phone is sitting right beside me.`,'phone','apartment'),
-      scene('A',`The caller ID has tomorrow's date under my name. Put it on speaker, but say nothing.`,'reach','apartment'),
-      scene('B',`It is your voice. You are whispering my name and counting backward from ten.`,'phone','apartment'),
-      scene('A',`At zero, every light in this building just went out. That message knew it would happen.`,'look','apartment'),
-      scene('B',`Wait. The voice says we have four minutes to leave, and we cannot use the front stairs.`,'point','apartment'),
-      scene('A',`The hallway camera shows us already running outside. That recording is stamped ${time} tomorrow.`,'run','hallway'),
-      scene('B',`Then why are the people in the recording stopping and looking straight at this camera?`,'freeze','hallway'),
-      scene('A',`One of them is holding your phone. The call was never coming from my number.`,'step-back','hallway'),
-      scene('B',`The countdown started again, ${A}. This time the voice sounds exactly like me.`,'run','hallway')
-    ]
-  },
-  {
-    id:'laundromat-loop', genre:'mystery', title:'The Dryer Returned Tomorrow',
-    build:({A,B,object}) => [
-      scene('A',`${B}, dryer seven stopped, but I never put our clothes inside that machine.`,'point','laundromat'),
-      scene('B',`Then why is your ${object} spinning in there? You are wearing it right now.`,'reach','laundromat'),
-      scene('A',`The pocket has a receipt dated tomorrow and a warning written in my handwriting.`,'hand-object','laundromat'),
-      scene('B',`It says do not let the cycle finish. There are only forty seconds left.`,'phone','laundromat'),
-      scene('A',`The door is locked. Every other machine just started counting down with it.`,'pull','laundromat'),
-      scene('B',`Look through the glass. Those are not clothes anymore. That is this room, completely empty.`,'look','laundromat'),
-      scene('A',`I can see us inside the drum. We are pounding on the glass from the other side.`,'step-back','laundromat'),
-      scene('B',`The timer hit zero, but nothing opened. Why did the front door disappear?`,'turn','laundromat'),
-      scene('A',`Because we were not watching the dryer. Someone outside was watching us.`,'freeze','laundromat')
-    ]
-  },
-  {
-    id:'room-zero', genre:'horror', title:'The Elevator Found Floor Zero',
-    build:({A,B,place}) => [
-      scene('B',`${A}, this elevator has never had a zero button. Why is it glowing now?`,'point','elevator'),
-      scene('A',`I did not press it. The doors closed the second you said the word zero.`,'step-back','elevator'),
-      scene('B',`The floor counter is going backward, but ${place} only has twelve floors above ground.`,'look','elevator'),
-      scene('A',`Listen. Someone outside is matching the elevator, one knock for every floor we pass.`,'knock','elevator'),
-      scene('B',`We stopped. The doors opened onto our lobby, except every clock is frozen at midnight.`,'open-door','lobby'),
-      scene('A',`The security desk has two visitor badges waiting. They already have our names printed.`,'hand-object','lobby'),
-      scene('B',`The guard in that photograph is pointing behind us. He was not moving a second ago.`,'turn','lobby'),
-      scene('A',`Do not run to the elevator. Its display does not say zero anymore. It says occupied.`,'run','lobby'),
-      scene('B',`Then we take the stairs. Unless that knocking is coming from inside them too.`,'freeze','lobby')
-    ]
-  },
-  {
-    id:'fridge-court', genre:'comedy', title:'My Refrigerator Sued Me',
-    build:({A,B,object}) => [
-      scene('A',`${B}, there is a tiny lawyer standing beside the refrigerator with a clipboard.`,'point','kitchen','funny'),
-      scene('B',`He says the fridge is suing you for excessive opening without reasonable snack intent.`,'hand-object','kitchen','funny'),
-      scene('A',`That is ridiculous. I always have snack intent, even when I forget what I wanted.`,'gesture','kitchen','funny'),
-      scene('B',`Exhibit A is security footage of you staring inside for eleven minutes last Tuesday.`,'phone','kitchen','funny'),
-      scene('A',`Objection. The cheese moved, and I was conducting a responsible investigation.`,'point','kitchen','funny'),
-      scene('B',`The refrigerator demands weekends off, one new ${object}, and custody of the ice tray.`,'laugh','kitchen','funny'),
-      scene('A',`Fine, but I want guaranteed access after midnight and no judgment about leftovers.`,'handshake','kitchen','funny'),
-      scene('B',`The freezer rejected your offer. It has retained separate counsel and wants damages.`,'step-back','kitchen','funny'),
-      scene('A',`Great. I lost a lawsuit to an appliance, and the microwave is recording everything.`,'look','kitchen','funny')
-    ]
-  },
-  {
-    id:'last-bus', genre:'thriller', title:'The Bus Stop After the Last Stop',
-    build:({A,B,time}) => [
-      scene('A',`${B}, the driver passed our stop three times, and the same street keeps coming back.`,'point','bus'),
-      scene('B',`I asked him to stop. He said passengers who boarded after ${time} do not choose exits.`,'step-back','bus'),
-      scene('A',`There were six people behind us earlier. Every seat is empty now except ours.`,'look','bus'),
-      scene('B',`The route screen changed. It only shows two names, and they are ours.`,'phone','bus'),
-      scene('A',`Pull the emergency cord. I do not care what the driver said.`,'reach','bus'),
-      scene('B',`I pulled it. The sign says request accepted yesterday, but the doors are still locked.`,'pull','bus'),
-      scene('A',`The bus finally stopped. That house outside is mine, but it burned down years ago.`,'freeze','street'),
-      scene('B',`Someone is waiting on your porch. He has your jacket and my exact face.`,'point','street'),
-      scene('A',`The driver says one of us can get off. The other has to finish the route.`,'step-back','bus')
-    ]
-  },
-  {
-    id:'memory-store', genre:'mystery', title:'The Store That Sold My Memory',
-    build:({A,B,object}) => [
-      scene('B',`${A}, this receipt says you bought a childhood memory here ten minutes from now.`,'hand-object','shop'),
-      scene('A',`I have never seen this store, but that ${object} behind the counter belonged to my grandfather.`,'point','shop'),
-      scene('B',`The clerk says you traded the memory willingly and asked him not to give it back.`,'look','shop'),
-      scene('A',`Then why can I remember everything except the reason we came inside?`,'step-back','shop'),
-      scene('B',`Because the receipt lists me as the item, not the customer. Read the bottom line.`,'hand-object','shop'),
-      scene('A',`It says final sale at midnight. The clock just skipped forward twenty minutes.`,'phone','shop'),
-      scene('B',`There is another version of you outside, pounding on the locked door.`,'point','shop'),
-      scene('A',`He is shouting not to trust you, but he is holding the same receipt.`,'turn','shop'),
-      scene('B',`Choose quickly. One of us is a memory, and the store is about to close.`,'reach','shop')
-    ]
-  },
-  {
-    id:'office-copy', genre:'comedy-thriller', title:'My Replacement Arrived Early',
-    build:({A,B,place}) => [
-      scene('A',`${B}, someone is sitting at my desk wearing my badge and answering my emails.`,'point','office'),
-      scene('B',`He looks exactly like you, but he finished the entire quarterly report before breakfast.`,'look','office'),
-      scene('A',`That proves he is fake. I have been avoiding that report for three weeks.`,'gesture','office','funny'),
-      scene('B',`Management already promoted him. They want you to train your replacement before lunch.`,'hand-object','office','funny'),
-      scene('A',`He just whispered that he is not replacing me. He is hiding from the next copy.`,'step-back','office'),
-      scene('B',`The elevator opened. There are twelve more of you, and every one has a better résumé.`,'open-door','office'),
-      scene('A',`Lock the conference room. We need to find out which copy arrived first.`,'run','office'),
-      scene('B',`Too late. The calendar says this meeting has repeated every day for a year.`,'phone','office'),
-      scene('A',`Then the original me already escaped ${place}. The copies are the ones still working.`,'laugh','office','funny')
-    ]
-  },
-  {
-    id:'shadow-parking', genre:'horror', title:'My Shadow Parked First',
-    build:({A,B,time}) => [
-      scene('B',`${A}, your shadow is standing beside the car, but you are standing next to me.`,'point','garage'),
-      scene('A',`Do not move. It only changes position when the lights flicker.`,'freeze','garage'),
-      scene('B',`It is holding the keys. You left those in my hand at ${time}.`,'hand-object','garage'),
-      scene('A',`The headlights turned on. There is another shadow sitting in the driver's seat.`,'look','garage'),
-      scene('B',`Mine is gone now. Please tell me it did not just climb into the back seat.`,'turn','garage'),
-      scene('A',`The car doors locked themselves. The dashboard says two passengers already inside.`,'phone','garage'),
-      scene('B',`Our shadows are driving away, but the real car has not moved at all.`,'run','garage'),
-      scene('A',`Every garage light is switching off toward us, one row at a time.`,'step-back','garage'),
-      scene('B',`Run before the last light dies. Whatever leaves here will be wearing our shapes.`,'run','garage')
-    ]
-  },
-  {
-    id:'cafe-tomorrow', genre:'mystery', title:'The Customer From Tomorrow',
-    build:({A,B,object}) => [
-      scene('A',`${B}, that customer ordered my exact drink and paid with a coin dated next year.`,'point','cafe'),
-      scene('B',`He also left this ${object} for you. Your name is engraved on the back.`,'hand-object','cafe'),
-      scene('A',`It is playing a recording of us having this conversation, word for word.`,'phone','cafe'),
-      scene('B',`The next line says we should leave before the cup breaks. Do not touch anything.`,'step-back','cafe'),
-      scene('A',`The cup broke by itself. Everyone in the café just froze except that customer.`,'freeze','cafe'),
-      scene('B',`He says this is the only minute today that can be changed.`,'look','cafe'),
-      scene('A',`He wants us to stop him from walking through that door thirty seconds ago.`,'point','cafe'),
-      scene('B',`Then who is the man outside waving at us with your face?`,'turn','street'),
-      scene('A',`The recording ended with one sentence: never let tomorrow meet itself.`,'run','street')
-    ]
-  },
-  {
-    id:'motel-404', genre:'horror', title:'Room 404 Was My Bedroom',
-    build:({A,B,place}) => [
-      scene('B',`${A}, the desk clerk gave us room 404, then insisted this motel has only three floors.`,'hand-object','motel'),
-      scene('A',`The key still opened something. This room looks exactly like my childhood bedroom.`,'open-door','bedroom'),
-      scene('B',`Those are your photographs on the wall, but I appear in every one of them.`,'point','bedroom'),
-      scene('A',`We did not meet until college. Why does that picture say ${place}, ten years earlier?`,'look','bedroom'),
-      scene('B',`The phone is ringing. The display says front desk, twenty years ago.`,'phone','bedroom'),
-      scene('A',`The clerk says checkout happened already and the room must be empty before midnight.`,'step-back','bedroom'),
-      scene('B',`Someone is knocking from inside the closet. They are using our voices.`,'freeze','bedroom'),
-      scene('A',`The hallway is gone. The room door opens into this same bedroom again.`,'open-door','bedroom'),
-      scene('B',`Then room 404 is not missing. It is where the motel puts people it wants forgotten.`,'hide','bedroom')
-    ]
-  },
-  {
-    id:'duck-detective', genre:'comedy', title:'The Detective Had Feathers',
-    build:({A,B,object}) => [
-      scene('A',`${B}, that duck has followed me for three days, and now it is wearing a tiny badge.`,'point','park','funny'),
-      scene('B',`He slid a photograph under the bench. It shows you stealing a golden ${object}.`,'hand-object','park','funny'),
-      scene('A',`I have never seen that thing in my life, and ducks do not run criminal investigations.`,'gesture','park','funny'),
-      scene('B',`This one does. He has a notebook, two witnesses, and surprisingly neat handwriting.`,'look','park','funny'),
-      scene('A',`Tell Detective Quacks I want a lawyer and one reasonable explanation.`,'point','park','funny'),
-      scene('B',`He says the ${object} was hidden in your lunch bag. Check it slowly.`,'reach','park','funny'),
-      scene('A',`It is in here, along with a note thanking me for taking the blame.`,'hand-object','park','funny'),
-      scene('B',`The duck just arrested a squirrel. Apparently we cracked an international snack ring.`,'laugh','park','funny'),
-      scene('A',`Great. I am innocent, but Detective Quacks says I still owe him breadcrumbs.`,'handshake','park','funny')
-    ]
+function fitDialogue(value, seed, index) {
+  let parts = words(value);
+  if (parts.length > 23) parts = parts.slice(0, 23);
+  let text = parts.join(' ');
+  let guard = 0;
+  while (words(text).length < 17 && guard < 4) {
+    text += ` ${pick(END_PHRASES, seed, index + guard)}`;
+    guard++;
   }
-];
+  parts = words(text);
+  if (parts.length > 23) parts = parts.slice(0, 23);
+  text = parts.join(' ');
+  if (!/[.!?]$/.test(text)) text += '.';
+  return text;
+}
 
-const PLACES = ['the Hawthorne building','the old Riverside block','the Bellweather complex','the Northline apartments'];
-const TIMES = ['3:17 a.m.','11:58 p.m.','exactly midnight','2:06 a.m.'];
-const OBJECTS = ['silver key','red notebook','broken watch','green jacket','glass marble','brass compass'];
-const SAFE_ACTIONS = new Set(['point','step-back','reach','knock','open-door','slam-door','look','turn','phone','run','freeze','hand-object','pull','gesture','laugh','handshake','hide','walk','wave']);
-const SAFE_SETTINGS = new Set(['hallway','kitchen','apartment','laundromat','elevator','lobby','bus','street','shop','office','garage','cafe','motel','bedroom','park']);
+function durationForSeed(seedValue) {
+  const slotMatch = String(seedValue).match(/^(.*)-slot-(\d+)$/);
+  if (slotMatch) {
+    const dayRotation = hashSeed(`${slotMatch[1]}:duration`) % DAILY_DURATION_MINUTES.length;
+    const slot = Math.max(0, Number(slotMatch[2]) - 1);
+    return DAILY_DURATION_MINUTES[(slot + dayRotation) % DAILY_DURATION_MINUTES.length];
+  }
+  return DAILY_DURATION_MINUTES[hashSeed(`${seedValue}:duration`) % DAILY_DURATION_MINUTES.length];
+}
 
-function proceduralStory(seedValue, { long = false } = {}) {
+function phaseFor(index, count) {
+  const progress = count <= 1 ? 1 : index / (count - 1);
+  if (progress < 0.12) return 'hook';
+  if (progress < 0.28) return 'investigate';
+  if (progress < 0.48) return 'escalate';
+  if (progress < 0.66) return 'consequence';
+  if (progress < 0.82) return 'twist';
+  if (progress < 0.95) return 'climax';
+  return 'finale';
+}
+
+function lineForPhase(plot, phase, speakerName, otherName, seed, index) {
+  const variants = {
+    hook: [
+      `${otherName}, I need you to look at this carefully: ${plot.inciting}.`,
+      `I thought I imagined it, ${otherName}, but ${plot.inciting}.`,
+      `${otherName}, this started like a normal night, then ${plot.inciting}.`,
+      `Before we do anything else, explain why ${plot.inciting}.`
+    ],
+    investigate: [
+      `Look closer, ${otherName}. ${plot.clue}, and that cannot be an accident.`,
+      `I checked twice, ${otherName}. ${plot.clue}, which means somebody expected us here.`,
+      `${otherName}, the strangest part is this: ${plot.clue}.`,
+      `That gives us our first real clue, ${otherName}: ${plot.clue}.`
+    ],
+    escalate: [
+      `${otherName}, stop for a second. ${plot.danger}, and it is happening faster now.`,
+      `This is not random anymore, ${otherName}. ${plot.danger}, exactly when we move.`,
+      `I was hoping this would calm down, but ${plot.danger}.`,
+      `${otherName}, whatever started this is reacting to us because ${plot.danger}.`
+    ],
+    consequence: [
+      `We waited too long, ${otherName}. ${plot.consequence}, so our choices are getting smaller.`,
+      `${otherName}, this just became serious: ${plot.consequence}.`,
+      `Every clue points the same direction now. ${plot.consequence}, and we are running out of room.`,
+      `I think our last decision triggered it, ${otherName}. ${plot.consequence}.`
+    ],
+    twist: [
+      `${otherName}, I finally see the pattern. ${plot.twist}, which changes everything we thought we knew.`,
+      `Wait, ${otherName}. The clues only make sense if ${plot.twist}.`,
+      `I was looking at this backward. ${plot.twist}, and that means the danger is much closer.`,
+      `${otherName}, the answer was in front of us the whole time: ${plot.twist}.`
+    ],
+    climax: [
+      `Then we act now, ${otherName}. We use what we learned, stay together, and force this thing to reveal itself.`,
+      `${otherName}, no more waiting. We know the pattern now, so we move before it gets another chance.`,
+      `I have one plan left, ${otherName}. It is risky, but doing nothing is exactly what this expects.`,
+      `${otherName}, follow my lead. If the pattern repeats once more, we use that moment to break it.`
+    ],
+    finale: [
+      `${otherName}, we almost made it, but ${plot.finale}.`,
+      `I thought it was over, ${otherName}. Then ${plot.finale}.`,
+      `${otherName}, remember everything we just learned, because ${plot.finale}.`,
+      `We got our answer, ${otherName}, and I wish we had not: ${plot.finale}.`
+    ]
+  };
+  return pick(variants[phase], seed, index);
+}
+
+function proceduralStory(seedValue) {
   const seed = hashSeed(seedValue);
   const pair = CHARACTER_PAIRS[seed % CHARACTER_PAIRS.length].map(character => ({ ...character }));
   const slotMatch = String(seedValue).match(/^(.*)-slot-(\d+)$/);
   const plotIndex = slotMatch
-    ? (hashSeed(slotMatch[1]) + Math.max(0,Number(slotMatch[2]) - 1)) % PLOTS.length
+    ? (hashSeed(slotMatch[1]) + Math.max(0, Number(slotMatch[2]) - 1)) % PLOTS.length
     : (seed >>> 3) % PLOTS.length;
   const plot = PLOTS[plotIndex];
-  const vars = {
-    A: pair[0].name,
-    B: pair[1].name,
-    place: pick(PLACES, seed, 1),
-    time: pick(TIMES, seed, 2),
-    object: pick(OBJECTS, seed, 3)
-  };
-  let scenes = plot.build(vars);
+  const targetMinutes = durationForSeed(seedValue);
+  const sceneCount = Math.max(16, Math.round(targetMinutes * 7.2));
+  const scenes = [];
 
-  const naturalExtensions = [
-    'Tell me you can see that too.',
-    'Stay close, because something is definitely wrong.',
-    'Do not move until we understand this.',
-    'That was not happening a second ago.',
-    'We need a real plan right now.',
-    'Look again, because it just changed.',
-    'Keep watching and do not touch anything.',
-    'I have a very bad feeling.',
-    'Whatever happens next, stay beside me.'
-  ];
-  scenes = scenes.map((item,index) => ({
-    ...item,
-    dialogue: `${item.dialogue} ${naturalExtensions[index % naturalExtensions.length]}`
-  }));
-
-  if (long) {
-    scenes = scenes.concat([
-      scene('A',`We made it outside, but every window behind us shows the room we just escaped.`,'run','street'),
-      scene('B',`My phone says the story is not over. It is asking which one of us opened it first.`,'phone','street'),
-      scene('A',`Do not answer. The moment we choose, whatever followed us will know whose voice to use.`,'step-back','street')
-    ]);
+  for (let index = 0; index < sceneCount; index++) {
+    const speaker = index % 2 === 0 ? pair[0] : pair[1];
+    const other = index % 2 === 0 ? pair[1] : pair[0];
+    const phase = phaseFor(index, sceneCount);
+    const dialogue = fitDialogue(lineForPhase(plot, phase, speaker.name, other.name, seed, index), seed, index);
+    const phasePosition = index / Math.max(1, sceneCount - 1);
+    const settingIndex = Math.min(plot.settings.length - 1, Math.floor(phasePosition * plot.settings.length));
+    scenes.push({
+      speaker:speaker.id,
+      dialogue,
+      action:pick(ACTION_CYCLE, seed, index),
+      setting:plot.settings[settingIndex],
+      mood:plot.genre.includes('comedy') ? 'funny' : 'tense'
+    });
   }
 
+  const spokenWords = scenes.reduce((sum, item) => sum + words(item.dialogue).length, 0);
   return {
-    id: `${plot.id}-${seedValue}`,
-    title: plot.title,
-    genre: plot.genre,
-    characters: pair,
+    id:`${plotIndex}-${seedValue}`,
+    title:plot.title,
+    genre:plot.genre,
+    characters:pair,
     scenes,
-    caption: `${plot.title}: a normal moment turns impossible. Watch to the end. #RubysRealm #AnimatedStory #StoryTok #${plot.genre.replace(/[^a-z]/gi,'')} #AIGenerated`
+    targetMinutes,
+    targetSeconds:Math.round(targetMinutes * 60),
+    spokenWords,
+    sceneCount,
+    durationRange:'2-9 minutes',
+    caption:`${plot.title}. Full animated ${plot.genre.replaceAll('-',' ')} story with talking characters. Watch to the end. #RubysRealm #AnimatedStory #StoryTok #AIGenerated`
   };
 }
 
-function normalizeGeneratedStory(generated, base, long) {
-  const desiredScenes = long ? 12 : 9;
+function normalizeGeneratedStory(generated, base) {
   if (!generated || typeof generated !== 'object') throw new Error('Generated story is not an object.');
-  if (!Array.isArray(generated.scenes) || generated.scenes.length < desiredScenes - 2) {
+  if (!Array.isArray(generated.scenes) || generated.scenes.length < Math.floor(base.sceneCount * 0.8)) {
     throw new Error('Generated story did not contain enough scenes.');
   }
 
-  const scenes = generated.scenes.slice(0, desiredScenes).map((item, index) => {
+  const scenes = generated.scenes.slice(0, base.sceneCount).map((item, index) => {
     const speaker = item.speaker === 'B' ? 'B' : 'A';
-    const dialogue = String(item.dialogue || '').trim().slice(0, 240);
+    const dialogue = fitDialogue(String(item.dialogue || '').trim(), hashSeed(base.id), index);
     if (dialogue.length < 8) throw new Error(`Generated scene ${index + 1} has no dialogue.`);
     return {
       speaker,
       dialogue,
-      action: SAFE_ACTIONS.has(item.action) ? item.action : 'gesture',
-      setting: SAFE_SETTINGS.has(item.setting) ? item.setting : base.scenes[Math.min(index, base.scenes.length - 1)].setting,
-      mood: item.mood === 'funny' ? 'funny' : 'tense'
+      action:SAFE_ACTIONS.has(item.action) ? item.action : base.scenes[index]?.action || 'gesture',
+      setting:SAFE_SETTINGS.has(item.setting) ? item.setting : base.scenes[index]?.setting || 'hallway',
+      mood:item.mood === 'funny' ? 'funny' : base.scenes[index]?.mood || 'tense'
     };
   });
 
+  if (scenes.length < base.sceneCount) {
+    scenes.push(...base.scenes.slice(scenes.length));
+  }
+
+  const spokenWords = scenes.reduce((sum, item) => sum + words(item.dialogue).length, 0);
   return {
     ...base,
-    title: String(generated.title || base.title).trim().slice(0, 80),
-    genre: String(generated.genre || base.genre).trim().slice(0, 30),
+    title:String(generated.title || base.title).trim().slice(0, 80),
+    genre:String(generated.genre || base.genre).trim().slice(0, 30),
     scenes,
-    caption: `${String(generated.title || base.title).trim().slice(0, 80)}. Watch to the end. #RubysRealm #AnimatedStory #StoryTok #AIGenerated`
+    spokenWords,
+    caption:`${String(generated.title || base.title).trim().slice(0, 80)}. Full animated story with talking characters. Watch to the end. #RubysRealm #AnimatedStory #StoryTok #AIGenerated`
   };
 }
 
-async function aiStory(seedValue, base, { long = false } = {}) {
+async function aiStory(seedValue, base) {
   const [first, second] = base.characters;
-  const sceneCount = long ? 12 : 9;
+  const approximateWords = base.sceneCount * TARGET_WORDS_PER_SCENE;
   const prompt = `Create one original ${base.genre} TikTok story inspired by the title "${base.title}".
 
 Requirements:
 - Exactly two visible ADULT characters: ${first.name} (speaker A) and ${second.name} (speaker B).
-- Exactly ${sceneCount} chronological scenes with a clear hook, escalation, physical action, twist, and final cliffhanger/payoff.
-- 150-190 total spoken words${long ? ', or 210-250 words for this longer edition' : ''}.
-- Every scene must have one speaker talking to the other. No narrator and no silent scenes.
-- Dialogue must sound natural, fast, and emotionally acted. Avoid exposition dumps.
+- Exactly ${base.sceneCount} chronological dialogue scenes.
+- Target about ${approximateWords} total spoken words so the finished video lands near ${base.targetMinutes} minutes.
+- Each scene should be roughly 17-23 spoken words.
+- Build a complete beginning, escalation, investigation, twist, climax, and payoff or cliffhanger.
+- Every scene must have one character speaking to the other. No narrator and no silent scenes.
+- Characters must physically react and move throughout the story.
 - Keep it PG-13: no gore, hate, sexual content, real-person impersonation, or copyrighted characters.
 - action must be one of: ${[...SAFE_ACTIONS].join(', ')}.
 - setting must be one of: ${[...SAFE_SETTINGS].join(', ')}.
 - mood must be "tense" or "funny".
-- Do not include hashtags, stage directions inside dialogue, or a watermark.
+- Do not include hashtags, stage directions inside dialogue, or watermarks.
 - Seed: ${seedValue}.
 
-Return only JSON in this exact shape:
+Return only JSON in this shape:
 {"title":"...","genre":"...","scenes":[{"speaker":"A","dialogue":"...","action":"point","setting":"hallway","mood":"tense"}]}`;
   const generated = await generateStoryJson(prompt);
-  return normalizeGeneratedStory(generated, base, long);
+  return normalizeGeneratedStory(generated, base);
 }
 
 export async function createStory(seedValue, options = {}) {
   const base = proceduralStory(seedValue, options);
   if (!hasGatewayAuth() || process.env.AI_STORY_GENERATION === 'off') return base;
-
   try {
-    return await aiStory(seedValue, base, options);
+    return await aiStory(seedValue, base);
   } catch (error) {
-    console.warn('AI story generation failed; using deterministic story', error.message);
+    console.warn('AI story generation failed; using deterministic duration-driven story', error.message);
     return base;
   }
 }
