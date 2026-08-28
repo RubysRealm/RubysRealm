@@ -6,6 +6,8 @@ const DAILY_POSTS = 6;
 const SLOT_HOURS_UTC = [13, 16, 19, 22, 25, 28]; // 9am, noon, 3pm, 6pm, 9pm, midnight ET during EDT
 const MIN_DURATION_SECONDS = 120;
 const MAX_DURATION_SECONDS = 540;
+const RELEASE_OWNER = 'RubysRealm';
+const RELEASE_REPO = 'RubysRealm';
 
 function isAuthorized(req) {
   const cronSecret = process.env.CRON_SECRET;
@@ -54,7 +56,7 @@ function storiesForToday(now = new Date()) {
   const day = now.toISOString().slice(0,10);
   return Array.from({ length:DAILY_POSTS }, (_, slot) => {
     const seed = `${day}-slot-${slot + 1}`;
-    return { seed, preview:previewStory(seed) };
+    return { slot:slot + 1, seed, preview:previewStory(seed) };
   });
 }
 
@@ -63,32 +65,14 @@ function captionFor(item) {
   return `${item.preview.title}. Full ${item.preview.targetMinutes}-minute animated ${genre} story with talking characters. Watch to the end. #RubysRealm #AnimatedStory #TalkingCharacters #StoryTok #AIGenerated`;
 }
 
-async function mapLimit(items, limit, worker) {
-  const output = new Array(items.length);
-  let cursor = 0;
-  async function runOne() {
-    while (cursor < items.length) {
-      const index = cursor++;
-      output[index] = await worker(items[index], index);
-    }
-  }
-  await Promise.all(Array.from({ length:Math.min(limit, items.length) }, runOne));
-  return output;
-}
-
-async function warmAndVerifyVideo(item) {
-  const response = await fetch(item.videoUrl, { method:'GET' });
-  if (!response.ok) throw new Error(`Video render failed for ${item.seed}: HTTP ${response.status}`);
-  if (response.headers.get('x-rubys-realm-format') !== 'animated-story-v2') {
-    throw new Error(`Unexpected render format for ${item.seed}.`);
-  }
-  const duration = Number(response.headers.get('x-rubys-realm-duration'));
-  await response.arrayBuffer();
-  if (!Number.isFinite(duration)) throw new Error(`Rendered duration missing for ${item.seed}.`);
-  if (duration < MIN_DURATION_SECONDS || duration > MAX_DURATION_SECONDS) {
-    throw new Error(`Rendered duration ${duration.toFixed(1)}s is outside 2-9 minutes for ${item.seed}.`);
-  }
-  return duration;
+async function fetchManifest(day) {
+  const tag = `stories-${day}`;
+  const url = `https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/releases/download/${tag}/manifest.json`;
+  const response = await fetch(url, { redirect:'follow', cache:'no-store' });
+  if (!response.ok) throw new Error(`Daily rendered-story manifest is not ready: HTTP ${response.status}`);
+  const manifest = await response.json();
+  if (manifest?.day !== day || !Array.isArray(manifest?.slots)) throw new Error('Daily rendered-story manifest is invalid.');
+  return { tag, manifest };
 }
 
 export default async function handler(req, res) {
@@ -99,20 +83,27 @@ export default async function handler(req, res) {
     const target = await getBufferTikTokChannel();
     if (!target) return res.status(404).json({ error:'No TikTok channel connected in Buffer.' });
 
-    const origin = process.env.PUBLIC_BASE_URL || 'https://rubys-realm.vercel.app';
     const stories = storiesForToday();
+    const day = stories[0].seed.slice(0,10);
     const slots = scheduledSlots();
     const existing = await scheduledPosts(target);
+    const { tag, manifest } = await fetchManifest(day);
 
-    const prepared = stories.map((item, index) => ({
-      ...item,
-      videoUrl:`${origin}/api/story-video?seed=${encodeURIComponent(item.seed)}`,
-      dueAt:slots[index].toISOString(),
-      caption:captionFor(item)
-    }));
-
-    const renderDurations = await mapLimit(prepared, 3, warmAndVerifyVideo);
-    prepared.forEach((item, index) => { item.actualDurationSeconds = renderDurations[index]; });
+    const prepared = stories.map((item, index) => {
+      const rendered = manifest.slots.find(entry => Number(entry.slot) === item.slot);
+      if (!rendered) throw new Error(`Rendered release asset is missing for slot ${item.slot}.`);
+      const actualDurationSeconds = Number(rendered.durationSeconds);
+      if (!Number.isFinite(actualDurationSeconds) || actualDurationSeconds < MIN_DURATION_SECONDS || actualDurationSeconds > MAX_DURATION_SECONDS) {
+        throw new Error(`Rendered slot ${item.slot} is outside the required 2-9 minute range.`);
+      }
+      return {
+        ...item,
+        actualDurationSeconds,
+        videoUrl:`https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/releases/download/${tag}/slot-${item.slot}.mp4`,
+        dueAt:slots[index].toISOString(),
+        caption:captionFor(item)
+      };
+    });
 
     const created = [];
     const skipped = [];
@@ -133,6 +124,9 @@ export default async function handler(req, res) {
         });
         continue;
       }
+
+      const fileCheck = await fetch(item.videoUrl, { method:'HEAD', redirect:'follow' });
+      if (!fileCheck.ok) throw new Error(`Static rendered MP4 is unavailable for ${item.seed}: HTTP ${fileCheck.status}`);
 
       const post = await createBufferVideoPost({
         channelId:target.channel.id,
@@ -164,6 +158,8 @@ export default async function handler(req, res) {
       dailyPosts:DAILY_POSTS,
       durationRange:'2-9 minutes',
       verifiedActualDurations:true,
+      staticReleaseAssets:true,
+      releaseTag:tag,
       format:{
         fullStories:true,
         animatedAdults:true,
