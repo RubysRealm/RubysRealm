@@ -1,13 +1,10 @@
-import { previewStory } from '../content/story-engine.js';
 import { getBufferTikTokChannel, createBufferVideoPost } from '../lib/buffer.js';
 
 const BUFFER_ENDPOINT = 'https://api.buffer.com';
-const DAILY_POSTS = 6;
-const SLOT_HOURS_UTC = [13, 16, 19, 22, 25, 28]; // 9am, noon, 3pm, 6pm, 9pm, midnight ET during EDT
 const MIN_DURATION_SECONDS = 120;
 const MAX_DURATION_SECONDS = 540;
-const REQUIRED_RENDERER = 'photoreal-human-v1';
-const REQUIRED_QUALITY_GATE = 'realistic-humans-required';
+const REQUIRED_RENDERER = 'fully-animated-scene-v1';
+const REQUIRED_QUALITY_GATE = 'animated-dialogue-clean-screen-required';
 const RELEASE_OWNER = 'RubysRealm';
 const RELEASE_REPO = 'RubysRealm';
 
@@ -45,39 +42,15 @@ async function scheduledPosts(target) {
   return (data?.posts?.edges || []).map(edge => edge.node);
 }
 
-function scheduledSlots(now = new Date()) {
-  const base = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
-  let slots = SLOT_HOURS_UTC.map(hour => new Date(base.getTime() + hour * 3600000));
-  while (slots.filter(d => d.getTime() > now.getTime() + 10 * 60000).length < DAILY_POSTS) {
-    slots.push(new Date(slots[slots.length - 1].getTime() + 3 * 3600000));
-  }
-  return slots.filter(d => d.getTime() > now.getTime() + 10 * 60000).slice(0, DAILY_POSTS);
-}
-
-function storiesForToday(now = new Date()) {
-  const day = now.toISOString().slice(0,10);
-  return Array.from({ length:DAILY_POSTS }, (_, slot) => {
-    const seed = `${day}-slot-${slot + 1}`;
-    return { slot:slot + 1, seed, preview:previewStory(seed) };
-  });
-}
-
-function captionFor(item) {
-  const genre = item.preview.genre.replaceAll('-',' ');
-  return `${item.preview.title}. Full ${item.preview.targetMinutes}-minute realistic animated ${genre} story with human characters. Watch to the end. #RubysRealm #RealisticAI #TalkingCharacters #StoryTok #AIGenerated`;
-}
-
-async function fetchManifest(day) {
-  const tag = `stories-${day}`;
-  const url = `https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/releases/download/${tag}/manifest.json`;
-  const response = await fetch(url, { redirect:'follow', cache:'no-store' });
-  if (!response.ok) throw new Error(`Daily rendered-story manifest is not ready: HTTP ${response.status}`);
-  const manifest = await response.json();
-  if (manifest?.day !== day || !Array.isArray(manifest?.slots)) throw new Error('Daily rendered-story manifest is invalid.');
-  if (manifest?.renderer !== REQUIRED_RENDERER || manifest?.qualityGate !== REQUIRED_QUALITY_GATE || manifest?.qualityAndDurationRequired !== true) {
-    throw new Error('Daily rendered-story manifest failed the required realistic-human quality gate. Nothing will be posted.');
-  }
-  return { tag, manifest };
+function validateManifest(manifest) {
+  if (!manifest || manifest.renderer !== REQUIRED_RENDERER) throw new Error('Blocked: video is not from the fully animated scene renderer.');
+  if (manifest.qualityGate !== REQUIRED_QUALITY_GATE) throw new Error('Blocked: required animation/text quality gate did not pass.');
+  if (manifest.fullyAnimatedPeople !== true) throw new Error('Blocked: characters are not confirmed fully animated.');
+  if (manifest.visibleDialogue !== true) throw new Error('Blocked: visible character-to-character dialogue is required.');
+  if (manifest.storyMatchedEnvironments !== true) throw new Error('Blocked: story-matched environments are required.');
+  if (manifest.noStillImageVoiceover !== true) throw new Error('Blocked: still-image voiceover format is prohibited.');
+  if (manifest.cleanScreenTextPassed !== true) throw new Error('Blocked: stray/unplanned on-screen text detected or not verified.');
+  if (manifest.onlyIntentionalCaptions !== true) throw new Error('Blocked: only intentional captions/subtitles are permitted.');
 }
 
 export default async function handler(req, res) {
@@ -88,104 +61,45 @@ export default async function handler(req, res) {
     const target = await getBufferTikTokChannel();
     if (!target) return res.status(404).json({ error:'No TikTok channel connected in Buffer.' });
 
-    const stories = storiesForToday();
-    const day = stories[0].seed.slice(0,10);
-    const slots = scheduledSlots();
-    const existing = await scheduledPosts(target);
-    const { tag, manifest } = await fetchManifest(day);
+    const day = String(req.query?.day || new Date().toISOString().slice(0,10));
+    const tag = `animated-stories-${day}`;
+    const manifestUrl = `https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/releases/download/${tag}/manifest.json`;
+    const response = await fetch(manifestUrl, { redirect:'follow', cache:'no-store' });
+    if (!response.ok) throw new Error(`No approved fully animated release is ready for ${day}.`);
+    const manifest = await response.json();
+    validateManifest(manifest);
 
-    const prepared = stories.map((item, index) => {
-      const rendered = manifest.slots.find(entry => Number(entry.slot) === item.slot);
-      if (!rendered) throw new Error(`Rendered release asset is missing for slot ${item.slot}.`);
-      if (rendered.renderer !== REQUIRED_RENDERER || rendered.qualityGate !== REQUIRED_QUALITY_GATE) {
-        throw new Error(`Rendered slot ${item.slot} failed the realistic-human quality gate.`);
-      }
-      const actualDurationSeconds = Number(rendered.durationSeconds);
-      if (!Number.isFinite(actualDurationSeconds) || actualDurationSeconds < MIN_DURATION_SECONDS || actualDurationSeconds > MAX_DURATION_SECONDS) {
-        throw new Error(`Rendered slot ${item.slot} is outside the required 2-9 minute range.`);
-      }
-      return {
-        ...item,
-        actualDurationSeconds,
-        videoUrl:`https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/releases/download/${tag}/slot-${item.slot}.mp4`,
-        dueAt:slots[index].toISOString(),
-        caption:captionFor(item)
-      };
-    });
-
-    const created = [];
-    const skipped = [];
-
-    for (const item of prepared) {
-      const duplicate = existing.find(post =>
-        post?.assets?.some(asset => asset?.source === item.videoUrl) ||
-        (post?.dueAt === item.dueAt && post?.text === item.caption)
-      );
-      if (duplicate) {
-        skipped.push({
-          seed:item.seed,
-          postId:duplicate.id,
-          dueAt:item.dueAt,
-          targetMinutes:item.preview.targetMinutes,
-          actualDurationSeconds:item.actualDurationSeconds,
-          reason:'already-scheduled'
-        });
-        continue;
-      }
-
-      const fileCheck = await fetch(item.videoUrl, { method:'HEAD', redirect:'follow' });
-      if (!fileCheck.ok) throw new Error(`Static rendered MP4 is unavailable for ${item.seed}: HTTP ${fileCheck.status}`);
-
-      const post = await createBufferVideoPost({
-        channelId:target.channel.id,
-        caption:item.caption,
-        videoUrl:item.videoUrl,
-        dueAt:item.dueAt
-      });
-
-      created.push({
-        seed:item.seed,
-        title:item.preview.title,
-        genre:item.preview.genre,
-        renderer:REQUIRED_RENDERER,
-        qualityGate:REQUIRED_QUALITY_GATE,
-        targetMinutes:item.preview.targetMinutes,
-        actualDurationSeconds:item.actualDurationSeconds,
-        sceneCount:item.preview.sceneCount,
-        spokenWords:item.preview.spokenWords,
-        durationRange:item.preview.durationRange,
-        videoUrl:item.videoUrl,
-        dueAt:item.dueAt,
-        postId:post.id,
-        status:post.status
-      });
-      existing.push({ id:post.id, text:item.caption, dueAt:item.dueAt, assets:[{ source:item.videoUrl }] });
+    const videoUrl = `https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/releases/download/${tag}/${manifest.file || 'story.mp4'}`;
+    const duration = Number(manifest.durationSeconds);
+    if (!Number.isFinite(duration) || duration < MIN_DURATION_SECONDS || duration > MAX_DURATION_SECONDS) {
+      throw new Error('Blocked: final video is outside the required 2-9 minute range.');
     }
+
+    const existing = await scheduledPosts(target);
+    const duplicate = existing.find(post => post?.assets?.some(asset => asset?.source === videoUrl));
+    if (duplicate) return res.status(200).json({ ok:true, skipped:true, reason:'already-scheduled', postId:duplicate.id });
+
+    const fileCheck = await fetch(videoUrl, { method:'HEAD', redirect:'follow' });
+    if (!fileCheck.ok) throw new Error('Approved animated MP4 is unavailable.');
+
+    const dueAt = manifest.dueAt || new Date(Date.now() + 20 * 60000).toISOString();
+    const caption = String(manifest.caption || 'Ruby\'s Realm animated story. #StoryTok #AIGenerated');
+    const post = await createBufferVideoPost({ channelId:target.channel.id, caption, videoUrl, dueAt });
 
     return res.status(200).json({
       ok:true,
-      dailyPosts:DAILY_POSTS,
-      durationRange:'2-9 minutes',
-      verifiedActualDurations:true,
-      realisticHumanQualityRequired:true,
-      qualityAndDurationRequired:true,
-      staticReleaseAssets:true,
-      releaseTag:tag,
-      format:{
-        fullStories:true,
-        realisticHumans:true,
-        distinctVoices:true,
-        visibleTalking:true,
-        physicalActions:true,
-        captions:true,
-        durationDriven:true,
-        noLowQualityFallbacks:true,
-        preRenderedBeforeBuffer:true,
-        branding:'Ruby\'s Realm only'
-      },
-      channel:{ id:target.channel.id, name:target.channel.displayName || target.channel.name },
-      created,
-      skipped
+      renderer:REQUIRED_RENDERER,
+      fullyAnimatedPeople:true,
+      visibleDialogue:true,
+      storyMatchedEnvironments:true,
+      noStillImageVoiceover:true,
+      cleanScreenTextPassed:true,
+      onlyIntentionalCaptions:true,
+      automaticPosting:true,
+      videoUrl,
+      dueAt,
+      postId:post.id,
+      status:post.status
     });
   } catch (error) {
     console.error('auto-post failed', error);
