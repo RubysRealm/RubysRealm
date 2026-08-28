@@ -2,6 +2,10 @@ name: Generate animated TikTok story
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - 'tiktok_animator/**'
+      - '.github/workflows/tiktok-animated-story.yml'
   schedule:
     - cron: '17 */6 * * *'
 
