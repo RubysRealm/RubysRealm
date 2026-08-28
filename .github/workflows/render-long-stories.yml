@@ -48,31 +48,52 @@ jobs:
 
           echo "DAY=${DAY}" >> "$GITHUB_ENV"
 
-      - name: Verify actual durations and build manifest
+      - name: Verify duration and realistic-human quality
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import json, os, re
           day = os.environ['DAY']
+          required_renderer = 'photoreal-human-v1'
           slots = []
           for slot in range(1, 7):
               header_path = f'rendered/slot-{slot}.headers'
               with open(header_path, 'r', encoding='utf-8', errors='replace') as f:
                   headers = f.read()
-              matches = re.findall(r'(?im)^x-rubys-realm-duration:\s*([0-9.]+)\s*$', headers)
-              if not matches:
+
+              duration_matches = re.findall(r'(?im)^x-rubys-realm-duration:\s*([0-9.]+)\s*$', headers)
+              renderer_matches = re.findall(r'(?im)^x-rubys-realm-format:\s*([^\r\n]+)\s*$', headers)
+              ai_matches = re.findall(r'(?im)^x-ai-generated:\s*([^\r\n]+)\s*$', headers)
+
+              if not duration_matches:
                   raise SystemExit(f'slot {slot} did not return X-Rubys-Realm-Duration')
-              duration = float(matches[-1])
+              if not renderer_matches or renderer_matches[-1].strip() != required_renderer:
+                  raise SystemExit(f'slot {slot} failed realistic-human quality gate')
+              if not ai_matches or ai_matches[-1].strip().lower() != 'true':
+                  raise SystemExit(f'slot {slot} failed generated-media identity gate')
+
+              duration = float(duration_matches[-1])
               if duration < 120 or duration > 540:
                   raise SystemExit(f'slot {slot} duration {duration:.2f}s is outside the required 120-540 second range')
+
               slots.append({
                   'slot': slot,
                   'seed': f'{day}-slot-{slot}',
                   'durationSeconds': round(duration, 2),
-                  'file': f'slot-{slot}.mp4'
+                  'file': f'slot-{slot}.mp4',
+                  'renderer': required_renderer,
+                  'qualityGate': 'realistic-humans-required'
               })
-          manifest = {'day': day, 'durationRangeSeconds': [120, 540], 'slots': slots, 'renderer':'photoreal-human-v1'}
+
+          manifest = {
+              'day': day,
+              'durationRangeSeconds': [120, 540],
+              'renderer': required_renderer,
+              'qualityGate': 'realistic-humans-required',
+              'qualityAndDurationRequired': True,
+              'slots': slots
+          }
           with open('rendered/manifest.json','w',encoding='utf-8') as f:
               json.dump(manifest, f, indent=2)
           print(json.dumps(manifest, indent=2))
