@@ -4,6 +4,7 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import sharp from 'sharp';
 import ffmpegStaticPath from 'ffmpeg-static';
+import { EdgeTTS } from 'node-edge-tts';
 import { createStory } from '../content/story-engine.js';
 import { generateSpeechAudio } from '../lib/ai-gateway.js';
 
@@ -200,6 +201,26 @@ async function fliteFallback(text, voice, output, dir, index) {
   ]);
 }
 
+async function neuralVoiceFallback(text, voice, rawOutput) {
+  const edgeVoice = {
+    onyx:'en-US-GuyNeural',
+    echo:'en-US-AndrewNeural',
+    nova:'en-US-JennyNeural',
+    shimmer:'en-US-AvaNeural',
+    alloy:'en-US-BrianNeural'
+  }[voice] || 'en-US-AvaNeural';
+  const tts = new EdgeTTS({
+    voice:edgeVoice,
+    lang:'en-US',
+    outputFormat:'audio-24khz-96kbitrate-mono-mp3',
+    pitch:'default',
+    rate:'-5%',
+    volume:'default',
+    timeout:30000
+  });
+  await tts.ttsPromise(text,rawOutput);
+}
+
 async function speechFile(sceneItem, character, dir, index) {
   const raw = path.join(dir, `speech-${index}.raw`);
   const output = path.join(dir, `speech-${index}.wav`);
@@ -210,9 +231,16 @@ async function speechFile(sceneItem, character, dir, index) {
     await fs.writeFile(raw, audio);
     await run(['-y','-i',raw,'-ar','24000','-ac','1','-c:a','pcm_s16le',output]);
   } catch (error) {
-    provider = 'flite-fallback';
-    console.warn(`Speech generation failed for scene ${index + 1}; using local fallback`, error.message);
-    await fliteFallback(sceneItem.dialogue, character.voice, output, dir, index);
+    provider = 'edge-neural';
+    console.warn(`AI Gateway speech failed for scene ${index + 1}; using neural fallback`, error.message);
+    try {
+      await neuralVoiceFallback(sceneItem.dialogue,character.voice,raw);
+      await run(['-y','-i',raw,'-ar','24000','-ac','1','-c:a','pcm_s16le',output]);
+    } catch (fallbackError) {
+      provider = 'flite-fallback';
+      console.warn(`Neural speech fallback failed for scene ${index + 1}; using local voice`, fallbackError.message);
+      await fliteFallback(sceneItem.dialogue, character.voice, output, dir, index);
+    }
   }
 
   const buffer = await fs.readFile(output);
@@ -337,6 +365,8 @@ export default async function handler(req, res) {
     return res.status(200).send(video);
   } catch (error) {
     console.error('animated story render failed', error);
+    res.setHeader('Content-Type','application/json; charset=utf-8');
+    res.setHeader('Cache-Control','no-store');
     return res.status(500).json({ ok:false, error:'Animated story render failed', detail:error.message });
   } finally {
     await fs.rm(dir,{ recursive:true,force:true }).catch(()=>{});
