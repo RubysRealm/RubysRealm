@@ -30,7 +30,7 @@ jobs:
           set -euo pipefail
           DAY="$(date -u +%F)"
           mkdir -p rendered
-          BASE="https://rubys-realm.vercel.app/api/story-video"
+          BASE="https://rubys-realm.vercel.app/api/story-video-realistic"
 
           render_slot() {
             local slot="$1"
@@ -72,7 +72,7 @@ jobs:
                   'durationSeconds': round(duration, 2),
                   'file': f'slot-{slot}.mp4'
               })
-          manifest = {'day': day, 'durationRangeSeconds': [120, 540], 'slots': slots}
+          manifest = {'day': day, 'durationRangeSeconds': [120, 540], 'slots': slots, 'renderer':'photoreal-human-v1'}
           with open('rendered/manifest.json','w',encoding='utf-8') as f:
               json.dump(manifest, f, indent=2)
           print(json.dumps(manifest, indent=2))
