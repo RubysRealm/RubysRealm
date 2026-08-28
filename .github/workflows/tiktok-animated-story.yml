@@ -1,0 +1,31 @@
+name: Generate animated TikTok story
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install system tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg espeak-ng fonts-dejavu-core
+      - name: Install renderer dependency
+        run: pip install -r tiktok_animator/requirements.txt
+      - name: Generate true animated story video
+        run: python tiktok_animator/story_factory.py
+      - name: Upload generated MP4
+        uses: actions/upload-artifact@v4
+        with:
+          name: animated-tiktok-story-${{ github.run_number }}
+          path: tiktok_animator/output/*.mp4
+          if-no-files-found: error
+          retention-days: 7
