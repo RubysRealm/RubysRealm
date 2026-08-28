@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "mode": "quality-first-multi-provider",
+  "posting": {
+    "targetCadence": "daily-attempts-with-1-to-2-day-quality-output",
+    "allowStillImageVoiceoverFallback": false,
+    "allowTalkingHeadOnlyFallback": false,
+    "allowRandomText": false,
+    "allowLowQualityFallback": false
+  },
+  "providers": [
+    {
+      "name": "Higgsfield",
+      "priority": 1,
+      "capability": "multi-character cinematic generative video",
+      "useWhen": "free-trial/unlimited allowance or credits are available without new spend",
+      "skipWhen": "trial unavailable, allowance exhausted, or generation would require unapproved spend"
+    },
+    {
+      "name": "Runway",
+      "priority": 2,
+      "capability": "cinematic text/image/video generation",
+      "useWhen": "connected workspace exposes an eligible video model",
+      "skipWhen": "availableVideoModels is empty or generation requires unapproved plan change"
+    },
+    {
+      "name": "HeyGen",
+      "priority": 3,
+      "capability": "animated/lip-synced presenter and scene generation",
+      "useWhen": "free generation allowance exists and requested format is natively supported",
+      "skipWhen": "free allowance exhausted or provider can only produce a single-speaker substitution for a multi-character story"
+    }
+  ],
+  "rotationRules": [
+    "Check provider availability before every generation attempt.",
+    "If a provider is capped, rate-limited, unavailable, or cannot satisfy the requested format, skip it automatically and try the next provider.",
+    "Never substitute static portraits, slideshows, Ken Burns motion, or one-speaker talking-head output for required full animation.",
+    "Do not incur new charges, start paid subscriptions, or accept paid trials without user authorization.",
+    "For story posts require animated characters, visible actions, coherent story-matched environments, natural non-repetitive dialogue, and no accidental text.",
+    "For brain-rot posts require original fully animated characters, expressive full-body motion, coherent environment interaction, and no accidental text.",
+    "Only intentional captions/subtitles/title cards may contain text.",
+    "If no provider can currently generate a compliant video without new spend, do not post an inferior fallback; recheck provider availability on the next automated attempt."
+  ]
+}
