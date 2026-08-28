@@ -4,7 +4,6 @@ import { getBufferTikTokChannel, createBufferVideoPost } from '../lib/buffer.js'
 const BUFFER_ENDPOINT = 'https://api.buffer.com';
 const DAILY_POSTS = 6;
 const SLOT_HOURS_UTC = [13, 16, 19, 22, 25, 28]; // 9am, noon, 3pm, 6pm, 9pm, midnight ET during EDT
-const LONG_SLOT_INDEX = 4; // one extended story each day, currently the 9pm ET slot
 
 function isAuthorized(req) {
   const cronSecret = process.env.CRON_SECRET;
@@ -48,11 +47,9 @@ async function scheduledPosts(target) {
 function scheduledSlots(now = new Date()) {
   const base = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
   let slots = SLOT_HOURS_UTC.map(hour => new Date(base.getTime() + hour * 3600000));
-
   while (slots.filter(d => d.getTime() > now.getTime() + 10 * 60000).length < DAILY_POSTS) {
     slots.push(new Date(slots[slots.length - 1].getTime() + 3 * 3600000));
   }
-
   return slots.filter(d => d.getTime() > now.getTime() + 10 * 60000).slice(0, DAILY_POSTS);
 }
 
@@ -60,15 +57,13 @@ function storiesForToday(now = new Date()) {
   const day = now.toISOString().slice(0,10);
   return Array.from({ length: DAILY_POSTS }, (_, slot) => {
     const seed = `${day}-slot-${slot + 1}`;
-    const isLong = slot === LONG_SLOT_INDEX;
-    return { seed, isLong, preview:previewStory(seed,{ long:isLong }) };
+    return { seed, preview:previewStory(seed) };
   });
 }
 
 function captionFor(item) {
   const genre = item.preview.genre.replaceAll('-',' ');
-  const lengthNote = item.isLong ? ' Extended story.' : '';
-  return `${item.preview.title}. An animated ${genre} story with a twist.${lengthNote} Watch to the end. #RubysRealm #AnimatedStory #TalkingCharacters #StoryTok #AIGenerated`;
+  return `${item.preview.title}. Full ${item.preview.targetMinutes}-minute animated ${genre} story with talking characters. Watch to the end. #RubysRealm #AnimatedStory #TalkingCharacters #StoryTok #AIGenerated`;
 }
 
 export default async function handler(req, res) {
@@ -88,7 +83,7 @@ export default async function handler(req, res) {
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      const videoUrl = `${origin}/api/story-video?seed=${encodeURIComponent(item.seed)}${item.isLong ? '&long=1' : ''}`;
+      const videoUrl = `${origin}/api/story-video?seed=${encodeURIComponent(item.seed)}`;
       const dueAt = slots[i].toISOString();
       const caption = captionFor(item);
       const duplicate = existing.find(post =>
@@ -97,7 +92,7 @@ export default async function handler(req, res) {
       );
 
       if (duplicate) {
-        skipped.push({ seed:item.seed, postId:duplicate.id, dueAt, reason:'already-scheduled' });
+        skipped.push({ seed:item.seed, postId:duplicate.id, dueAt, targetMinutes:item.preview.targetMinutes, reason:'already-scheduled' });
         continue;
       }
 
@@ -118,7 +113,10 @@ export default async function handler(req, res) {
         title:item.preview.title,
         genre:item.preview.genre,
         renderer:'animated-story-v2',
-        lengthClass:item.isLong ? 'extended-story' : 'story',
+        targetMinutes:item.preview.targetMinutes,
+        sceneCount:item.preview.sceneCount,
+        spokenWords:item.preview.spokenWords,
+        durationRange:item.preview.durationRange,
         videoUrl,
         dueAt,
         postId:post.id,
@@ -130,13 +128,15 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok:true,
       dailyPosts:DAILY_POSTS,
-      extendedStoriesPerDay:1,
+      durationRange:'2-9 minutes',
       format:{
+        fullStories:true,
         animatedAdults:true,
         distinctVoices:true,
         visibleTalking:true,
         physicalActions:true,
         captions:true,
+        durationDriven:true,
         branding:'Ruby\'s Realm only'
       },
       channel:{ id:target.channel.id, name:target.channel.displayName || target.channel.name },
