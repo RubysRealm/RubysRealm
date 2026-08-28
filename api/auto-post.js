@@ -6,6 +6,8 @@ const DAILY_POSTS = 6;
 const SLOT_HOURS_UTC = [13, 16, 19, 22, 25, 28]; // 9am, noon, 3pm, 6pm, 9pm, midnight ET during EDT
 const MIN_DURATION_SECONDS = 120;
 const MAX_DURATION_SECONDS = 540;
+const REQUIRED_RENDERER = 'photoreal-human-v1';
+const REQUIRED_QUALITY_GATE = 'realistic-humans-required';
 const RELEASE_OWNER = 'RubysRealm';
 const RELEASE_REPO = 'RubysRealm';
 
@@ -62,7 +64,7 @@ function storiesForToday(now = new Date()) {
 
 function captionFor(item) {
   const genre = item.preview.genre.replaceAll('-',' ');
-  return `${item.preview.title}. Full ${item.preview.targetMinutes}-minute animated ${genre} story with talking characters. Watch to the end. #RubysRealm #AnimatedStory #TalkingCharacters #StoryTok #AIGenerated`;
+  return `${item.preview.title}. Full ${item.preview.targetMinutes}-minute realistic animated ${genre} story with human characters. Watch to the end. #RubysRealm #RealisticAI #TalkingCharacters #StoryTok #AIGenerated`;
 }
 
 async function fetchManifest(day) {
@@ -72,6 +74,9 @@ async function fetchManifest(day) {
   if (!response.ok) throw new Error(`Daily rendered-story manifest is not ready: HTTP ${response.status}`);
   const manifest = await response.json();
   if (manifest?.day !== day || !Array.isArray(manifest?.slots)) throw new Error('Daily rendered-story manifest is invalid.');
+  if (manifest?.renderer !== REQUIRED_RENDERER || manifest?.qualityGate !== REQUIRED_QUALITY_GATE || manifest?.qualityAndDurationRequired !== true) {
+    throw new Error('Daily rendered-story manifest failed the required realistic-human quality gate. Nothing will be posted.');
+  }
   return { tag, manifest };
 }
 
@@ -92,6 +97,9 @@ export default async function handler(req, res) {
     const prepared = stories.map((item, index) => {
       const rendered = manifest.slots.find(entry => Number(entry.slot) === item.slot);
       if (!rendered) throw new Error(`Rendered release asset is missing for slot ${item.slot}.`);
+      if (rendered.renderer !== REQUIRED_RENDERER || rendered.qualityGate !== REQUIRED_QUALITY_GATE) {
+        throw new Error(`Rendered slot ${item.slot} failed the realistic-human quality gate.`);
+      }
       const actualDurationSeconds = Number(rendered.durationSeconds);
       if (!Number.isFinite(actualDurationSeconds) || actualDurationSeconds < MIN_DURATION_SECONDS || actualDurationSeconds > MAX_DURATION_SECONDS) {
         throw new Error(`Rendered slot ${item.slot} is outside the required 2-9 minute range.`);
@@ -139,7 +147,8 @@ export default async function handler(req, res) {
         seed:item.seed,
         title:item.preview.title,
         genre:item.preview.genre,
-        renderer:'animated-story-v2',
+        renderer:REQUIRED_RENDERER,
+        qualityGate:REQUIRED_QUALITY_GATE,
         targetMinutes:item.preview.targetMinutes,
         actualDurationSeconds:item.actualDurationSeconds,
         sceneCount:item.preview.sceneCount,
@@ -158,16 +167,19 @@ export default async function handler(req, res) {
       dailyPosts:DAILY_POSTS,
       durationRange:'2-9 minutes',
       verifiedActualDurations:true,
+      realisticHumanQualityRequired:true,
+      qualityAndDurationRequired:true,
       staticReleaseAssets:true,
       releaseTag:tag,
       format:{
         fullStories:true,
-        animatedAdults:true,
+        realisticHumans:true,
         distinctVoices:true,
         visibleTalking:true,
         physicalActions:true,
         captions:true,
         durationDriven:true,
+        noLowQualityFallbacks:true,
         preRenderedBeforeBuffer:true,
         branding:'Ruby\'s Realm only'
       },
