@@ -136,11 +136,12 @@ async function concatClips(clips, out, dir) {
 export default async function handler(req,res) {
   if (!['GET','HEAD'].includes(req.method)) return res.status(405).end();
   const seed = String(req.query?.seed || new Date().toISOString().slice(0,10));
-  const story = createStory(seed);
+  const story = await createStory(seed);
   if (req.method === 'HEAD') {
     res.setHeader('X-Rubys-Realm-Format','photoreal-human-v1');
     res.setHeader('X-Rubys-Realm-Branding','brand-only');
     res.setHeader('X-AI-Generated','true');
+    res.setHeader('X-Rubys-Realm-Duration',String(story.targetSeconds || Math.round(story.targetMinutes*60)));
     return res.status(200).end();
   }
 
