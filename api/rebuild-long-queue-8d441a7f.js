@@ -2,17 +2,33 @@ import autoPost from './auto-post.js';
 import { getBufferTikTokChannel } from '../lib/buffer.js';
 
 const BUFFER_ENDPOINT = 'https://api.buffer.com';
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function gql(query, variables = {}) {
-  const response = await fetch(BUFFER_ENDPOINT, {
-    method:'POST',
-    headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${process.env.BUFFER_API_KEY}` },
-    body:JSON.stringify({ query, variables })
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(`Buffer HTTP ${response.status}`);
-  if (data.errors?.length) throw new Error(data.errors.map(e => e.message).join('; '));
-  return data.data;
+  let lastError;
+  for (let attempt = 0; attempt < 7; attempt++) {
+    const response = await fetch(BUFFER_ENDPOINT, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${process.env.BUFFER_API_KEY}` },
+      body:JSON.stringify({ query, variables })
+    });
+
+    if (response.status === 429) {
+      const retryAfter = Number(response.headers.get('retry-after'));
+      const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(retryAfter * 1000, 60000)
+        : Math.min(2500 * (2 ** attempt), 45000);
+      lastError = new Error(`Buffer HTTP 429; retrying after ${waitMs}ms`);
+      await sleep(waitMs);
+      continue;
+    }
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(`Buffer HTTP ${response.status}`);
+    if (data.errors?.length) throw new Error(data.errors.map(e => e.message).join('; '));
+    return data.data;
+  }
+  throw lastError || new Error('Buffer rate limit did not clear.');
 }
 
 async function scheduledPosts(found) {
@@ -52,8 +68,12 @@ export default async function handler(req, res) {
     if (mode === 'clear' || mode === 'rebuild') {
       const posts = await scheduledPosts(found);
       const deleted = [];
-      for (const post of posts) deleted.push(await deletePost(post.id));
+      for (const post of posts) {
+        deleted.push(await deletePost(post.id));
+        await sleep(1200);
+      }
       if (mode === 'clear') return res.status(200).json({ ok:true, deleted, remaining:await scheduledPosts(found) });
+      await sleep(2500);
       req.headers['x-vercel-cron'] = '1';
       return autoPost(req, res);
     }
