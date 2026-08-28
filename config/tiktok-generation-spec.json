@@ -1,0 +1,65 @@
+{
+  "version": "2026-08-28-reference-style-v1",
+  "cadence": {
+    "mode": "quality-first",
+    "target": "1 post every 1-2 days"
+  },
+  "creativeModes": [
+    {
+      "id": "cinematic-animated-story",
+      "description": "Original stylized 3D/AI-animated story episodes with multiple characters visibly talking, moving, reacting, handling props, and changing through story-matched environments."
+    },
+    {
+      "id": "original-brainrot-short",
+      "description": "Original surreal brain-rot-style characters with full-body animation, expressive faces, comedic movement, and visual-gag-driven action."
+    }
+  ],
+  "hardRequirements": {
+    "verticalAspectRatio": "9:16",
+    "fullyAnimated": true,
+    "multipleCharactersWhenStoryBased": true,
+    "visibleCharacterConversation": true,
+    "facialMovement": true,
+    "bodyMovement": true,
+    "storyMatchedBackgrounds": true,
+    "cinematicSceneChanges": true,
+    "naturalNonRepetitiveDialogue": true,
+    "originalStories": true,
+    "originalCharacters": true,
+    "noStaticPortraitVoiceover": true,
+    "noSlideshow": true,
+    "noTalkingHeadSubstitution": true,
+    "noRandomText": true,
+    "intentionalCaptionsOnly": true
+  },
+  "storyEpisodeDurationSeconds": {
+    "min": 120,
+    "max": 540
+  },
+  "shortBrainrotMode": {
+    "allowShorterThan120Seconds": true,
+    "reason": "visual gag concepts may work best as true short-form clips"
+  },
+  "qualityGate": {
+    "rejectIf": [
+      "stray or gibberish on-screen text",
+      "frozen characters with narration",
+      "generic or mismatched backgrounds",
+      "single-speaker substitute for a multi-character scene",
+      "slideshow or pan-and-zoom still-image behavior",
+      "malformed anatomy that materially degrades the scene",
+      "repetitive dialogue",
+      "copied reference story or copied identifiable character"
+    ]
+  },
+  "preferredGeneration": {
+    "multiSceneVideoModels": ["Seedance", "Kling", "Wan"],
+    "allowSceneAssembly": true,
+    "qualityOverVolume": true
+  },
+  "publishing": {
+    "automatic": true,
+    "destination": "existing Ruby's Realm TikTok/Buffer pipeline",
+    "previewInChat": false
+  }
+}
