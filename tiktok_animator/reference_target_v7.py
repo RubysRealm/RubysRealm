@@ -132,7 +132,7 @@ async def narrate(text,audio,event_file):
         tmp=Path(str(audio)+'.partial')
         tmp.unlink(missing_ok=True)
         try:
-            communicate=edge_tts.Communicate(text,voice,rate='+6%',pitch='-1Hz',volume='+0%')
+            communicate=edge_tts.Communicate(text,voice,rate='+6%',pitch='-1Hz',volume='+0%',boundary='WordBoundary')
             with open(tmp,'wb') as f:
                 async for chunk in communicate.stream():
                     if chunk['type']=='audio':
@@ -246,7 +246,6 @@ def select_visuals(scheduler,semantic,beats,duration):
     # Keep enough scene changes for the reference feel while avoiding meaningless churn.
     target_min=max(12,min(22,int(duration/17.0)))
     if len(visuals)<target_min:
-        chosen={round(float(v['start']),2) for v in visuals}
         candidates=sorted(beats,key=lambda b:(-float(b.get('score',0)),float(b['start'])))
         for b in candidates:
             st=float(b['start'])
