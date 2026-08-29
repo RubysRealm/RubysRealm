@@ -25,7 +25,7 @@ jobs:
       - name: Install system tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          sudo apt-get install -y ffmpeg espeak-ng fonts-dejavu-core
       - name: Install renderer dependencies
         run: pip install -r tiktok_animator/requirements.txt
       - name: Generate narration-driven reference-style story
@@ -33,11 +33,19 @@ jobs:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: python tiktok_animator/story_factory.py
-      - name: Verify final media
+      - name: Verify quality manifest and final media
         run: |
-          test -n "$(find tiktok_animator/output -maxdepth 1 -name '*.mp4' -print -quit)"
-          test -n "$(find tiktok_animator/output -maxdepth 1 -name '*.json' -print -quit)"
-          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 tiktok_animator/output/*.mp4
+          python - <<'PY'
+          import json, pathlib, subprocess
+          manifests=sorted(pathlib.Path('tiktok_animator/output').glob('*.json'))
+          videos=sorted(pathlib.Path('tiktok_animator/output').glob('*.mp4'))
+          if not manifests or not videos: raise SystemExit('missing final output')
+          data=json.loads(manifests[-1].read_text())
+          if not data.get('qualityPassed'): raise SystemExit('reference-style quality gate failed')
+          if data.get('renderer')!='reference-narration-story-v1': raise SystemExit('wrong renderer')
+          subprocess.run(['ffprobe','-v','error','-show_entries','format=duration','-of','default=nw=1:nk=1',str(videos[-1])],check=True)
+          print(json.dumps(data.get('checks',{}),indent=2))
+          PY
       - name: Publish directly to TikTok
         env:
           TT_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
