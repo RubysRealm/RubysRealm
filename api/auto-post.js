@@ -7,7 +7,7 @@ const REQUIRED_RENDERER='reference-illustrated-story-v7';
 const REQUIRED_GATE='reference-example-target-v7';
 const MIN_SECONDS=120;
 const MAX_SECONDS=540;
-const MIN_GENERATED_ILLUSTRATION_RATIO=0.65;
+const MIN_GENERATED_ILLUSTRATION_RATIO=1.0;
 
 async function gql(query,variables={}){
   const key=process.env.BUFFER_API_KEY;
@@ -36,8 +36,45 @@ function validateManifest(m){
   if(Number(m.captionMaxWords||99)!==1) throw new Error('Blocked: captions are not exact one-word narration cues.');
   if(m?.style?.lower_panel!=='none') throw new Error('Blocked: teal lower panel is still enabled.');
   if(m?.style?.caption_timing!=='direct-neural-word-boundaries') throw new Error('Blocked: captions are not tied directly to narration word boundaries.');
-  if(Number(m?.style?.generated_illustration_ratio||0)<MIN_GENERATED_ILLUSTRATION_RATIO) throw new Error('Blocked: insufficient generated reference-style illustrations.');
+  if(Number(m?.style?.generated_illustration_ratio||0)<MIN_GENERATED_ILLUSTRATION_RATIO) throw new Error('Blocked: every production visual must be a generated cartoon illustration.');
+  if(!/^sha256:[a-f0-9]{64}$/i.test(String(m.storyFingerprint||''))) throw new Error('Blocked: story duplicate fingerprint is missing.');
+  if(!/^sha256:[a-f0-9]{64}$/i.test(String(m.videoFingerprint||''))) throw new Error('Blocked: video duplicate fingerprint is missing.');
+  if(m.duplicateGuard!=='story-and-video-sha256-v1') throw new Error('Blocked: duplicate guard is not enabled.');
   if(!m.file || !String(m.file).endsWith('.mp4')) throw new Error('Blocked: invalid final media file.');
+}
+
+function releaseTagFromSource(source){
+  const m=String(source||'').match(/github\.com\/RubysRealm\/RubysRealm\/releases\/download\/([^/]+)\//i);
+  if(!m) return null;
+  try{return decodeURIComponent(m[1]);}catch{return m[1];}
+}
+
+async function priorPublishedManifests(posts,currentTag){
+  const byTag=new Map();
+  for(const post of posts){
+    for(const asset of post?.assets||[]){
+      const tag=releaseTagFromSource(asset?.source);
+      if(tag && tag!==currentTag && !byTag.has(tag)) byTag.set(tag,post);
+    }
+  }
+  const tags=[...byTag.keys()].slice(0,24);
+  const results=await Promise.allSettled(tags.map(async tag=>{
+    const url=`https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/releases/download/${encodeURIComponent(tag)}/manifest.json`;
+    const r=await fetch(url,{redirect:'follow',cache:'no-store'});
+    if(!r.ok) throw new Error(`prior manifest ${tag} unavailable (${r.status})`);
+    return {tag,post:byTag.get(tag),manifest:await r.json()};
+  }));
+  const ok=results.filter(r=>r.status==='fulfilled').map(r=>r.value);
+  if(tags.length && !ok.length) throw new Error('Duplicate check could not verify prior published release manifests; refusing to risk a repeat upload.');
+  return ok;
+}
+
+function sameProduction(current,prior){
+  if(current.videoFingerprint && prior.videoFingerprint && current.videoFingerprint===prior.videoFingerprint) return 'video-fingerprint';
+  if(current.storyFingerprint && prior.storyFingerprint && current.storyFingerprint===prior.storyFingerprint) return 'story-fingerprint';
+  // Legacy exact-output protection for posts created before fingerprints were added.
+  if(current.file && prior.file && current.file===prior.file) return 'legacy-file-name';
+  return null;
 }
 
 export default async function handler(req,res){
@@ -58,13 +95,22 @@ export default async function handler(req,res){
     const target=await getBufferTikTokChannel();
     if(!target) throw new Error('No TikTok channel is connected in Buffer.');
     const existing=await recentPosts(target);
-    const duplicate=existing.find(p=>p?.assets?.some(a=>a?.source===videoUrl));
-    if(duplicate) return res.status(200).json({ok:true,skipped:true,postId:duplicate.id,status:duplicate.status,externalLink:duplicate.externalLink||null,renderer:REQUIRED_RENDERER});
+
+    const exactUrlDuplicate=existing.find(p=>p?.assets?.some(a=>a?.source===videoUrl));
+    if(exactUrlDuplicate) return res.status(200).json({ok:true,skipped:true,duplicateReason:'exact-release-url',postId:exactUrlDuplicate.id,status:exactUrlDuplicate.status,externalLink:exactUrlDuplicate.externalLink||null,renderer:REQUIRED_RENDERER});
+
+    const prior=await priorPublishedManifests(existing,tag);
+    for(const item of prior){
+      const reason=sameProduction(manifest,item.manifest||{});
+      if(reason){
+        return res.status(200).json({ok:true,skipped:true,duplicateReason:reason,duplicateRelease:item.tag,postId:item.post?.id||null,status:item.post?.status||'sent',externalLink:item.post?.externalLink||null,renderer:REQUIRED_RENDERER});
+      }
+    }
 
     const caption=`${String(manifest.title||"Ruby's Realm Story")} ${String(manifest.part||'Part 1')} #storytime #storytok #aistory #rubysrealm`;
     const dueAt=new Date(Date.now()+90*1000).toISOString();
     const post=await createBufferVideoPost({channelId:target.channel.id,caption,videoUrl,dueAt});
-    return res.status(200).json({ok:true,postId:post.id,status:post.status,dueAt,videoUrl,renderer:REQUIRED_RENDERER,qualityPassed:true,durationSeconds:Number(manifest.durationSeconds),visualCoverageRatio:Number(manifest.visualCoverageRatio),visualInsertCount:Number(manifest.visualInsertCount),voice:manifest?.style?.voice_used||null,generatedIllustrationRatio:Number(manifest?.style?.generated_illustration_ratio||0)});
+    return res.status(200).json({ok:true,postId:post.id,status:post.status,dueAt,videoUrl,renderer:REQUIRED_RENDERER,qualityPassed:true,durationSeconds:Number(manifest.durationSeconds),visualCoverageRatio:Number(manifest.visualCoverageRatio),visualInsertCount:Number(manifest.visualInsertCount),voice:manifest?.style?.voice_used||null,generatedIllustrationRatio:Number(manifest?.style?.generated_illustration_ratio||0),storyFingerprint:manifest.storyFingerprint,videoFingerprint:manifest.videoFingerprint});
   }catch(e){
     console.error('reference target publish failed',e);
     return res.status(500).json({ok:false,error:e.message});
