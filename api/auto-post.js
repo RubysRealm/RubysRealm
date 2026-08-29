@@ -1,108 +1,60 @@
 import { getBufferTikTokChannel, createBufferVideoPost } from '../lib/buffer.js';
 
-const BUFFER_ENDPOINT = 'https://api.buffer.com';
-const MIN_DURATION_SECONDS = 120;
-const MAX_DURATION_SECONDS = 540;
-const REQUIRED_RENDERER = 'fully-animated-scene-v1';
-const REQUIRED_QUALITY_GATE = 'animated-dialogue-clean-screen-required';
-const RELEASE_OWNER = 'RubysRealm';
-const RELEASE_REPO = 'RubysRealm';
+const BUFFER_ENDPOINT='https://api.buffer.com';
+const OWNER='RubysRealm';
+const REPO='RubysRealm';
+const RENDERER='reference-narration-story-v1';
+const GATE='reference-narration-clean-screen-v1';
 
-function isAuthorized(req) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) return req.headers.authorization === `Bearer ${cronSecret}`;
-  return req.headers['x-vercel-cron'] === '1' || req.headers['x-vercel-cron'] === 'true';
+async function gql(query,variables={}){
+  const key=process.env.BUFFER_API_KEY;
+  if(!key) throw new Error('BUFFER_API_KEY is not configured.');
+  const r=await fetch(BUFFER_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${key}`},body:JSON.stringify({query,variables})});
+  const d=await r.json();
+  if(!r.ok) throw new Error(`Buffer HTTP ${r.status}`);
+  if(d.errors?.length) throw new Error(d.errors.map(e=>e.message).join('; '));
+  return d.data;
 }
 
-async function bufferGraphQL(query, variables = {}) {
-  const apiKey = process.env.BUFFER_API_KEY;
-  if (!apiKey) throw new Error('BUFFER_API_KEY is not configured.');
-  const response = await fetch(BUFFER_ENDPOINT, {
-    method:'POST',
-    headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${apiKey}` },
-    body:JSON.stringify({ query, variables })
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(`Buffer HTTP ${response.status}`);
-  if (data.errors?.length) throw new Error(data.errors.map(e => e.message).join('; '));
-  return data.data;
+async function recentPosts(target){
+  const d=await gql(`query Posts($organizationId: OrganizationId!, $channelId: ChannelId!) { posts(first: 30,input:{organizationId:$organizationId,filter:{status:[scheduled,sent],channelIds:[$channelId]},sort:[{field:createdAt,direction:desc}]}) { edges { node { id status dueAt sentAt externalLink assets { source } } } } }`,{organizationId:target.organization.id,channelId:target.channel.id});
+  return (d?.posts?.edges||[]).map(e=>e.node);
 }
 
-async function scheduledPosts(target) {
-  const data = await bufferGraphQL(
-    `query Scheduled($organizationId: OrganizationId!, $channelId: ChannelId!) {
-      posts(first: 20, input: {
-        organizationId: $organizationId,
-        filter: { status: [scheduled], channelIds: [$channelId] },
-        sort: [{ field: dueAt, direction: asc }]
-      }) { edges { node { id text dueAt assets { source } } } }
-    }`,
-    { organizationId:target.organization.id, channelId:target.channel.id }
-  );
-  return (data?.posts?.edges || []).map(edge => edge.node);
+function validTag(tag){ return /^reference-story-\d+$/.test(tag); }
+function validate(m){
+  if(!m||m.renderer!==RENDERER) throw new Error('Wrong renderer.');
+  if(m.qualityGate!==GATE||m.qualityPassed!==true) throw new Error('Reference-style quality gate did not pass.');
+  const checks=m.checks||{};
+  if(!Object.keys(checks).length||Object.values(checks).some(v=>v!==true)) throw new Error('One or more required quality checks failed.');
+  const d=Number(m.durationSeconds);
+  if(!Number.isFinite(d)||d<120||d>540) throw new Error('Video duration is outside the 2-9 minute range.');
+  if(!m.file||!String(m.file).endsWith('.mp4')) throw new Error('Manifest video file is invalid.');
 }
 
-function validateManifest(manifest) {
-  if (!manifest || manifest.renderer !== REQUIRED_RENDERER) throw new Error('Blocked: video is not from the fully animated scene renderer.');
-  if (manifest.qualityGate !== REQUIRED_QUALITY_GATE) throw new Error('Blocked: required animation/text quality gate did not pass.');
-  if (manifest.fullyAnimatedPeople !== true) throw new Error('Blocked: characters are not confirmed fully animated.');
-  if (manifest.visibleDialogue !== true) throw new Error('Blocked: visible character-to-character dialogue is required.');
-  if (manifest.storyMatchedEnvironments !== true) throw new Error('Blocked: story-matched environments are required.');
-  if (manifest.noStillImageVoiceover !== true) throw new Error('Blocked: still-image voiceover format is prohibited.');
-  if (manifest.cleanScreenTextPassed !== true) throw new Error('Blocked: stray/unplanned on-screen text detected or not verified.');
-  if (manifest.onlyIntentionalCaptions !== true) throw new Error('Blocked: only intentional captions/subtitles are permitted.');
-}
-
-export default async function handler(req, res) {
-  if (req.method !== 'GET') return res.status(405).json({ error:'Method not allowed' });
-  if (!isAuthorized(req)) return res.status(401).json({ error:'Unauthorized' });
-
-  try {
-    const target = await getBufferTikTokChannel();
-    if (!target) return res.status(404).json({ error:'No TikTok channel connected in Buffer.' });
-
-    const day = String(req.query?.day || new Date().toISOString().slice(0,10));
-    const tag = `animated-stories-${day}`;
-    const manifestUrl = `https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/releases/download/${tag}/manifest.json`;
-    const response = await fetch(manifestUrl, { redirect:'follow', cache:'no-store' });
-    if (!response.ok) throw new Error(`No approved fully animated release is ready for ${day}.`);
-    const manifest = await response.json();
-    validateManifest(manifest);
-
-    const videoUrl = `https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/releases/download/${tag}/${manifest.file || 'story.mp4'}`;
-    const duration = Number(manifest.durationSeconds);
-    if (!Number.isFinite(duration) || duration < MIN_DURATION_SECONDS || duration > MAX_DURATION_SECONDS) {
-      throw new Error('Blocked: final video is outside the required 2-9 minute range.');
-    }
-
-    const existing = await scheduledPosts(target);
-    const duplicate = existing.find(post => post?.assets?.some(asset => asset?.source === videoUrl));
-    if (duplicate) return res.status(200).json({ ok:true, skipped:true, reason:'already-scheduled', postId:duplicate.id });
-
-    const fileCheck = await fetch(videoUrl, { method:'HEAD', redirect:'follow' });
-    if (!fileCheck.ok) throw new Error('Approved animated MP4 is unavailable.');
-
-    const dueAt = manifest.dueAt || new Date(Date.now() + 20 * 60000).toISOString();
-    const caption = String(manifest.caption || 'Ruby\'s Realm animated story. #StoryTok #AIGenerated');
-    const post = await createBufferVideoPost({ channelId:target.channel.id, caption, videoUrl, dueAt });
-
-    return res.status(200).json({
-      ok:true,
-      renderer:REQUIRED_RENDERER,
-      fullyAnimatedPeople:true,
-      visibleDialogue:true,
-      storyMatchedEnvironments:true,
-      noStillImageVoiceover:true,
-      cleanScreenTextPassed:true,
-      onlyIntentionalCaptions:true,
-      automaticPosting:true,
-      videoUrl,
-      dueAt,
-      postId:post.id,
-      status:post.status
-    });
-  } catch (error) {
-    console.error('auto-post failed', error);
-    return res.status(500).json({ ok:false, error:error.message });
+export default async function handler(req,res){
+  if(req.method!=='GET') return res.status(405).json({ok:false,error:'Method not allowed'});
+  try{
+    const tag=String(req.query?.tag||'');
+    if(!validTag(tag)) return res.status(400).json({ok:false,error:'A valid reference-story release tag is required.'});
+    const manifestUrl=`https://github.com/${OWNER}/${REPO}/releases/download/${tag}/manifest.json`;
+    const mr=await fetch(manifestUrl,{redirect:'follow',cache:'no-store'});
+    if(!mr.ok) throw new Error(`Approved manifest unavailable (${mr.status}).`);
+    const manifest=await mr.json(); validate(manifest);
+    const videoUrl=`https://github.com/${OWNER}/${REPO}/releases/download/${tag}/${encodeURIComponent(manifest.file)}`;
+    const head=await fetch(videoUrl,{method:'HEAD',redirect:'follow'});
+    if(!head.ok) throw new Error(`Approved MP4 unavailable (${head.status}).`);
+    const target=await getBufferTikTokChannel();
+    if(!target) throw new Error('No TikTok channel is connected in Buffer.');
+    const existing=await recentPosts(target);
+    const duplicate=existing.find(p=>p?.assets?.some(a=>a?.source===videoUrl));
+    if(duplicate) return res.status(200).json({ok:true,skipped:true,postId:duplicate.id,status:duplicate.status,externalLink:duplicate.externalLink||null});
+    const dueAt=new Date(Date.now()+60*1000).toISOString();
+    const caption=String(manifest.caption||`${manifest.title||"Ruby's Realm Story"} ${manifest.part||'Part 1'} #storytime #storytok #aistory #rubysrealm`);
+    const post=await createBufferVideoPost({channelId:target.channel.id,caption,videoUrl,dueAt});
+    return res.status(200).json({ok:true,postId:post.id,status:post.status,dueAt,videoUrl,renderer:RENDERER,qualityPassed:true});
+  }catch(e){
+    console.error('reference auto-post failed',e);
+    return res.status(500).json({ok:false,error:e.message});
   }
 }
