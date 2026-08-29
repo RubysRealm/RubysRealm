@@ -47,10 +47,12 @@ export default async function handler(req,res){
 
     const model=process.env.AI_IMAGE_MODEL||'openai/gpt-image-2';
     const prompt=[
-      'Create a polished stylized 3D animated story illustration for a vertical social storytelling video.',
-      'Visual target: cinematic simplified cartoon people and environments, expressive but clean character design, soft realistic lighting, dimensional depth, polished AI-rendered look similar to a modern animated explainer.',
+      'Create an unmistakably NON-PHOTOREALISTIC stylized 3D CARTOON story illustration for a vertical social storytelling video.',
+      'The result must look like a polished animated-film still or modern 3D cartoon explainer frame, NOT a photograph and NOT realistic documentary imagery.',
+      'Use simplified geometry, smooth CG materials, slightly exaggerated proportions, expressive cartoon faces, clean readable silhouettes, cinematic lighting, rich dimensional depth, and cohesive stylized environments.',
+      'Do not render photographic skin texture, camera-real faces, documentary photography, stock-photo aesthetics, hyperrealism, or real-person likenesses.',
       'No text, no captions, no labels, no logos, no watermark.',
-      'Use a consistent recurring protagonist when a person belongs in the scene: adult man with shaved head, charcoal hoodie, dark pants, simple expressive face.',
+      'Use a consistent recurring protagonist when a person belongs in the scene: stylized adult male cartoon character with shaved head, charcoal hoodie, dark pants, simple expressive animated face.',
       'The image must clearly and literally depict the current story beat, including the most important location, object, action, clue, emotion, or discovery.',
       'Compose the important subject center-left or center and keep the lower-center region readable for an overlaid one-word caption.',
       `Story title: ${title}.`,
@@ -77,6 +79,7 @@ export default async function handler(req,res){
     res.setHeader('Content-Type','image/jpeg');
     res.setHeader('Cache-Control','no-store');
     res.setHeader('X-Rubys-Realm-Image-Model',model);
+    res.setHeader('X-Rubys-Realm-Visual-Style','non-photorealistic-3d-cartoon');
     res.setHeader('X-Rubys-Realm-Credit-Balance-Before',String(balance));
     return res.status(200).send(output);
   }catch(e){
