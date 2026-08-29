@@ -1,4 +1,4 @@
-name: Generate and publish animated TikTok story
+name: Generate and publish reference-style TikTok story
 
 on:
   workflow_dispatch:
@@ -7,12 +7,11 @@ on:
       - 'tiktok_animator/**'
       - '.github/workflows/tiktok-animated-story.yml'
   schedule:
-    - cron: '0 4 * * *'   # 12:00 AM ET during EDT
-    - cron: '0 13 * * *'  # 9:00 AM ET during EDT
-    - cron: '0 16 * * *'  # 12:00 PM ET during EDT
-    - cron: '0 19 * * *'  # 3:00 PM ET during EDT
-    - cron: '0 22 * * *'  # 6:00 PM ET during EDT
-    - cron: '0 1 * * *'   # 9:00 PM ET during EDT
+    - cron: '0 14 * * *' # quality-first daily cycle; push still runs immediately
+
+concurrency:
+  group: rubys-realm-reference-story
+  cancel-in-progress: true
 
 jobs:
   render-and-publish:
@@ -26,20 +25,30 @@ jobs:
       - name: Install system tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg espeak-ng fonts-dejavu-core
-      - name: Install renderer dependency
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+      - name: Install renderer dependencies
         run: pip install -r tiktok_animator/requirements.txt
-      - name: Generate animated story video
+      - name: Generate narration-driven reference-style story
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
         run: python tiktok_animator/story_factory.py
+      - name: Verify final media
+        run: |
+          test -n "$(find tiktok_animator/output -maxdepth 1 -name '*.mp4' -print -quit)"
+          test -n "$(find tiktok_animator/output -maxdepth 1 -name '*.json' -print -quit)"
+          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 tiktok_animator/output/*.mp4
       - name: Publish directly to TikTok
         env:
           TT_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
         run: python tiktok_animator/publisher.py
-      - name: Upload generated MP4 backup
+      - name: Upload generated MP4 and manifest backup
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: animated-tiktok-story-${{ github.run_number }}
-          path: tiktok_animator/output/*.mp4
+          name: reference-style-tiktok-story-${{ github.run_number }}
+          path: |
+            tiktok_animator/output/*.mp4
+            tiktok_animator/output/*.json
           if-no-files-found: error
           retention-days: 7
