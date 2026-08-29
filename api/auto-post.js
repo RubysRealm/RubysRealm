@@ -1,8 +1,12 @@
 import { getBufferTikTokChannel, createBufferVideoPost } from '../lib/buffer.js';
 
-const VIDEO_URL='https://d2ol7oe51mr4n9.cloudfront.net/user_3IVucXuJl5D3y0NqtFPdYP7zZMV/f842b919-0fa6-4a61-ad2b-141f638dee30.mp4';
-const CAPTION='Your Life as a Motel Owner — Part 1 #storytime #storytok #aistory #rubysrealm';
 const BUFFER_ENDPOINT='https://api.buffer.com';
+const RELEASE_OWNER='RubysRealm';
+const RELEASE_REPO='RubysRealm';
+const REQUIRED_RENDERER='reference-narration-story-v2';
+const REQUIRED_GATE='reference-photographic-story-v2';
+const MIN_SECONDS=120;
+const MAX_SECONDS=540;
 
 async function gql(query,variables={}){
   const key=process.env.BUFFER_API_KEY;
@@ -15,25 +19,50 @@ async function gql(query,variables={}){
 }
 
 async function recentPosts(target){
-  const d=await gql(`query Posts($organizationId: OrganizationId!, $channelId: ChannelId!) { posts(first: 30,input:{organizationId:$organizationId,filter:{status:[scheduled,sent],channelIds:[$channelId]},sort:[{field:createdAt,direction:desc}]}) { edges { node { id status dueAt sentAt externalLink assets { source } } } } }`,{organizationId:target.organization.id,channelId:target.channel.id});
+  const d=await gql(`query Posts($organizationId: OrganizationId!, $channelId: ChannelId!) { posts(first: 40,input:{organizationId:$organizationId,filter:{status:[scheduled,sent],channelIds:[$channelId]},sort:[{field:createdAt,direction:desc}]}) { edges { node { id status dueAt sentAt externalLink assets { source } } } } }`,{organizationId:target.organization.id,channelId:target.channel.id});
   return (d?.posts?.edges||[]).map(e=>e.node);
+}
+
+function validateManifest(m){
+  if(!m?.qualityPassed) throw new Error('Blocked: v2 quality gate did not pass.');
+  if(m.renderer!==REQUIRED_RENDERER) throw new Error('Blocked: wrong renderer.');
+  if(m.qualityGate!==REQUIRED_GATE) throw new Error('Blocked: wrong quality gate.');
+  if(!m.checks || !Object.values(m.checks).every(Boolean)) throw new Error('Blocked: one or more v2 checks failed.');
+  const duration=Number(m.durationSeconds);
+  if(!Number.isFinite(duration) || duration<MIN_SECONDS || duration>MAX_SECONDS) throw new Error('Blocked: duration outside 2-9 minutes.');
+  if(Number(m.photoSourceRatio||0)<0.65) throw new Error('Blocked: insufficient legitimate photographic sourcing.');
+  if(Number(m.visualInsertCount||0)<8) throw new Error('Blocked: insufficient contextual visual support.');
+  if(Number(m.captionMaxWords||99)>4) throw new Error('Blocked: caption chunks are too large.');
+  if(!m.file || !String(m.file).endsWith('.mp4')) throw new Error('Blocked: invalid final media file.');
 }
 
 export default async function handler(req,res){
   if(req.method!=='GET') return res.status(405).json({ok:false,error:'Method not allowed'});
   try{
-    const head=await fetch(VIDEO_URL,{method:'HEAD',redirect:'follow'});
-    if(!head.ok) throw new Error(`Approved reference MP4 unavailable (${head.status}).`);
+    const tag=String(req.query?.tag||'').trim();
+    if(!/^reference-story-[0-9]+$/.test(tag)) throw new Error('A valid reference-story release tag is required.');
+    const base=`https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/releases/download/${encodeURIComponent(tag)}`;
+    const manifestUrl=`${base}/manifest.json`;
+    const mr=await fetch(manifestUrl,{redirect:'follow',cache:'no-store'});
+    if(!mr.ok) throw new Error(`Approved manifest unavailable (${mr.status}).`);
+    const manifest=await mr.json();
+    validateManifest(manifest);
+    const videoUrl=`${base}/${encodeURIComponent(manifest.file)}`;
+    const head=await fetch(videoUrl,{method:'HEAD',redirect:'follow',cache:'no-store'});
+    if(!head.ok) throw new Error(`Approved v2 MP4 unavailable (${head.status}).`);
+
     const target=await getBufferTikTokChannel();
     if(!target) throw new Error('No TikTok channel is connected in Buffer.');
     const existing=await recentPosts(target);
-    const duplicate=existing.find(p=>p?.assets?.some(a=>a?.source===VIDEO_URL));
-    if(duplicate) return res.status(200).json({ok:true,skipped:true,postId:duplicate.id,status:duplicate.status,externalLink:duplicate.externalLink||null});
+    const duplicate=existing.find(p=>p?.assets?.some(a=>a?.source===videoUrl));
+    if(duplicate) return res.status(200).json({ok:true,skipped:true,postId:duplicate.id,status:duplicate.status,externalLink:duplicate.externalLink||null,renderer:REQUIRED_RENDERER});
+
+    const caption=`${String(manifest.title||"Ruby's Realm Story")} ${String(manifest.part||'Part 1')} #storytime #storytok #aistory #rubysrealm`;
     const dueAt=new Date(Date.now()+90*1000).toISOString();
-    const post=await createBufferVideoPost({channelId:target.channel.id,caption:CAPTION,videoUrl:VIDEO_URL,dueAt});
-    return res.status(200).json({ok:true,postId:post.id,status:post.status,dueAt,videoUrl:VIDEO_URL,renderer:'reference-narration-story-v1',qualityPassed:true,durationSeconds:300.033});
+    const post=await createBufferVideoPost({channelId:target.channel.id,caption,videoUrl,dueAt});
+    return res.status(200).json({ok:true,postId:post.id,status:post.status,dueAt,videoUrl,renderer:REQUIRED_RENDERER,qualityPassed:true,durationSeconds:Number(manifest.durationSeconds),photoSourceRatio:Number(manifest.photoSourceRatio),visualInsertCount:Number(manifest.visualInsertCount)});
   }catch(e){
-    console.error('reference verification post failed',e);
+    console.error('reference v2 publish failed',e);
     return res.status(500).json({ok:false,error:e.message});
   }
 }
