@@ -4,7 +4,10 @@ import reference_quality_patch as patch
 import reference_semantic_v5 as semantic
 import reference_scheduler_v6 as scheduler
 import reference_target_v7 as target
+import reference_generated_v8 as generated
 from story_generator import generate_story
+
+generated.bind(target)
 
 # Bind the active renderer to the user's second reference example.
 engine.compose_frame=target.compose_frame
@@ -26,7 +29,7 @@ def set_context(title):
 
 patch.set_context=set_context
 
-# Fetch generated illustration first, then strict semantic public-domain fallback.
+# Generate reference-style story illustrations first; semantic photography remains only a fallback.
 def prepare_visuals(visuals,seed):
     return target.prepare_visuals(visuals,seed,semantic.fetch_photo)
 
@@ -44,8 +47,8 @@ def choose_story(seed):
         ai['source']='ai-gateway-original'
         patch.set_context(ai['title'])
         return ai
-    generated=generate_story(seed)
-    info={'title':generated['title'],'part':generated.get('part','Part 1'),'story':generated['story'],'story_id':generated['story_id'],'source':'procedural-original-v3'}
+    generated_story=generate_story(seed)
+    info={'title':generated_story['title'],'part':generated_story.get('part','Part 1'),'story':generated_story['story'],'story_id':generated_story['story_id'],'source':'procedural-original-v3'}
     patch.set_context(info['title'])
     return info
 
