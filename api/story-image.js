@@ -1,5 +1,6 @@
 import sharp from 'sharp';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { getVercelOidcToken } from '@vercel/oidc';
 
 const GITHUB_JWKS=createRemoteJWKSet(new URL('https://token.actions.githubusercontent.com/.well-known/jwks'));
 const AUDIENCE='rubys-realm-image-generator';
@@ -39,7 +40,10 @@ export default async function handler(req,res){
     if(!beat || beat.length>1400) throw new Error('A valid story beat is required.');
     if(!Number.isInteger(index) || index<0 || index>24) throw new Error('Invalid scene index.');
 
-    const gatewayToken=process.env.AI_GATEWAY_API_KEY||process.env.VERCEL_OIDC_TOKEN;
+    let gatewayToken=process.env.AI_GATEWAY_API_KEY||null;
+    if(!gatewayToken){
+      try{ gatewayToken=await getVercelOidcToken(); }catch{}
+    }
     if(!gatewayToken) throw new Error('Vercel AI Gateway authorization is unavailable.');
     const reserve=Number(process.env.AI_IMAGE_CREDIT_RESERVE||0.75);
     const balance=await gatewayCredits(gatewayToken);
