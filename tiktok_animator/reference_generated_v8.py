@@ -11,23 +11,27 @@ def _is_generated(source):
 
 
 def _scene_kind(text):
-    t=str(text or '').lower()
+    import re
+    t=re.sub(r'[^a-z0-9]+',' ',str(text or '').lower()).strip()
     groups=[
-        ('mountain',('mountain','lodge','cabin','snow','ridge','trail','forest')),
-        ('storage',('storage','auction','locker','warehouse','unit','box','crate')),
+        ('storage',('storage','auction','locker','warehouse','unit','box','crate','bay')),
         ('motel',('motel','hotel','room','lobby','keycard','front desk')),
-        ('vehicle',('car','truck','van','road','drive','parking','garage')),
-        ('money',('cash','money','wallet','payment','bank','safe','coin')),
-        ('phone',('phone','call','message','texted','screen','voicemail')),
+        ('document',('note','letter','paper','receipt','document','map','photo','photograph','survey','plan','filing','contract','record')),
+        ('phone',('phone','call','message','texted','screen','voicemail','monitor','camera','cctv')),
         ('door',('door','lock','key','hallway','entrance','gate')),
-        ('document',('note','letter','paper','receipt','document','map','photo')),
+        ('money',('cash','money','wallet','payment','bank','safe','coin')),
+        ('vehicle',('car','truck','van','road','drive','parking','garage','vehicle')),
+        ('mountain',('mountain','lodge','cabin','snow','ridge','trail','forest')),
         ('storm',('storm','rain','lightning','wind','dark cloud')),
         ('fire',('fire','smoke','burn','flame','alarm')),
-        ('police',('police','officer','siren','crime','investigator')),
+        ('police',('police','officer','siren','crime','investigator','deputy','law enforcement')),
     ]
+    padded=' '+t+' '
     for kind,words in groups:
-        if any(w in t for w in words):
-            return kind
+        for w in words:
+            phrase=' '+re.sub(r'[^a-z0-9]+',' ',w.lower()).strip()+' '
+            if phrase in padded:
+                return kind
     return 'mystery'
 
 
@@ -281,20 +285,69 @@ def bind(target):
 
     def select_visuals(scheduler,semantic,beats,duration):
         visuals=list(original_select(scheduler,semantic,beats,duration))
-        max_scenes=18
-        if len(visuals)<=max_scenes:
-            return visuals
-        positions=[]
-        for i in range(max_scenes):
-            idx=round(i*(len(visuals)-1)/(max_scenes-1))
-            if idx not in positions: positions.append(idx)
-        return [visuals[i] for i in positions]
+        visuals.sort(key=lambda v:float(v.get('start',0)))
+        # Preserve meaningful story beats while guaranteeing the existing <=24s change-cadence QC.
+        # Add the strongest unused beat near the midpoint of any oversized gap.
+        def candidate_for(lo,hi):
+            midpoint=(lo+hi)/2.0
+            choices=[]
+            for b in beats:
+                st=float(b.get('start',0))
+                if lo+5.0 <= st <= hi-5.0:
+                    text=str(b.get('text') or '').strip()
+                    if not text:
+                        continue
+                    score=float(b.get('score',0) or 0)
+                    choices.append((abs(st-midpoint),-score,st,b))
+            if not choices:
+                return None
+            return sorted(choices,key=lambda x:(x[0],x[1],x[2]))[0][3]
+
+        changed=True
+        while changed:
+            changed=False
+            visuals.sort(key=lambda v:float(v.get('start',0)))
+            starts=[float(v.get('start',0)) for v in visuals]
+            boundaries=list(zip(starts,starts[1:]))
+            for lo,hi in boundaries:
+                if hi-lo>24.0:
+                    b=candidate_for(lo,hi)
+                    if b is None:
+                        # Deterministic midpoint split only when there is no scored scheduler beat in-range;
+                        # carry the nearest narrated beat text so the illustration still matches current narration.
+                        nearest=min(beats,key=lambda x:abs(float(x.get('start',0))-(lo+hi)/2.0))
+                        st=(lo+hi)/2.0
+                        text=str(nearest.get('text') or target.CURRENT_TITLE)
+                        score=float(nearest.get('score',0) or 0)
+                    else:
+                        st=float(b.get('start',0)); text=str(b.get('text') or target.CURRENT_TITLE); score=float(b.get('score',0) or 0)
+                    visuals.append({'start':st,'end':min(float(duration),st+8.0),'duration':8.0,'query':semantic.semantic_query(text),'score':score,'beat_text':text})
+                    changed=True
+                    break
+
+        # Also prevent an oversized final hold by adding a late narrated beat when needed.
+        visuals.sort(key=lambda v:float(v.get('start',0)))
+        while visuals and float(duration)-float(visuals[-1].get('start',0))>24.0:
+            lo=float(visuals[-1].get('start',0)); hi=float(duration)
+            b=candidate_for(lo,hi)
+            if b is not None:
+                st=float(b.get('start',0)); text=str(b.get('text') or target.CURRENT_TITLE); score=float(b.get('score',0) or 0)
+            else:
+                st=min(float(duration)-6.0,lo+22.0)
+                nearest=min(beats,key=lambda x:abs(float(x.get('start',0))-st))
+                text=str(nearest.get('text') or target.CURRENT_TITLE); score=float(nearest.get('score',0) or 0)
+            visuals.append({'start':st,'end':min(float(duration),st+8.0),'duration':8.0,'query':semantic.semantic_query(text),'score':score,'beat_text':text})
+            visuals.sort(key=lambda v:float(v.get('start',0)))
+
+        # Keep all cadence-required scenes; the normal story length keeps this comfortably bounded.
+        return visuals
 
     def verify(video,cues,visuals,narration,source_count):
         actual,cov,gaps,ratio,checks,_passed=original_verify(video,cues,visuals,narration,source_count)
         sources=[v.get('source') or {} for v in visuals]
         generated=sum(1 for s in sources if _is_generated(s))
         generated_ratio=generated/max(1,len(visuals))
+        checks['story_visual_source_ok']=all(_is_generated(s) for s in sources) and len(visuals)>=10
         checks['generated_illustration_ratio_ok']=generated_ratio==1.0 and len(visuals)>=10
         checks['no_realistic_photo_fallback_ok']=all(_is_generated(s) for s in sources)
         target.base.STYLE['generated_illustration_ratio']=round(generated_ratio,4)
