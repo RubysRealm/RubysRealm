@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - 'tiktok_animator/**'
+      - 'api/auto-post.js'
       - '.github/workflows/tiktok-animated-story.yml'
   schedule:
     - cron: '0 14 * * *' # quality-first daily cycle; push still runs immediately
@@ -31,12 +32,13 @@ jobs:
           sudo apt-get install -y ffmpeg espeak-ng fonts-dejavu-core
       - name: Install renderer dependencies
         run: pip install -r tiktok_animator/requirements.txt
-      - name: Generate narration-driven reference-style story
+      - name: Generate photographic narration story v2
         env:
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-        run: python tiktok_animator/story_factory.py
-      - name: Verify quality manifest and final media
+          STORY_SEED: ${{ github.run_number }}
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          AI_STORY_MODEL: ${{ vars.AI_STORY_MODEL }}
+        run: python tiktok_animator/reference_story_v2.py
+      - name: Verify v2 quality manifest and final media
         run: |
           python - <<'PY'
           import json, pathlib, subprocess
@@ -44,12 +46,16 @@ jobs:
           videos=sorted(pathlib.Path('tiktok_animator/output').glob('*.mp4'))
           if not manifests or not videos: raise SystemExit('missing final output')
           data=json.loads(manifests[-1].read_text())
-          if not data.get('qualityPassed'): raise SystemExit('reference-style quality gate failed')
-          if data.get('renderer')!='reference-narration-story-v1': raise SystemExit('wrong renderer')
-          if data.get('qualityGate')!='reference-narration-clean-screen-v1': raise SystemExit('wrong quality gate')
-          if not all((data.get('checks') or {}).values()): raise SystemExit('one or more quality checks failed')
+          if not data.get('qualityPassed'): raise SystemExit('v2 reference quality gate failed')
+          if data.get('renderer')!='reference-narration-story-v2': raise SystemExit('wrong renderer')
+          if data.get('qualityGate')!='reference-photographic-story-v2': raise SystemExit('wrong quality gate')
+          checks=data.get('checks') or {}
+          if not checks or not all(checks.values()): raise SystemExit('one or more v2 quality checks failed')
+          if float(data.get('photoSourceRatio') or 0)<0.65: raise SystemExit('photographic source ratio too low')
+          if int(data.get('visualInsertCount') or 0)<8: raise SystemExit('not enough contextual visual inserts')
+          if int(data.get('captionMaxWords') or 99)>4: raise SystemExit('caption chunks too large')
           subprocess.run(['ffprobe','-v','error','-show_entries','format=duration','-of','default=nw=1:nk=1',str(videos[-1])],check=True)
-          print(json.dumps(data.get('checks',{}),indent=2))
+          print(json.dumps(checks,indent=2))
           PY
       - name: Create approved public release
         env:
@@ -61,28 +67,28 @@ jobs:
           MANIFEST="$(find tiktok_animator/output -maxdepth 1 -name '*.json' -print -quit)"
           cp "$MANIFEST" manifest.json
           gh release delete "$TAG" --yes --cleanup-tag >/dev/null 2>&1 || true
-          gh release create "$TAG" "$VIDEO" manifest.json --title "Ruby's Realm Reference Story ${GITHUB_RUN_NUMBER}" --notes "Quality-gated reference-narration render for automated TikTok publishing."
+          gh release create "$TAG" "$VIDEO" manifest.json --title "Ruby's Realm Reference Story V2 ${GITHUB_RUN_NUMBER}" --notes "Photographic, narration-driven, caption-synchronized quality-gated TikTok render."
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
       - name: Send approved release to connected TikTok channel
         run: |
           set -euo pipefail
           URL="https://rubys-realm.vercel.app/api/auto-post?tag=${RELEASE_TAG}"
           RESPONSE=''
-          for i in $(seq 1 18); do
+          for i in $(seq 1 24); do
             RESPONSE="$(curl -sS --max-time 90 "$URL" || true)"
-            if printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("ok") else 1)' 2>/dev/null; then
+            if printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("ok") and d.get("renderer")=="reference-narration-story-v2" else 1)' 2>/dev/null; then
               break
             fi
             sleep 10
           done
           printf '%s\n' "$RESPONSE"
-          printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); assert d.get("ok"), d; print("POST_ID="+str(d["postId"]))' >> "$GITHUB_ENV"
+          printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); assert d.get("ok"), d; assert d.get("renderer")=="reference-narration-story-v2", d; print("POST_ID="+str(d["postId"]))' >> "$GITHUB_ENV"
       - name: Confirm TikTok publish completion
         run: |
           set -euo pipefail
           STATUS_URL="https://rubys-realm.vercel.app/api/buffer-status?post_id=${POST_ID}"
           RESPONSE=''
-          for i in $(seq 1 36); do
+          for i in $(seq 1 42); do
             RESPONSE="$(curl -sS --max-time 60 "$STATUS_URL" || true)"
             STATE="$(printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); print(((d.get("post") or {}).get("status") or "").lower())' 2>/dev/null || true)"
             if [ "$STATE" = "sent" ]; then
@@ -101,7 +107,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: reference-style-tiktok-story-${{ github.run_number }}
+          name: reference-style-v2-tiktok-story-${{ github.run_number }}
           path: |
             tiktok_animator/output/*.mp4
             tiktok_animator/output/*.json
