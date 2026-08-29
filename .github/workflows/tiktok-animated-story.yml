@@ -20,7 +20,7 @@ concurrency:
 jobs:
   render-and-publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,35 +29,37 @@ jobs:
       - name: Install system tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg espeak-ng fonts-dejavu-core
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
       - name: Install renderer dependencies
         run: pip install -r tiktok_animator/requirements.txt
-      - name: Generate photographic narration story v3 with automatic QC retries
+      - name: Generate exact-target illustrated story with automatic QC retry
         env:
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
           AI_STORY_MODEL: ${{ vars.AI_STORY_MODEL }}
+          AI_IMAGE_MODEL: openai/gpt-image-2
+          AI_IMAGE_CREDIT_RESERVE: '0.75'
         run: |
           set +e
           PASSED=0
-          for ATTEMPT in 0 1 2 3; do
+          for ATTEMPT in 0 1; do
             rm -rf tiktok_animator/output tiktok_animator/tmp
             mkdir -p tiktok_animator/output tiktok_animator/tmp
             export STORY_SEED=$((GITHUB_RUN_ID + ATTEMPT * 104729))
-            echo "Reference render attempt $((ATTEMPT+1))/4 with seed ${STORY_SEED}"
+            echo "Reference-target render attempt $((ATTEMPT+1))/2 with seed ${STORY_SEED}"
             python tiktok_animator/reference_story_v3.py
             RC=$?
             if [ "$RC" -eq 0 ]; then
               PASSED=1
-              echo "Quality-approved render completed on attempt $((ATTEMPT+1))"
+              echo "Quality-approved target render completed on attempt $((ATTEMPT+1))"
               break
             fi
-            echo "Attempt $((ATTEMPT+1)) failed its render/QC gate; automatically regenerating with a fresh story seed and visual selection."
+            echo "Attempt $((ATTEMPT+1)) failed strict target QC; rebuilding with a fresh story seed and fresh visual selection."
           done
           if [ "$PASSED" -ne 1 ]; then
-            echo "All automatic render/QC attempts failed. Refusing to publish substandard media."
+            echo "Both strict target attempts failed. Refusing to publish substandard media."
             exit 1
           fi
-      - name: Verify v3 quality manifest and final media
+      - name: Verify exact-target manifest and final media
         run: |
           python - <<'PY'
           import json, pathlib, subprocess
@@ -65,18 +67,21 @@ jobs:
           videos=sorted(pathlib.Path('tiktok_animator/output').glob('*.mp4'))
           if not manifests or not videos: raise SystemExit('missing final output')
           data=json.loads(manifests[-1].read_text())
-          if not data.get('qualityPassed'): raise SystemExit('v3 reference quality gate failed')
-          if data.get('renderer')!='reference-narration-story-v2': raise SystemExit('wrong renderer')
-          if data.get('qualityGate')!='reference-photographic-story-v2': raise SystemExit('wrong quality gate')
+          if not data.get('qualityPassed'): raise SystemExit('strict reference target quality gate failed')
+          if data.get('renderer')!='reference-illustrated-story-v7': raise SystemExit('wrong renderer')
+          if data.get('qualityGate')!='reference-example-target-v7': raise SystemExit('wrong quality gate')
           if data.get('storySource') not in ('ai-gateway-original','procedural-original-v3','supplied'):
               raise SystemExit('story source is not approved')
           checks=data.get('checks') or {}
-          if not checks or not all(checks.values()): raise SystemExit('one or more v3 quality checks failed')
-          if float(data.get('photoSourceRatio') or 0)<0.65: raise SystemExit('photographic source ratio too low')
-          if int(data.get('visualInsertCount') or 0)<8: raise SystemExit('not enough contextual visual inserts')
-          if int(data.get('captionMaxWords') or 99)>4: raise SystemExit('caption chunks too large')
+          if not checks or not all(checks.values()): raise SystemExit('one or more strict target checks failed')
+          if float(data.get('visualCoverageRatio') or 0)<0.98: raise SystemExit('image does not continuously fill storytelling area')
+          if int(data.get('visualInsertCount') or 0)<10: raise SystemExit('not enough story-matched scene images')
+          if int(data.get('captionMaxWords') or 99)!=1: raise SystemExit('captions are not direct word-boundary cues')
+          style=data.get('style') or {}
+          if style.get('lower_panel')!='none': raise SystemExit('lower teal panel still enabled')
+          if style.get('caption_timing')!='direct-neural-word-boundaries': raise SystemExit('caption timing is not tied directly to narration')
           subprocess.run(['ffprobe','-v','error','-show_entries','format=duration','-of','default=nw=1:nk=1',str(videos[-1])],check=True)
-          print(json.dumps(checks,indent=2))
+          print(json.dumps({'checks':checks,'voice':style.get('voice_used'),'generatedIllustrationRatio':style.get('generated_illustration_ratio')},indent=2))
           PY
       - name: Create approved public release
         env:
@@ -88,26 +93,26 @@ jobs:
           MANIFEST="$(find tiktok_animator/output -maxdepth 1 -name '*.json' -print -quit)"
           cp "$MANIFEST" manifest.json
           gh release delete "$TAG" --yes --cleanup-tag >/dev/null 2>&1 || true
-          gh release create "$TAG" "$VIDEO" manifest.json --title "Ruby's Realm Reference Story V3 ${GITHUB_RUN_NUMBER}" --notes "Original-story, photographic, narration-driven, caption-synchronized quality-gated TikTok render."
+          gh release create "$TAG" "$VIDEO" manifest.json --title "Ruby's Realm Reference Target ${GITHUB_RUN_NUMBER}" --notes "Fresh original story with continuous story imagery, no lower teal panel, upgraded neural narration, and direct word-boundary captions."
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
       - name: Send approved release to connected TikTok channel
         run: |
           set -euo pipefail
           URL="https://rubys-realm.vercel.app/api/auto-post?tag=${RELEASE_TAG}"
           RESPONSE=''
-          for i in $(seq 1 24); do
+          for i in $(seq 1 30); do
             RESPONSE="$(curl -sS --max-time 90 "$URL" || true)"
-            if printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("ok") and d.get("renderer")=="reference-narration-story-v2" else 1)' 2>/dev/null; then break; fi
+            if printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("ok") and d.get("renderer")=="reference-illustrated-story-v7" else 1)' 2>/dev/null; then break; fi
             sleep 10
           done
           printf '%s\n' "$RESPONSE"
-          printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); assert d.get("ok"), d; assert d.get("renderer")=="reference-narration-story-v2", d; print("POST_ID="+str(d["postId"]))' >> "$GITHUB_ENV"
+          printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); assert d.get("ok"), d; assert d.get("renderer")=="reference-illustrated-story-v7", d; print("POST_ID="+str(d["postId"]))' >> "$GITHUB_ENV"
       - name: Confirm TikTok publish completion
         run: |
           set -euo pipefail
           STATUS_URL="https://rubys-realm.vercel.app/api/buffer-status?post_id=${POST_ID}"
           RESPONSE=''
-          for i in $(seq 1 42); do
+          for i in $(seq 1 48); do
             RESPONSE="$(curl -sS --max-time 60 "$STATUS_URL" || true)"
             STATE="$(printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); print(((d.get("post") or {}).get("status") or "").lower())' 2>/dev/null || true)"
             if [ "$STATE" = "sent" ]; then printf '%s\n' "$RESPONSE"; exit 0; fi
@@ -120,7 +125,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: reference-style-v3-tiktok-story-${{ github.run_number }}
+          name: reference-target-v7-tiktok-story-${{ github.run_number }}
           path: |
             tiktok_animator/output/*.mp4
             tiktok_animator/output/*.json
