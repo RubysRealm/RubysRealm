@@ -7,7 +7,7 @@ SERVICE_FAILURES=0
 
 
 def _is_generated(source):
-    return (source or {}).get('source_type') in ('ai-generated-illustration','procedural-generated-illustration')
+    return (source or {}).get('source_type') == 'ai-generated-illustration'
 
 
 def _scene_kind(text):
@@ -253,15 +253,9 @@ def bind(target):
             except Exception as e:
                 last_error=e
                 Path(dest).unlink(missing_ok=True)
-        try:
-            local=_procedural_cartoon(beat,seed,dest)
-            SERVICE_FAILURES=0
-            print('Using local no-cost 3D cartoon illustration for beat after gateway failure:',str(last_error)[:160])
-            return local
-        except Exception as local_error:
-            SERVICE_FAILURES += 1
-            print('Generated cartoon image unavailable for beat:',str(last_error)[:220],'local fallback:',str(local_error)[:220])
-            return None
+        SERVICE_FAILURES += 1
+        print('Generated premium cartoon image unavailable for beat:',str(last_error)[:300])
+        return None
 
     def prepare_visuals(visuals,seed,_semantic_fetch=None):
         valid=[]
