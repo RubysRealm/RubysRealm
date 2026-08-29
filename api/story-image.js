@@ -45,11 +45,11 @@ export default async function handler(req,res){
       try{ gatewayToken=await getVercelOidcToken(); }catch{}
     }
     if(!gatewayToken) throw new Error('Vercel AI Gateway authorization is unavailable.');
-    const reserve=Number(process.env.AI_IMAGE_CREDIT_RESERVE||0.75);
+    const reserve=Number(process.env.AI_IMAGE_CREDIT_RESERVE||0.05);
     const balance=await gatewayCredits(gatewayToken);
     if(balance<=reserve) return res.status(402).json({ok:false,error:'Existing AI Gateway credit reserve reached; no paid top-up will be attempted.',balance,reserve});
 
-    const model=process.env.AI_IMAGE_MODEL||'openai/gpt-image-2';
+    const model=process.env.AI_IMAGE_MODEL||'bfl/flux-2-klein-4b';
     const prompt=[
       'Create an unmistakably NON-PHOTOREALISTIC stylized 3D CARTOON story illustration for a vertical social storytelling video.',
       'The result must look like a polished animated-film still or modern 3D cartoon explainer frame, NOT a photograph and NOT realistic documentary imagery.',
