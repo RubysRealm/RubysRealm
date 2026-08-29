@@ -32,12 +32,31 @@ jobs:
           sudo apt-get install -y ffmpeg espeak-ng fonts-dejavu-core
       - name: Install renderer dependencies
         run: pip install -r tiktok_animator/requirements.txt
-      - name: Generate photographic narration story v3
+      - name: Generate photographic narration story v3 with automatic QC retries
         env:
-          STORY_SEED: ${{ github.run_id }}
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
           AI_STORY_MODEL: ${{ vars.AI_STORY_MODEL }}
-        run: python tiktok_animator/reference_story_v3.py
+        run: |
+          set +e
+          PASSED=0
+          for ATTEMPT in 0 1 2 3; do
+            rm -rf tiktok_animator/output tiktok_animator/tmp
+            mkdir -p tiktok_animator/output tiktok_animator/tmp
+            export STORY_SEED=$((GITHUB_RUN_ID + ATTEMPT * 104729))
+            echo "Reference render attempt $((ATTEMPT+1))/4 with seed ${STORY_SEED}"
+            python tiktok_animator/reference_story_v3.py
+            RC=$?
+            if [ "$RC" -eq 0 ]; then
+              PASSED=1
+              echo "Quality-approved render completed on attempt $((ATTEMPT+1))"
+              break
+            fi
+            echo "Attempt $((ATTEMPT+1)) failed its render/QC gate; automatically regenerating with a fresh story seed and visual selection."
+          done
+          if [ "$PASSED" -ne 1 ]; then
+            echo "All automatic render/QC attempts failed. Refusing to publish substandard media."
+            exit 1
+          fi
       - name: Verify v3 quality manifest and final media
         run: |
           python - <<'PY'
