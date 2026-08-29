@@ -7,6 +7,7 @@ const REQUIRED_RENDERER='reference-illustrated-story-v7';
 const REQUIRED_GATE='reference-example-target-v7';
 const MIN_SECONDS=120;
 const MAX_SECONDS=540;
+const MIN_GENERATED_ILLUSTRATION_RATIO=0.65;
 
 async function gql(query,variables={}){
   const key=process.env.BUFFER_API_KEY;
@@ -35,6 +36,7 @@ function validateManifest(m){
   if(Number(m.captionMaxWords||99)!==1) throw new Error('Blocked: captions are not exact one-word narration cues.');
   if(m?.style?.lower_panel!=='none') throw new Error('Blocked: teal lower panel is still enabled.');
   if(m?.style?.caption_timing!=='direct-neural-word-boundaries') throw new Error('Blocked: captions are not tied directly to narration word boundaries.');
+  if(Number(m?.style?.generated_illustration_ratio||0)<MIN_GENERATED_ILLUSTRATION_RATIO) throw new Error('Blocked: insufficient generated reference-style illustrations.');
   if(!m.file || !String(m.file).endsWith('.mp4')) throw new Error('Blocked: invalid final media file.');
 }
 
