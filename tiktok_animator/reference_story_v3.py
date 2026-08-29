@@ -1,10 +1,12 @@
 import os
 import reference_story_v2 as engine
 import reference_quality_patch as patch
+import reference_gap_fix as gapfix
 from story_generator import generate_story
 
+gapfix.bind(patch)
 engine.fetch_photo=patch.fetch_photo
-engine.select_visuals=patch.select_visuals
+engine.select_visuals=lambda beats,duration: gapfix.select_visuals(patch,beats,duration)
 engine.verify=patch.verify
 engine.visual_query=patch.contextual_visual_query
 
