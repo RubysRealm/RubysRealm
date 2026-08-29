@@ -6,31 +6,37 @@ from story_generator import generate_story
 engine.fetch_photo=patch.fetch_photo
 engine.select_visuals=patch.select_visuals
 engine.verify=patch.verify
+engine.visual_query=patch.contextual_visual_query
 
 
 def choose_story(seed):
     supplied=os.getenv('STORY_TEXT','').strip()
     if supplied:
-        return {
+        info={
             'title':os.getenv('STORY_TITLE',"Ruby's Realm Story").strip() or "Ruby's Realm Story",
             'part':os.getenv('STORY_PART','Part 1').strip() or 'Part 1',
             'story':supplied,
             'source':'supplied'
         }
+        patch.set_context(info['title'])
+        return info
 
     ai=engine.gateway_story(seed)
     if ai:
         ai['source']='ai-gateway-original'
+        patch.set_context(ai['title'])
         return ai
 
     generated=generate_story(seed)
-    return {
+    info={
         'title':generated['title'],
         'part':generated.get('part','Part 1'),
         'story':generated['story'],
         'story_id':generated['story_id'],
         'source':'procedural-original-v3'
     }
+    patch.set_context(info['title'])
+    return info
 
 engine.choose_story=choose_story
 
