@@ -8,7 +8,7 @@ on:
       - 'api/auto-post.js'
       - '.github/workflows/tiktok-animated-story.yml'
   schedule:
-    - cron: '0 14 * * *' # quality-first daily cycle; push still runs immediately
+    - cron: '0 14 * * *'
 
 permissions:
   contents: write
@@ -37,7 +37,7 @@ jobs:
           STORY_SEED: ${{ github.run_number }}
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
           AI_STORY_MODEL: ${{ vars.AI_STORY_MODEL }}
-        run: python tiktok_animator/reference_story_v2.py
+        run: python tiktok_animator/reference_story_v3.py
       - name: Verify v2 quality manifest and final media
         run: |
           python - <<'PY'
@@ -76,9 +76,7 @@ jobs:
           RESPONSE=''
           for i in $(seq 1 24); do
             RESPONSE="$(curl -sS --max-time 90 "$URL" || true)"
-            if printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("ok") and d.get("renderer")=="reference-narration-story-v2" else 1)' 2>/dev/null; then
-              break
-            fi
+            if printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("ok") and d.get("renderer")=="reference-narration-story-v2" else 1)' 2>/dev/null; then break; fi
             sleep 10
           done
           printf '%s\n' "$RESPONSE"
@@ -91,14 +89,8 @@ jobs:
           for i in $(seq 1 42); do
             RESPONSE="$(curl -sS --max-time 60 "$STATUS_URL" || true)"
             STATE="$(printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); print(((d.get("post") or {}).get("status") or "").lower())' 2>/dev/null || true)"
-            if [ "$STATE" = "sent" ]; then
-              printf '%s\n' "$RESPONSE"
-              exit 0
-            fi
-            if [ "$STATE" = "failed" ] || [ "$STATE" = "error" ]; then
-              printf '%s\n' "$RESPONSE"
-              exit 1
-            fi
+            if [ "$STATE" = "sent" ]; then printf '%s\n' "$RESPONSE"; exit 0; fi
+            if [ "$STATE" = "failed" ] || [ "$STATE" = "error" ]; then printf '%s\n' "$RESPONSE"; exit 1; fi
             sleep 10
           done
           printf '%s\n' "$RESPONSE"
