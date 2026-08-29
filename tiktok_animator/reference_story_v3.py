@@ -2,10 +2,14 @@ import os
 import reference_story_v2 as engine
 import reference_quality_patch as patch
 import reference_gap_fix as gapfix
-import reference_semantic_v4 as semantic
+import reference_semantic_v5 as semantic
 from story_generator import generate_story
 
 gapfix.bind(patch)
+engine.STYLE['visual_min_gap']=13.5
+engine.STYLE['visual_max_gap']=18.0
+engine.STYLE['visual_hold']=[5.8,7.6]
+engine.STYLE['visual_coverage']=[0.30,0.55]
 _original_context=patch.set_context
 
 def set_context(title):
@@ -13,6 +17,7 @@ def set_context(title):
     semantic.set_context(title)
 
 patch.set_context=set_context
+patch.contextual_visual_query=semantic.semantic_query
 engine.fetch_photo=semantic.fetch_photo
 engine.select_visuals=lambda beats,duration: gapfix.select_visuals(patch,beats,duration)
 _base_verify=patch.verify
