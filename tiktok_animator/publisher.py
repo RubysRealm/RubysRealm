@@ -4,8 +4,8 @@ import urllib.request
 
 ROOT='https://open.tiktokapis.com'
 OUT=Path('tiktok_animator/output')
-RENDERER='reference-narration-story-v1'
-GATE='reference-narration-clean-screen-v1'
+RENDERER='reference-narration-story-v2'
+GATE='reference-photographic-story-v2'
 
 def post(path,token,body):
     req=urllib.request.Request(ROOT+path,data=json.dumps(body).encode(),headers={'Authorization':'Bearer '+token,'Content-Type':'application/json; charset=UTF-8'},method='POST')
@@ -22,6 +22,7 @@ def approved_output():
     if manifest.get('renderer')!=RENDERER or manifest.get('qualityGate')!=GATE: raise RuntimeError('Wrong renderer or quality gate')
     checks=manifest.get('checks') or {}
     if not checks or not all(checks.values()): raise RuntimeError('One or more required quality checks failed')
+    if float(manifest.get('photoSourceRatio') or 0)<0.65: raise RuntimeError('Insufficient legitimate photographic visual coverage')
     video=OUT/manifest.get('file','')
     if not video.exists(): raise RuntimeError('Approved video file is missing')
     dur=float(manifest.get('durationSeconds') or 0)
@@ -34,7 +35,7 @@ def main():
     video,manifest=approved_output()
     creator=post('/v2/post/publish/creator_info/query/',token,{})
     privacy='PUBLIC_TO_EVERYONE' if 'PUBLIC_TO_EVERYONE' in (creator.get('privacy_level_options') or []) else 'SELF_ONLY'
-    title=str(manifest.get('title') or 'Ruby\'s Realm Story')
+    title=str(manifest.get('title') or "Ruby's Realm Story")
     caption=f"{title} {manifest.get('part','Part 1')} #storytime #storytok #aistory #rubysrealm"
     size=video.stat().st_size
     init=post('/v2/post/publish/video/init/',token,{'post_info':{'title':caption,'privacy_level':privacy,'disable_duet':False,'disable_comment':False,'disable_stitch':False,'video_cover_timestamp_ms':1000},'source_info':{'source':'FILE_UPLOAD','video_size':size,'chunk_size':size,'total_chunk_count':1}})
