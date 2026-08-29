@@ -4,7 +4,12 @@ from PIL import Image, ImageOps
 import reference_media as base
 
 base.STYLE['minimum_photo_source_ratio']=0.65
+base.STYLE['visual_min_gap']=11.5
+base.STYLE['visual_max_gap']=18.5
+base.STYLE['visual_hold']=[5.8,7.8]
+base.STYLE['visual_coverage']=[0.28,0.62]
 CURRENT_CONTEXT='story'
+USED_URLS=set()
 
 CURATED={
  'storage':['File:IndoorStorageUnit.jpg','File:EFTA00002250 - Stacks of cardboard boxes in a dimly lit storage room with a white door open.jpg'],
@@ -37,10 +42,11 @@ GENERIC={'building','room','file','files','man','woman','phone','sign','office',
 
 
 def set_context(title):
- global CURRENT_CONTEXT
+ global CURRENT_CONTEXT, USED_URLS
  t=re.sub(r'^your life (?:as|after buying|after)\s+(?:a|an|the)?\s*','',str(title).lower()).strip()
  toks=[x for x in re.findall(r'[a-z0-9]+',t) if x not in STOP]
  CURRENT_CONTEXT=' '.join(toks[:4]) or 'story setting'
+ USED_URLS=set()
 
 
 def _tokens(s):
@@ -56,7 +62,6 @@ def _kind(query):
 
 def contextual_visual_query(text):
  low=str(text).lower()
- # Preserve high-value concrete combinations instead of collapsing to one generic noun.
  priority=[]
  phrases=[
   ('security camera','security camera'),('filing cabinet','filing cabinet'),('key rack','key rack'),
@@ -65,18 +70,18 @@ def contextual_visual_query(text):
   ('ledger','ledger'),('deed','property deed'),('envelope','sealed envelope'),('corridor','corridor'),
   ('hallway','hallway'),('motel','motel'),('lodge','mountain lodge'),('cabin','cabin'),('warehouse','warehouse'),
   ('restaurant','restaurant'),('diner','diner'),('hospital','hospital'),('school','school'),('church','church'),
-  ('bridge','bridge'),('airport','airport'),('train','train'),('boat','boat'),('garage','garage')]
+  ('bridge','bridge'),('airport','airport'),('train','train'),('boat','boat'),('ferry','ferry terminal'),
+  ('garage','garage'),('river','river'),('map','map'),('receipt','receipt'),('document','documents'),
+  ('breaker','electrical panel'),('flashlight','flashlight'),('truck','truck'),('parking lot','parking lot')]
  for needle,label in phrases:
   if needle in low and label not in priority: priority.append(label)
  nouns=[]
  for t in re.findall(r'[a-z][a-z0-9-]+',low):
   if t in STOP or t in GENERIC or len(t)<4: continue
   if t not in nouns: nouns.append(t)
- context=CURRENT_CONTEXT
  parts=[]
- for x in (context.split()+priority+nouns):
+ for x in (CURRENT_CONTEXT.split()+priority+nouns):
   if x not in parts: parts.append(x)
- # Keep queries specific enough for Commons while not becoming a sentence.
  return ' '.join(parts[:7]) or CURRENT_CONTEXT
 
 
@@ -99,10 +104,18 @@ def _relevance(query,c):
  hay=(str(c.get('title',''))+' '+str(c.get('description',''))).lower()
  if phrase and phrase in hay: score+=12
  if kind in ('storage','camera','fence','sheriff','sedan','key') and not text&SYN[kind]: return -99
- # Reject the nonsense generic matches that made the previous result look random.
  if len(q)<=2 and not (text&q): return -99
  if q & GENERIC and not ((q-GENERIC)&text) and not (ctx&text): return -99
  return score
+
+
+def _add_candidates(pool,variant,query,minimum):
+ try:
+  for c in base.wiki_candidates(variant):
+   c.setdefault('description','')
+   if _relevance(query,c)>=minimum: pool.append(c)
+ except Exception:
+  pass
 
 
 def fetch_photo(query,seed,dest):
@@ -113,77 +126,113 @@ def fetch_photo(query,seed,dest):
    c=_exact_file(title)
    if c and _relevance(query,c)>=8: pool.append(c)
   except Exception: pass
+
  variants=[query]
- if CURRENT_CONTEXT and CURRENT_CONTEXT not in query: variants.insert(0,f'{CURRENT_CONTEXT} {query}')
- if kind=='storage': variants += [f'{CURRENT_CONTEXT} storage unit', 'self storage unit interior']
- elif kind=='camera': variants += [f'{CURRENT_CONTEXT} security camera','security camera CCTV']
- elif kind=='fence': variants += [f'{CURRENT_CONTEXT} fence','chain link fence']
- elif kind=='filing': variants += [f'{CURRENT_CONTEXT} filing cabinet records','filing cabinets records']
- elif kind=='workbench': variants += [f'{CURRENT_CONTEXT} workbench','workbench workshop']
- elif kind=='key': variants += [f'{CURRENT_CONTEXT} key','metal key lock']
- elif kind=='deed': variants += [f'{CURRENT_CONTEXT} property document','property deed document']
- for variant in variants[:5]:
-  try:
-   for c in base.wiki_candidates(variant):
-    c.setdefault('description','')
-    if _relevance(query,c)>=10: pool.append(c)
-  except Exception: pass
+ if kind:
+  terms=sorted(SYN[kind],key=len,reverse=True)
+  variants += [f'{CURRENT_CONTEXT} {terms[0]}',terms[0]]
+ variants += [CURRENT_CONTEXT,f'{CURRENT_CONTEXT} exterior',f'{CURRENT_CONTEXT} interior']
+ seen=[]
+ for variant in variants:
+  variant=' '.join(str(variant).split())
+  if variant and variant not in seen: seen.append(variant)
+ for variant in seen[:7]:
+  minimum=10 if variant not in (CURRENT_CONTEXT,f'{CURRENT_CONTEXT} exterior',f'{CURRENT_CONTEXT} interior') else 7
+  _add_candidates(pool,variant,query,minimum)
+
  uniq={str(c.get('url')):c for c in pool if c.get('url')}
- ranked=sorted(uniq.values(),key=lambda c:(-_relevance(query,c),abs((c['width']/max(1,c['height']))-1.3),-min(c['width'],c['height'])))
- if not ranked: return {'query':query,'source_type':'none','error':'No semantically adequate public-domain/CC0 image found'}
- pick=ranked[seed%min(2,len(ranked))]; raw=Path(dest).with_suffix('.download')
+ ranked=sorted(uniq.values(),key=lambda c:(str(c.get('url')) in USED_URLS,-_relevance(query,c),abs((c['width']/max(1,c['height']))-1.3),-min(c['width'],c['height'])))
+ if not ranked:
+  return {'query':query,'source_type':'none','error':'No semantically adequate public-domain/CC0 image found'}
+ pick=ranked[seed%min(4,len(ranked))]
+ raw=Path(dest).with_suffix('.download')
  try:
   base.download(pick['url'],raw)
   with Image.open(raw) as src:
    src=ImageOps.exif_transpose(src).convert('RGB')
    if src.width<600 or src.height<400: raise RuntimeError('image too small')
    src.save(dest,quality=94)
-  raw.unlink(missing_ok=True); pick['query']=query; pick['source_type']='wikimedia-public-domain'; pick['relevanceScore']=_relevance(query,pick); return pick
+  raw.unlink(missing_ok=True)
+  USED_URLS.add(str(pick['url']))
+  pick['query']=query; pick['source_type']='wikimedia-public-domain'; pick['relevanceScore']=_relevance(query,pick)
+  return pick
  except Exception as e:
-  raw.unlink(missing_ok=True); return {'query':query,'source_type':'none','error':str(e)[:500]}
+  raw.unlink(missing_ok=True)
+  return {'query':query,'source_type':'none','error':str(e)[:500]}
 
 
-def _entry(b,duration,hold_max=8.2):
- hold=min(hold_max,max(5.8,b['end']-b['start']+1.2),max(0,duration-b['start']-.15))
+def _entry(b,duration,hold_max=7.6):
+ hold=min(hold_max,max(5.8,b['end']-b['start']+0.9),max(0,duration-b['start']-.15))
  if hold<3.2: return None
  return {'start':b['start'],'end':b['start']+hold,'duration':hold,'query':contextual_visual_query(b['text']),'score':b.get('score',0),'beat_text':b['text']}
 
 
 def select_visuals(beats,duration):
  if not beats: return []
- selected=[]; last=-999
+ selected=[]; last=-999.0
  for i,b in enumerate(beats):
   gap=b['start']-last
-  if i==0 or (gap>=7.0 and b.get('score',0)>=4) or gap>=13.5:
-   v=_entry(b,duration,8.3)
-   if v: selected.append(v); last=b['start']
- # Repeatedly fill the largest start-to-start gap until none exceed the target.
- for _ in range(24):
+  should=(i==0) or (gap>=11.5 and b.get('score',0)>=4) or gap>=17.0
+  if not should: continue
+  v=_entry(b,duration,7.6)
+  if v:
+   selected.append(v); last=b['start']
+
+ for _ in range(18):
   selected.sort(key=lambda v:v['start'])
   starts=[v['start'] for v in selected]
   spans=[]
-  if starts and starts[0]>15.5: spans.append((starts[0],0.0,starts[0]))
+  if starts and starts[0]>18.5: spans.append((starts[0],0.0,starts[0]))
   for a,z in zip(starts,starts[1:]): spans.append((z-a,a,z))
-  if starts and duration-starts[-1]>17.0: spans.append((duration-starts[-1],starts[-1],duration))
+  if starts and duration-starts[-1]>18.5: spans.append((duration-starts[-1],starts[-1],duration))
   if not spans: break
   gap,a,z=max(spans)
-  if gap<=16.8: break
+  if gap<=18.5: break
   midpoint=(a+z)/2
-  candidates=[b for b in beats if a+4.8<=b['start']<=z-3.0 and all(abs(b['start']-v['start'])>=5.2 for v in selected)]
+  candidates=[b for b in beats if a+5.0<=b['start']<=z-3.5 and all(abs(b['start']-v['start'])>=9.5 for v in selected)]
   if not candidates: break
   b=max(candidates,key=lambda x:(x.get('score',0),-abs(x['start']-midpoint)))
-  v=_entry(b,duration,8.0)
+  v=_entry(b,duration,7.2)
   if not v: break
   selected.append(v)
+
  selected.sort(key=lambda v:v['start'])
  clean=[]
  for v in selected:
-  if clean and v['start']<clean[-1]['start']+5.0: continue
+  if clean and v['start']<clean[-1]['end']+0.45: continue
   clean.append(v)
- return clean[:36]
+ max_visuals=max(12,min(24,int(duration/13.5)+1))
+ return clean[:max_visuals]
+
+
+def _union_coverage(visuals):
+ if not visuals: return 0.0
+ spans=sorted((float(v['start']),float(v['end'])) for v in visuals)
+ total=0.0; a,z=spans[0]
+ for x,y in spans[1:]:
+  if x<=z: z=max(z,y)
+  else: total+=max(0,z-a); a,z=x,y
+ total+=max(0,z-a)
+ return total
 
 
 def verify(video,cues,visuals,narration,source_count):
- actual=base.media_duration(video); coverage=sum(v['duration'] for v in visuals)/max(1,actual); starts=[v['start'] for v in visuals]; gaps=[b-a for a,b in zip(starts,starts[1:])]; source_ratio=source_count/max(1,len(visuals)); bad=sum(1 for c in cues if c.get('bad_ending'))/max(1,len(cues))
- checks={'duration_in_range':120<=actual<=540,'caption_density_ok':len(cues)>=max(90,int(actual*.82)),'caption_word_limit_ok':max((c['words'] for c in cues),default=0)<=4,'caption_natural_boundary_ok':bad<=.08,'visual_insert_count_ok':len(visuals)>=max(8,int(actual/28)),'visual_coverage_ok':.28<=coverage<=.72,'visual_max_gap_ok':not gaps or max(gaps)<=17.2,'photo_source_ratio_ok':source_ratio>=.65,'no_primitive_placeholder_art':True,'audio_video_sync_ok':abs(actual-narration)<=2}
+ actual=base.media_duration(video)
+ coverage=_union_coverage(visuals)/max(1,actual)
+ starts=[v['start'] for v in visuals]
+ gaps=[b-a for a,b in zip(starts,starts[1:])]
+ source_ratio=source_count/max(1,len(visuals))
+ bad=sum(1 for c in cues if c.get('bad_ending'))/max(1,len(cues))
+ checks={
+  'duration_in_range':120<=actual<=540,
+  'caption_density_ok':len(cues)>=max(90,int(actual*.82)),
+  'caption_word_limit_ok':max((c['words'] for c in cues),default=0)<=4,
+  'caption_natural_boundary_ok':bad<=.08,
+  'visual_insert_count_ok':len(visuals)>=max(8,int(actual/35)),
+  'visual_coverage_ok':.28<=coverage<=.62,
+  'visual_max_gap_ok':not gaps or max(gaps)<=19.0,
+  'photo_source_ratio_ok':source_ratio>=.65,
+  'no_primitive_placeholder_art':True,
+  'audio_video_sync_ok':abs(actual-narration)<=2
+ }
  return actual,coverage,gaps,source_ratio,checks,all(checks.values())
