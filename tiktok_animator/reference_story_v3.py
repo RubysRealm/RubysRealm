@@ -2,13 +2,22 @@ import os
 import reference_story_v2 as engine
 import reference_quality_patch as patch
 import reference_gap_fix as gapfix
+import reference_semantic_v4 as semantic
 from story_generator import generate_story
 
 gapfix.bind(patch)
-engine.fetch_photo=patch.fetch_photo
+_original_context=patch.set_context
+
+def set_context(title):
+    _original_context(title)
+    semantic.set_context(title)
+
+patch.set_context=set_context
+engine.fetch_photo=semantic.fetch_photo
 engine.select_visuals=lambda beats,duration: gapfix.select_visuals(patch,beats,duration)
-engine.verify=patch.verify
-engine.visual_query=patch.contextual_visual_query
+_base_verify=patch.verify
+engine.verify=lambda video,cues,visuals,narration,source_count: semantic.verify(_base_verify,video,cues,visuals,narration,source_count)
+engine.visual_query=semantic.semantic_query
 
 
 def choose_story(seed):
