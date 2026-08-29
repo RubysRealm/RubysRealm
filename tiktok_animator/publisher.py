@@ -55,3 +55,5 @@ if __name__=='__main__':
     try: main()
     except Exception as e:
         print(e,file=sys.stderr); sys.exit(1)
+
+# Production trigger marker: 2026-08-29 10:20 ET
