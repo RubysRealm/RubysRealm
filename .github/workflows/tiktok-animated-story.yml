@@ -32,13 +32,13 @@ jobs:
           sudo apt-get install -y ffmpeg espeak-ng fonts-dejavu-core
       - name: Install renderer dependencies
         run: pip install -r tiktok_animator/requirements.txt
-      - name: Generate photographic narration story v2
+      - name: Generate photographic narration story v3
         env:
-          STORY_SEED: ${{ github.run_number }}
+          STORY_SEED: ${{ github.run_id }}
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
           AI_STORY_MODEL: ${{ vars.AI_STORY_MODEL }}
         run: python tiktok_animator/reference_story_v3.py
-      - name: Verify v2 quality manifest and final media
+      - name: Verify v3 quality manifest and final media
         run: |
           python - <<'PY'
           import json, pathlib, subprocess
@@ -46,11 +46,13 @@ jobs:
           videos=sorted(pathlib.Path('tiktok_animator/output').glob('*.mp4'))
           if not manifests or not videos: raise SystemExit('missing final output')
           data=json.loads(manifests[-1].read_text())
-          if not data.get('qualityPassed'): raise SystemExit('v2 reference quality gate failed')
+          if not data.get('qualityPassed'): raise SystemExit('v3 reference quality gate failed')
           if data.get('renderer')!='reference-narration-story-v2': raise SystemExit('wrong renderer')
           if data.get('qualityGate')!='reference-photographic-story-v2': raise SystemExit('wrong quality gate')
+          if data.get('storySource') not in ('ai-gateway-original','procedural-original-v3','supplied'):
+              raise SystemExit('story source is not approved')
           checks=data.get('checks') or {}
-          if not checks or not all(checks.values()): raise SystemExit('one or more v2 quality checks failed')
+          if not checks or not all(checks.values()): raise SystemExit('one or more v3 quality checks failed')
           if float(data.get('photoSourceRatio') or 0)<0.65: raise SystemExit('photographic source ratio too low')
           if int(data.get('visualInsertCount') or 0)<8: raise SystemExit('not enough contextual visual inserts')
           if int(data.get('captionMaxWords') or 99)>4: raise SystemExit('caption chunks too large')
@@ -67,7 +69,7 @@ jobs:
           MANIFEST="$(find tiktok_animator/output -maxdepth 1 -name '*.json' -print -quit)"
           cp "$MANIFEST" manifest.json
           gh release delete "$TAG" --yes --cleanup-tag >/dev/null 2>&1 || true
-          gh release create "$TAG" "$VIDEO" manifest.json --title "Ruby's Realm Reference Story V2 ${GITHUB_RUN_NUMBER}" --notes "Photographic, narration-driven, caption-synchronized quality-gated TikTok render."
+          gh release create "$TAG" "$VIDEO" manifest.json --title "Ruby's Realm Reference Story V3 ${GITHUB_RUN_NUMBER}" --notes "Original-story, photographic, narration-driven, caption-synchronized quality-gated TikTok render."
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
       - name: Send approved release to connected TikTok channel
         run: |
@@ -99,7 +101,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: reference-style-v2-tiktok-story-${{ github.run_number }}
+          name: reference-style-v3-tiktok-story-${{ github.run_number }}
           path: |
             tiktok_animator/output/*.mp4
             tiktok_animator/output/*.json
