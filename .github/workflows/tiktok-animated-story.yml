@@ -69,7 +69,7 @@ jobs:
             mkdir -p tiktok_animator/output tiktok_animator/tmp
             export STORY_SEED=$((GITHUB_RUN_ID + ATTEMPT * 104729))
             echo "Reference-target render attempt $((ATTEMPT+1))/2 with seed ${STORY_SEED}"
-            python tiktok_animator/reference_story_v3.py
+            ALLOW_REMOTE_IMAGE_GENERATION=1 python tiktok_animator/reference_story_v3.py
             RC=$?
             if [ "$RC" -eq 0 ]; then
               PASSED=1
