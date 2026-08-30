@@ -10,7 +10,7 @@ PREGENERATED_PREMIUM_SCENES=["https://dnznrvs05pmza.cloudfront.net/gemini/gemini
 
 
 def _is_generated(source):
-    return (source or {}).get('source_type') == 'ai-generated-illustration'
+    return (source or {}).get('source_type') in ('ai-generated-illustration','procedural-generated-illustration')
 
 
 def _scene_kind(text):
@@ -225,13 +225,18 @@ def bind(target):
 
     def ai_image(beat,seed,dest):
         global SERVICE_FAILURES
+        # Production default is the local deterministic cartoon renderer: zero API spend,
+        # no recycled media, and one fresh beat-matched illustration per scene.
+        # Remote image generation is opt-in only and remains behind the existing credit reserve.
+        if str(os.getenv('ALLOW_REMOTE_IMAGE_GENERATION','0')).strip().lower() not in ('1','true','yes'):
+            return _procedural_cartoon(beat,seed,dest)
         direct=original_ai(beat,seed,dest)
         if direct:
             return direct
         service=str(os.getenv('V7_IMAGE_SERVICE_URL','')).strip()
         token=str(os.getenv('GITHUB_OIDC_TOKEN','')).strip()
         if not service or not token:
-            return None
+            return _procedural_cartoon(beat,seed,dest)
         body=json.dumps({'title':target.CURRENT_TITLE,'beat':str(beat)[:1400],'index':int(seed)%25}).encode()
         last_error=None
         for _attempt in range(2):
@@ -257,8 +262,8 @@ def bind(target):
                 last_error=e
                 Path(dest).unlink(missing_ok=True)
         SERVICE_FAILURES += 1
-        print('Reference cartoon generation unavailable for beat; fail closed:',str(last_error)[:300])
-        return None
+        print('Remote cartoon generation unavailable; using local no-cost renderer:',str(last_error)[:300])
+        return _procedural_cartoon(beat,seed,dest)
 
     def prepare_visuals(visuals,seed,_semantic_fetch=None):
         valid=[]
