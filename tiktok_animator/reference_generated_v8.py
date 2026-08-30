@@ -10,7 +10,7 @@ PREGENERATED_PREMIUM_SCENES=["https://dnznrvs05pmza.cloudfront.net/gemini/gemini
 
 
 def _is_generated(source):
-    return (source or {}).get('source_type') in ('ai-generated-illustration','procedural-generated-illustration')
+    return (source or {}).get('source_type') == 'ai-generated-illustration'
 
 
 def _scene_kind(text):
@@ -225,18 +225,16 @@ def bind(target):
 
     def ai_image(beat,seed,dest):
         global SERVICE_FAILURES
-        # Production default is the local deterministic cartoon renderer: zero API spend,
-        # no recycled media, and one fresh beat-matched illustration per scene.
-        # Remote image generation is opt-in only and remains behind the existing credit reserve.
-        if str(os.getenv('ALLOW_REMOTE_IMAGE_GENERATION','0')).strip().lower() not in ('1','true','yes'):
-            return _procedural_cartoon(beat,seed,dest)
+        # The procedural renderer is intentionally NOT production-approved: its clip-art look
+        # does not match the supplied Hotel Owner reference. Production must use a genuinely
+        # generated story illustration and fail closed when zero-cost generation is unavailable.
         direct=original_ai(beat,seed,dest)
         if direct:
             return direct
         service=str(os.getenv('V7_IMAGE_SERVICE_URL','')).strip()
         token=str(os.getenv('GITHUB_OIDC_TOKEN','')).strip()
         if not service or not token:
-            return _procedural_cartoon(beat,seed,dest)
+            return None
         body=json.dumps({'title':target.CURRENT_TITLE,'beat':str(beat)[:1400],'index':int(seed)%25}).encode()
         last_error=None
         for _attempt in range(2):
@@ -262,8 +260,8 @@ def bind(target):
                 last_error=e
                 Path(dest).unlink(missing_ok=True)
         SERVICE_FAILURES += 1
-        print('Remote cartoon generation unavailable; using local no-cost renderer:',str(last_error)[:300])
-        return _procedural_cartoon(beat,seed,dest)
+        print('Reference-grade cartoon generation unavailable; fail closed:',str(last_error)[:300])
+        return None
 
     def prepare_visuals(visuals,seed,_semantic_fetch=None):
         valid=[]
@@ -352,6 +350,7 @@ def bind(target):
         checks['story_visual_source_ok']=all(_is_generated(s) for s in sources) and len(visuals)>=18
         checks['generated_illustration_ratio_ok']=generated_ratio==1.0 and len(visuals)>=18
         checks['no_realistic_photo_fallback_ok']=all(_is_generated(s) for s in sources)
+        checks['no_procedural_clipart_ok']=all((s or {}).get('source_type') != 'procedural-generated-illustration' for s in sources)
         target.base.STYLE['generated_illustration_ratio']=round(generated_ratio,4)
         target.base.STYLE['visual_source_policy']='generated-cartoon-only'
         target.base.STYLE['photographic_fallback']='disabled'
