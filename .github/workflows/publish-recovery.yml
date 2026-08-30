@@ -1,6 +1,7 @@
 name: Publish approved recovery release
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - '.github/workflows/publish-recovery.yml'
@@ -12,6 +13,7 @@ concurrency:
 
 jobs:
   publish-approved-release:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
