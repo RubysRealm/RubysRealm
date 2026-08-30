@@ -5,9 +5,11 @@ name: Legacy Ruby's Realm Story Renderer (Disabled)
 
 on:
   workflow_dispatch:
+  workflow_dispatch:
 
 jobs:
   blocked:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - name: Block obsolete renderer

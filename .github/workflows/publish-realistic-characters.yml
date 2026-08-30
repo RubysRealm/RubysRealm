@@ -1,6 +1,7 @@
 name: Publish Realistic Character Assets
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
@@ -11,6 +12,7 @@ permissions:
 
 jobs:
   publish:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
