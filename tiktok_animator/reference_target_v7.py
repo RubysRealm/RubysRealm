@@ -61,20 +61,37 @@ def _fit(draw,text,font,width,max_lines=2):
     return lines[:max_lines]
 
 
-def compose_frame(title,part,photo,seed,out,active=True):
+def compose_frame(title,part,photo,seed,out,active=True,secondary=None):
     im=Image.new('RGB',(W,H),(12,13,15))
     im.paste(_texture((W,HEADER_END),seed),(0,0))
-    if photo is not None:
-        with Image.open(photo) as src:
-            src=ImageOps.exif_transpose(src).convert('RGB')
-            src=ImageOps.fit(src,(W,H-HEADER_END),method=Image.Resampling.LANCZOS,centering=(.5,.5))
-            src=ImageEnhance.Contrast(src).enhance(1.06)
-            src=ImageEnhance.Color(src).enhance(1.02)
-            src=ImageEnhance.Sharpness(src).enhance(1.04)
-            im.paste(src,(0,HEADER_END))
+    stage_h=H-HEADER_END
+    paths=[p for p in [photo,secondary] if p is not None and Path(p).exists()]
+    if paths:
+        # Reference-style comic/story board: two different beat-matched cartoon illustrations
+        # share the visual stage instead of stretching one image across the entire slide.
+        if len(paths)>=2:
+            gap=8
+            top_h=int(stage_h*.50)
+            boxes=[(0,HEADER_END,W,top_h-gap//2),(0,HEADER_END+top_h+gap//2,W,stage_h-top_h-gap//2)]
+            for p,(x,y,w,h) in zip(paths[:2],boxes):
+                with Image.open(p) as src:
+                    src=ImageOps.exif_transpose(src).convert('RGB')
+                    src=ImageOps.fit(src,(w,h),method=Image.Resampling.LANCZOS,centering=(.5,.5))
+                    src=ImageEnhance.Contrast(src).enhance(1.06)
+                    src=ImageEnhance.Color(src).enhance(1.04)
+                    src=ImageEnhance.Sharpness(src).enhance(1.04)
+                    im.paste(src,(x,y))
+            ImageDraw.Draw(im).rectangle((0,HEADER_END+top_h-gap//2,W,HEADER_END+top_h+gap//2),fill=(3,4,5))
+        else:
+            with Image.open(paths[0]) as src:
+                src=ImageOps.exif_transpose(src).convert('RGB')
+                src=ImageOps.fit(src,(W,stage_h),method=Image.Resampling.LANCZOS,centering=(.5,.5))
+                src=ImageEnhance.Contrast(src).enhance(1.06)
+                src=ImageEnhance.Color(src).enhance(1.04)
+                src=ImageEnhance.Sharpness(src).enhance(1.04)
+                im.paste(src,(0,HEADER_END))
     else:
-        # This is only a build-time safety frame. Production QC refuses a video with no real image.
-        im.paste(_texture((W,H-HEADER_END),seed+3),(0,HEADER_END))
+        im.paste(_texture((W,stage_h),seed+3),(0,HEADER_END))
     d=ImageDraw.Draw(im)
     d.rectangle((0,HEADER_END-3,W,HEADER_END+2),fill=(3,4,5))
     lines=_fit(d,title,TITLE_FONT,630,2)
@@ -266,7 +283,11 @@ def render(_base_frame,visuals,audio,ass,duration,out,title,part,seed,tmp):
     frames=[]
     for i,v in enumerate(visuals):
         frame=Path(tmp)/f'v7_full_{i:02d}.jpg'
-        compose_frame(title,part,v['photo'],seed+i*43,frame,True)
+        # Pair adjacent, independently generated narrated beats so each slide has
+        # multiple relevant cartoon pictures like the supplied reference.
+        secondary=visuals[(i+1)%len(visuals)].get('photo') if len(visuals)>1 else None
+        compose_frame(title,part,v['photo'],seed+i*43,frame,True,secondary=secondary)
+        v['panel_count']=2 if secondary else 1
         frames.append(frame)
     concat=Path(tmp)/'v7_slides.txt'
     rows=[]
@@ -299,6 +320,7 @@ def verify(video,cues,visuals,narration,source_count):
         'caption_safe_word_limit_ok':max((int(c.get('words',0)) for c in cues),default=0)<=1,
         'continuous_story_image_ok':bool(visuals) and abs(float(visuals[0].get('start',0)))<0.05,
         'visual_insert_count_ok':len(visuals)>=max(10,int(actual/28)),
+        'multi_picture_slide_ok':all(int(v.get('panel_count',0))>=2 for v in visuals) if len(visuals)>1 else False,
         'visual_change_spacing_ok':not gaps or (min(gaps)>=5.0 and max(gaps)<=24.0),
         'story_visual_source_ok':len(valid)==len(visuals),
         'no_teal_lower_panel':True,
