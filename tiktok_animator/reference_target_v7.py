@@ -62,41 +62,21 @@ def _fit(draw,text,font,width,max_lines=2):
 
 
 def compose_frame(title,part,photo,seed,out,active=True,secondary=None,tertiary=None,quaternary=None):
+    # Reference target: persistent title header + ONE full-width story illustration.
+    # Supporting illustrations change only at meaningful narrated beats; never a collage.
     im=Image.new('RGB',(W,H),(12,13,15))
     im.paste(_texture((W,HEADER_END),seed),(0,0))
     stage_h=H-HEADER_END
-    paths=[p for p in [photo,secondary,tertiary,quaternary] if p is not None and Path(p).exists()]
-    if not paths:
-        im.paste(_texture((W,stage_h),seed+3),(0,HEADER_END))
+    if photo is not None and Path(photo).exists():
+        with Image.open(photo) as src:
+            src=ImageOps.exif_transpose(src).convert('RGB')
+            src=ImageOps.fit(src,(W,stage_h),method=Image.Resampling.LANCZOS,centering=(.5,.5))
+            src=ImageEnhance.Contrast(src).enhance(1.05)
+            src=ImageEnhance.Color(src).enhance(1.04)
+            src=ImageEnhance.Sharpness(src).enhance(1.04)
+            im.paste(src,(0,HEADER_END))
     else:
-        gap=8
-        if len(paths)>=4:
-            hero_w=int(W*.64)
-            small_w=W-hero_w-gap
-            small_h=(stage_h-2*gap)//3
-            boxes=[(0,HEADER_END,hero_w,stage_h),
-                   (hero_w+gap,HEADER_END,small_w,small_h),
-                   (hero_w+gap,HEADER_END+small_h+gap,small_w,small_h),
-                   (hero_w+gap,HEADER_END+2*(small_h+gap),small_w,stage_h-2*(small_h+gap))]
-        elif len(paths)==3:
-            hero_h=int(stage_h*.58)
-            lower_h=stage_h-hero_h-gap
-            boxes=[(0,HEADER_END,W,hero_h),
-                   (0,HEADER_END+hero_h+gap,(W-gap)//2,lower_h),
-                   ((W+gap)//2,HEADER_END+hero_h+gap,(W-gap)//2,lower_h)]
-        else:
-            boxes=[(0,HEADER_END,(W-gap)//2,stage_h),((W+gap)//2,HEADER_END,(W-gap)//2,stage_h)]
-        for p,(x,y,w,h) in zip(paths,boxes):
-            with Image.open(p) as src:
-                src=ImageOps.exif_transpose(src).convert('RGB')
-                src=ImageOps.fit(src,(int(w),int(h)),method=Image.Resampling.LANCZOS,centering=(.5,.5))
-                src=ImageEnhance.Contrast(src).enhance(1.07)
-                src=ImageEnhance.Color(src).enhance(1.05)
-                src=ImageEnhance.Sharpness(src).enhance(1.05)
-                im.paste(src,(int(x),int(y)))
-        d0=ImageDraw.Draw(im)
-        for x,y,w,h in boxes:
-            d0.rectangle((int(x),int(y),int(x+w),int(y+h)),outline=(3,4,5),width=5)
+        im.paste(_texture((W,stage_h),seed+3),(0,HEADER_END))
     d=ImageDraw.Draw(im)
     d.rectangle((0,HEADER_END-3,W,HEADER_END+2),fill=(3,4,5))
     lines=_fit(d,title,TITLE_FONT,630,2)
@@ -287,12 +267,9 @@ def render(_base_frame,visuals,audio,ass,duration,out,title,part,seed,tmp):
     frames=[]
     for i,v in enumerate(visuals):
         frame=Path(tmp)/f'v7_full_{i:02d}.jpg'
-        # True reference collage: 3-4 distinct adjacent narrated beats visible simultaneously.
-        n=len(visuals)
-        supporting=[visuals[(i+j)%n].get('photo') for j in (1,2,3)] if n>=4 else [visuals[(i+j)%n].get('photo') for j in range(1,n)]
-        while len(supporting)<3: supporting.append(None)
-        compose_frame(title,part,v['photo'],seed+i*43,frame,True,secondary=supporting[0],tertiary=supporting[1],quaternary=supporting[2])
-        v['panel_count']=1+sum(1 for p in supporting if p)
+        # One context-matched illustration at this meaningful story beat.
+        compose_frame(title,part,v['photo'],seed+i*43,frame,True)
+        v['panel_count']=1
         frames.append(frame)
     concat=Path(tmp)/'v7_slides.txt'
     rows=[]
@@ -325,7 +302,7 @@ def verify(video,cues,visuals,narration,source_count):
         'caption_safe_word_limit_ok':max((int(c.get('words',0)) for c in cues),default=0)<=1,
         'continuous_story_image_ok':bool(visuals) and abs(float(visuals[0].get('start',0)))<0.05,
         'visual_insert_count_ok':len(visuals)>=max(10,int(actual/28)),
-        'multi_picture_slide_ok':all(int(v.get('panel_count',0))>=3 for v in visuals) if len(visuals)>=3 else False,
+        'single_reference_frame_ok':all(int(v.get('panel_count',0))==1 for v in visuals),
         'visual_change_spacing_ok':not gaps or (min(gaps)>=5.0 and max(gaps)<=24.0),
         'story_visual_source_ok':len(valid)==len(visuals),
         'no_teal_lower_panel':True,
