@@ -130,32 +130,10 @@ jobs:
           gh release delete "$TAG" --yes --cleanup-tag >/dev/null 2>&1 || true
           gh release create "$TAG" "$VIDEO" manifest.json --title "Ruby's Realm Reference Target ${GITHUB_RUN_NUMBER}" --notes "Fresh original story with continuous generated story illustrations, no lower teal panel, upgraded neural narration, and direct word-boundary captions."
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
-      - name: Send approved release to connected TikTok channel
+      - name: Hold release until exact reference visual QC is implemented
         run: |
-          set -euo pipefail
-          URL="https://rubys-realm.vercel.app/api/auto-post?tag=${RELEASE_TAG}"
-          RESPONSE=''
-          for i in $(seq 1 30); do
-            RESPONSE="$(curl -sS --max-time 90 "$URL" || true)"
-            if printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("ok") and d.get("renderer")=="reference-illustrated-story-v7" else 1)' 2>/dev/null; then break; fi
-            sleep 10
-          done
-          printf '%s\n' "$RESPONSE"
-          printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); assert d.get("ok"), d; assert d.get("renderer")=="reference-illustrated-story-v7", d; print("POST_ID="+str(d["postId"]))' >> "$GITHUB_ENV"
-      - name: Confirm TikTok publish completion
-        run: |
-          set -euo pipefail
-          STATUS_URL="https://rubys-realm.vercel.app/api/buffer-status?post_id=${POST_ID}"
-          RESPONSE=''
-          for i in $(seq 1 48); do
-            RESPONSE="$(curl -sS --max-time 60 "$STATUS_URL" || true)"
-            STATE="$(printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); print(((d.get("post") or {}).get("status") or "").lower())' 2>/dev/null || true)"
-            if [ "$STATE" = "sent" ]; then printf '%s\n' "$RESPONSE"; exit 0; fi
-            if [ "$STATE" = "failed" ] || [ "$STATE" = "error" ]; then printf '%s\n' "$RESPONSE"; exit 1; fi
-            sleep 10
-          done
-          printf '%s\n' "$RESPONSE"
-          exit 1
+          echo "Publishing intentionally disabled: do not send any video until exact supplied-reference visual QC passes."
+          exit 0
       - name: Upload generated MP4 and manifest backup
         if: always()
         uses: actions/upload-artifact@v4
