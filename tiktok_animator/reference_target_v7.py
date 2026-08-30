@@ -172,10 +172,11 @@ def _credits_balance(key):
 def _generated_prompt(beat):
     beat=re.sub(r'\s+',' ',str(beat)).strip()
     return (
-        "Unmistakably non-photorealistic premium 3D cartoon story illustration matching a modern animated-feature / social-story aesthetic. "
-        "Cinematic but simple readable composition, expressive simplified adult characters, polished AI-cartoon render, "
-        "soft cinematic cartoon lighting, rounded modeled forms, expressive stylized faces and hands, coherent environment and props, no text, no letters, no captions, no logos, no watermark. "
-        "Use the same recurring protagonist design when a person is useful: adult man with shaved head, charcoal hoodie, dark pants. "
+        "Unmistakably non-photorealistic simplified 2D/2.5D cartoon story illustration matching the supplied Hotel Owner TikTok reference. "
+        "Adult characters use an oversized smooth bald round head, tiny simple eyes, minimal line mouth, clean dark outlines, compact simplified body, flat-to-soft cel shading, and expressive pose. "
+        "Detailed colorful illustrated environment behind the character. Absolutely no realistic, semi-realistic, cinematic-human, photographic, clay, doll, or lifelike 3D people. "
+        "One picture only. No collage, split screen, inset panels, text, letters, captions, logos, or watermark. "
+        "Use the same recurring protagonist design when useful: adult man, smooth bald oversized cartoon head, tiny simple facial features, black work uniform appropriate to the occupation. "
         "The image must literally depict the current story beat and its important location, object, action, or discovery. "
         "Keep the central lower area reasonably uncluttered for overlaid captions. Current story: " + CURRENT_TITLE + ". Beat: " + beat[:900]
     )
@@ -245,7 +246,7 @@ def prepare_visuals(visuals,seed,semantic_fetch):
 def select_visuals(scheduler,semantic,beats,duration):
     visuals=list(scheduler.select_visuals(semantic,beats,duration))
     # Keep enough scene changes for the reference feel while avoiding meaningless churn.
-    target_min=max(12,min(22,int(duration/17.0)))
+    target_min=max(18,min(34,int(duration/10.0)))
     if len(visuals)<target_min:
         candidates=sorted(beats,key=lambda b:(-float(b.get('score',0)),float(b['start'])))
         for b in candidates:
@@ -255,7 +256,7 @@ def select_visuals(scheduler,semantic,beats,duration):
             visuals.append({'start':st,'end':st+6.0,'duration':6.0,'query':semantic.semantic_query(b['text']),'score':b.get('score',0),'beat_text':b['text']})
             if len(visuals)>=target_min: break
     visuals.sort(key=lambda v:float(v['start']))
-    return visuals[:24]
+    return visuals[:36]
 
 
 def render(_base_frame,visuals,audio,ass,duration,out,title,part,seed,tmp):
