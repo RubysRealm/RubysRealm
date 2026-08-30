@@ -61,45 +61,49 @@ def _fit(draw,text,font,width,max_lines=2):
     return lines[:max_lines]
 
 
-def compose_frame(title,part,photo,seed,out,active=True,secondary=None):
+def compose_frame(title,part,photo,seed,out,active=True,secondary=None,tertiary=None,quaternary=None):
     im=Image.new('RGB',(W,H),(12,13,15))
     im.paste(_texture((W,HEADER_END),seed),(0,0))
     stage_h=H-HEADER_END
-    paths=[p for p in [photo,secondary] if p is not None and Path(p).exists()]
-    if paths:
-        # Reference-style comic/story board: two different beat-matched cartoon illustrations
-        # share the visual stage instead of stretching one image across the entire slide.
-        if len(paths)>=2:
-            gap=8
-            top_h=int(stage_h*.50)
-            boxes=[(0,HEADER_END,W,top_h-gap//2),(0,HEADER_END+top_h+gap//2,W,stage_h-top_h-gap//2)]
-            for p,(x,y,w,h) in zip(paths[:2],boxes):
-                with Image.open(p) as src:
-                    src=ImageOps.exif_transpose(src).convert('RGB')
-                    src=ImageOps.fit(src,(w,h),method=Image.Resampling.LANCZOS,centering=(.5,.5))
-                    src=ImageEnhance.Contrast(src).enhance(1.06)
-                    src=ImageEnhance.Color(src).enhance(1.04)
-                    src=ImageEnhance.Sharpness(src).enhance(1.04)
-                    im.paste(src,(x,y))
-            ImageDraw.Draw(im).rectangle((0,HEADER_END+top_h-gap//2,W,HEADER_END+top_h+gap//2),fill=(3,4,5))
-        else:
-            with Image.open(paths[0]) as src:
-                src=ImageOps.exif_transpose(src).convert('RGB')
-                src=ImageOps.fit(src,(W,stage_h),method=Image.Resampling.LANCZOS,centering=(.5,.5))
-                src=ImageEnhance.Contrast(src).enhance(1.06)
-                src=ImageEnhance.Color(src).enhance(1.04)
-                src=ImageEnhance.Sharpness(src).enhance(1.04)
-                im.paste(src,(0,HEADER_END))
-    else:
+    paths=[p for p in [photo,secondary,tertiary,quaternary] if p is not None and Path(p).exists()]
+    if not paths:
         im.paste(_texture((W,stage_h),seed+3),(0,HEADER_END))
+    else:
+        gap=8
+        if len(paths)>=4:
+            hero_w=int(W*.64)
+            small_w=W-hero_w-gap
+            small_h=(stage_h-2*gap)//3
+            boxes=[(0,HEADER_END,hero_w,stage_h),
+                   (hero_w+gap,HEADER_END,small_w,small_h),
+                   (hero_w+gap,HEADER_END+small_h+gap,small_w,small_h),
+                   (hero_w+gap,HEADER_END+2*(small_h+gap),small_w,stage_h-2*(small_h+gap))]
+        elif len(paths)==3:
+            hero_h=int(stage_h*.58)
+            lower_h=stage_h-hero_h-gap
+            boxes=[(0,HEADER_END,W,hero_h),
+                   (0,HEADER_END+hero_h+gap,(W-gap)//2,lower_h),
+                   ((W+gap)//2,HEADER_END+hero_h+gap,(W-gap)//2,lower_h)]
+        else:
+            boxes=[(0,HEADER_END,(W-gap)//2,stage_h),((W+gap)//2,HEADER_END,(W-gap)//2,stage_h)]
+        for p,(x,y,w,h) in zip(paths,boxes):
+            with Image.open(p) as src:
+                src=ImageOps.exif_transpose(src).convert('RGB')
+                src=ImageOps.fit(src,(int(w),int(h)),method=Image.Resampling.LANCZOS,centering=(.5,.5))
+                src=ImageEnhance.Contrast(src).enhance(1.07)
+                src=ImageEnhance.Color(src).enhance(1.05)
+                src=ImageEnhance.Sharpness(src).enhance(1.05)
+                im.paste(src,(int(x),int(y)))
+        d0=ImageDraw.Draw(im)
+        for x,y,w,h in boxes:
+            d0.rectangle((int(x),int(y),int(x+w),int(y+h)),outline=(3,4,5),width=5)
     d=ImageDraw.Draw(im)
     d.rectangle((0,HEADER_END-3,W,HEADER_END+2),fill=(3,4,5))
     lines=_fit(d,title,TITLE_FONT,630,2)
     y=75 if len(lines)>1 else 112
     for line in lines:
         b=d.textbbox((0,0),line,font=TITLE_FONT,stroke_width=2); tw=b[2]-b[0]
-        d.text(((W-tw)/2,y),line,font=TITLE_FONT,fill=(255,205,31),stroke_width=3,stroke_fill=(55,41,0))
-        y+=70
+        d.text(((W-tw)/2,y),line,font=TITLE_FONT,fill=(255,205,31),stroke_width=3,stroke_fill=(55,41,0)); y+=70
     b=d.textbbox((0,0),part,font=PART_FONT,stroke_width=2); tw=b[2]-b[0]
     d.text(((W-tw)/2,y+5),part,font=PART_FONT,fill=(72,255,31),stroke_width=3,stroke_fill=(8,61,5))
     im.save(out,quality=95)
@@ -188,9 +192,9 @@ def _credits_balance(key):
 def _generated_prompt(beat):
     beat=re.sub(r'\s+',' ',str(beat)).strip()
     return (
-        "High-quality stylized 3D animated story illustration for a vertical social storytelling video. "
+        "Unmistakably non-photorealistic premium 3D cartoon story illustration matching a modern animated-feature / social-story aesthetic. "
         "Cinematic but simple readable composition, expressive simplified adult characters, polished AI-cartoon render, "
-        "soft realistic lighting, coherent environment and props, no text, no letters, no captions, no logos, no watermark. "
+        "soft cinematic cartoon lighting, rounded modeled forms, expressive stylized faces and hands, coherent environment and props, no text, no letters, no captions, no logos, no watermark. "
         "Use the same recurring protagonist design when a person is useful: adult man with shaved head, charcoal hoodie, dark pants. "
         "The image must literally depict the current story beat and its important location, object, action, or discovery. "
         "Keep the central lower area reasonably uncluttered for overlaid captions. Current story: " + CURRENT_TITLE + ". Beat: " + beat[:900]
@@ -245,7 +249,7 @@ def prepare_visuals(visuals,seed,semantic_fetch):
             except Exception as e:
                 source={'source_type':'none','error':str(e)[:300],'query':beat[:300]}
         v['source']=source or {'source_type':'none'}
-        if dest.exists() and (source or {}).get('source_type') in ('ai-generated-illustration','wikimedia-public-domain'):
+        if dest.exists() and (source or {}).get('source_type') =='ai-generated-illustration':
             v['photo']=dest
             valid.append(v)
             generated += 1 if source.get('source_type')=='ai-generated-illustration' else 0
@@ -283,11 +287,12 @@ def render(_base_frame,visuals,audio,ass,duration,out,title,part,seed,tmp):
     frames=[]
     for i,v in enumerate(visuals):
         frame=Path(tmp)/f'v7_full_{i:02d}.jpg'
-        # Pair adjacent, independently generated narrated beats so each slide has
-        # multiple relevant cartoon pictures like the supplied reference.
-        secondary=visuals[(i+1)%len(visuals)].get('photo') if len(visuals)>1 else None
-        compose_frame(title,part,v['photo'],seed+i*43,frame,True,secondary=secondary)
-        v['panel_count']=2 if secondary else 1
+        # True reference collage: 3-4 distinct adjacent narrated beats visible simultaneously.
+        n=len(visuals)
+        supporting=[visuals[(i+j)%n].get('photo') for j in (1,2,3)] if n>=4 else [visuals[(i+j)%n].get('photo') for j in range(1,n)]
+        while len(supporting)<3: supporting.append(None)
+        compose_frame(title,part,v['photo'],seed+i*43,frame,True,secondary=supporting[0],tertiary=supporting[1],quaternary=supporting[2])
+        v['panel_count']=1+sum(1 for p in supporting if p)
         frames.append(frame)
     concat=Path(tmp)/'v7_slides.txt'
     rows=[]
@@ -320,7 +325,7 @@ def verify(video,cues,visuals,narration,source_count):
         'caption_safe_word_limit_ok':max((int(c.get('words',0)) for c in cues),default=0)<=1,
         'continuous_story_image_ok':bool(visuals) and abs(float(visuals[0].get('start',0)))<0.05,
         'visual_insert_count_ok':len(visuals)>=max(10,int(actual/28)),
-        'multi_picture_slide_ok':all(int(v.get('panel_count',0))>=2 for v in visuals) if len(visuals)>1 else False,
+        'multi_picture_slide_ok':all(int(v.get('panel_count',0))>=3 for v in visuals) if len(visuals)>=3 else False,
         'visual_change_spacing_ok':not gaps or (min(gaps)>=5.0 and max(gaps)<=24.0),
         'story_visual_source_ok':len(valid)==len(visuals),
         'no_teal_lower_panel':True,
