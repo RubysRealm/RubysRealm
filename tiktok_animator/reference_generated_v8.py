@@ -212,7 +212,7 @@ def _procedural_cartoon(beat,seed,dest):
         'model':'local-procedural-3d-cartoon-v1',
         'via':'local-no-cost-renderer',
         'seed':int(seed),
-        'visualStyle':'non-photorealistic-3d-cartoon',
+        'visualStyle':'hotel-owner-reference-simple-cartoon',
         'sceneKind':kind
     }
 
@@ -256,19 +256,9 @@ def bind(target):
             except Exception as e:
                 last_error=e
                 Path(dest).unlink(missing_ok=True)
-        try:
-            url=PREGENERATED_PREMIUM_SCENES[min(len(PREGENERATED_PREMIUM_SCENES)-1, max(0, int(seed)//271 % len(PREGENERATED_PREMIUM_SCENES)))]
-            req=urllib.request.Request(url,headers={'User-Agent':'RubyRealm/1.0'})
-            with urllib.request.urlopen(req,timeout=45) as resp:
-                data=resp.read()
-            Path(dest).write_bytes(data)
-            Image.open(dest).convert('RGB').save(dest,'JPEG',quality=94)
-            SERVICE_FAILURES=0
-            return {'query':beat,'source_type':'ai-generated-illustration','model':'fresh-story-scene-pack-v10','via':'fresh-story-specific-generated-scene','seed':seed,'visualStyle':'polished-non-photorealistic-3d-cartoon'}
-        except Exception as premium_error:
-            SERVICE_FAILURES += 1
-            print('Generated premium cartoon image unavailable for beat:',str(last_error)[:220],str(premium_error)[:160])
-            return None
+        SERVICE_FAILURES += 1
+        print('Reference cartoon generation unavailable for beat; fail closed:',str(last_error)[:300])
+        return None
 
     def prepare_visuals(visuals,seed,_semantic_fetch=None):
         valid=[]
@@ -282,7 +272,7 @@ def bind(target):
                 v['photo']=dest
                 valid.append(v)
         visuals[:] = valid
-        if len(visuals)<10:
+        if len(visuals)<18:
             raise RuntimeError(f'Only {len(visuals)} generated cartoon scenes completed; refusing realistic-photo fallback')
         visuals[0]['start']=0.0
         target.base.STYLE['generated_illustration_ratio']=1.0
@@ -354,8 +344,8 @@ def bind(target):
         sources=[v.get('source') or {} for v in visuals]
         generated=sum(1 for s in sources if _is_generated(s))
         generated_ratio=generated/max(1,len(visuals))
-        checks['story_visual_source_ok']=all(_is_generated(s) for s in sources) and len(visuals)>=10
-        checks['generated_illustration_ratio_ok']=generated_ratio==1.0 and len(visuals)>=10
+        checks['story_visual_source_ok']=all(_is_generated(s) for s in sources) and len(visuals)>=18
+        checks['generated_illustration_ratio_ok']=generated_ratio==1.0 and len(visuals)>=18
         checks['no_realistic_photo_fallback_ok']=all(_is_generated(s) for s in sources)
         target.base.STYLE['generated_illustration_ratio']=round(generated_ratio,4)
         target.base.STYLE['visual_source_policy']='generated-cartoon-only'
