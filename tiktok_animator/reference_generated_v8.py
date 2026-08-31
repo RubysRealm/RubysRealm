@@ -227,24 +227,28 @@ def _local_diffusion_cartoon(beat,seed,dest):
         from diffusers import StableDiffusionImg2ImgPipeline, DPMSolverMultistepScheduler
         if _LOCAL_PIPE is None:
             _LOCAL_PIPE=StableDiffusionImg2ImgPipeline.from_pretrained(
-                os.getenv('LOCAL_CARTOON_MODEL','segmind/tiny-sd'),
+                os.getenv('LOCAL_CARTOON_MODEL','stabilityai/sd-turbo'),
                 torch_dtype=torch.float32,
                 safety_checker=None,
                 requires_safety_checker=False
             )
             _LOCAL_PIPE.scheduler=DPMSolverMultistepScheduler.from_config(_LOCAL_PIPE.scheduler.config)
             _LOCAL_PIPE.enable_attention_slicing()
+            try:
+                torch.set_num_threads(max(2, min(8, os.cpu_count() or 4)))
+            except Exception:
+                pass
             _LOCAL_PIPE.set_progress_bar_config(disable=True)
         guide=Path(str(dest)+'.guide.jpg')
         _procedural_cartoon(beat,seed,guide)
         with Image.open(guide) as im:
             init=ImageOps.fit(im.convert('RGB'),(512,640),method=Image.Resampling.LANCZOS)
+        event=' '.join(str(beat).replace('\n',' ').split())[:260]
         prompt=(
-            'simple polished 2D cartoon story illustration, adult cartoon character, oversized smooth bald round head, '
-            'tiny dot eyes, tiny simple mouth, compact simplified body, clean thick outlines, flat cel shading, '
-            'bright readable colors, expressive pose, detailed but clearly illustrated environment, whimsical mobile-game art, '
-            'NOT realistic, NOT photographic, NOT lifelike, one scene only, no text, no collage. '
-            'Literally depict this narrated event: '+str(beat)[:700]
+            'EVENT: '+event+'. '
+            'Simple polished 2D cartoon adult, oversized smooth bald round head, dot eyes, tiny mouth, '
+            'compact body, thick clean outlines, flat cel shading, bright illustrated environment, '
+            'expressive action, one scene, no text, not realistic.'
         )
         negative=(
             'photo, photorealistic, realistic human, realistic skin, pores, cinematic actor, 3d render, clay, doll, '
@@ -255,9 +259,9 @@ def _local_diffusion_cartoon(beat,seed,dest):
             prompt=prompt,
             negative_prompt=negative,
             image=init,
-            strength=0.58,
-            guidance_scale=7.5,
-            num_inference_steps=int(os.getenv('LOCAL_CARTOON_STEPS','16')),
+            strength=float(os.getenv('LOCAL_CARTOON_STRENGTH','0.72')),
+            guidance_scale=float(os.getenv('LOCAL_CARTOON_GUIDANCE','0.0')),
+            num_inference_steps=int(os.getenv('LOCAL_CARTOON_STEPS','4')),
             generator=gen
         ).images[0]
         out=ImageOps.fit(out.convert('RGB'),(1024,1280),method=Image.Resampling.LANCZOS)
@@ -266,7 +270,7 @@ def _local_diffusion_cartoon(beat,seed,dest):
         return {
             'query':str(beat)[:500],
             'source_type':'ai-generated-illustration',
-            'model':os.getenv('LOCAL_CARTOON_MODEL','segmind/tiny-sd'),
+            'model':os.getenv('LOCAL_CARTOON_MODEL','stabilityai/sd-turbo'),
             'via':'local-diffusion-img2img-no-cost',
             'seed':int(seed),
             'visualStyle':'hotel-owner-reference-simple-2d-cartoon'
