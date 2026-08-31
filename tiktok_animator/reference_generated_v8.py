@@ -224,62 +224,55 @@ def _local_diffusion_cartoon(beat,seed,dest):
     global _LOCAL_PIPE
     try:
         import torch
-        from diffusers import StableDiffusionImg2ImgPipeline, DPMSolverMultistepScheduler
+        from diffusers import AutoPipelineForText2Image
+        model=os.getenv('LOCAL_CARTOON_MODEL','stabilityai/sdxl-turbo')
         if _LOCAL_PIPE is None:
-            _LOCAL_PIPE=StableDiffusionImg2ImgPipeline.from_pretrained(
-                os.getenv('LOCAL_CARTOON_MODEL','stabilityai/sd-turbo'),
+            _LOCAL_PIPE=AutoPipelineForText2Image.from_pretrained(
+                model,
                 torch_dtype=torch.float32,
-                safety_checker=None,
-                requires_safety_checker=False
+                use_safetensors=True
             )
-            _LOCAL_PIPE.scheduler=DPMSolverMultistepScheduler.from_config(_LOCAL_PIPE.scheduler.config)
-            _LOCAL_PIPE.enable_attention_slicing()
             try:
-                torch.set_num_threads(max(2, min(8, os.cpu_count() or 4)))
+                _LOCAL_PIPE.enable_attention_slicing()
+            except Exception:
+                pass
+            try:
+                torch.set_num_threads(max(2,min(8,os.cpu_count() or 4)))
             except Exception:
                 pass
             _LOCAL_PIPE.set_progress_bar_config(disable=True)
-        guide=Path(str(dest)+'.guide.jpg')
-        _procedural_cartoon(beat,seed,guide)
-        with Image.open(guide) as im:
-            init=ImageOps.fit(im.convert('RGB'),(512,640),method=Image.Resampling.LANCZOS)
-        event=' '.join(str(beat).replace('\n',' ').split())[:260]
+        event=' '.join(str(beat).replace('\n',' ').split())[:320]
         prompt=(
-            'EVENT: '+event+'. '
-            'Simple polished 2D cartoon adult, oversized smooth bald round head, dot eyes, tiny mouth, '
-            'compact body, thick clean outlines, flat cel shading, bright illustrated environment, '
-            'expressive action, one scene, no text, not realistic.'
-        )
-        negative=(
-            'photo, photorealistic, realistic human, realistic skin, pores, cinematic actor, 3d render, clay, doll, '
-            'anime, manga, painting, collage, split screen, text, letters, watermark, logo, deformed hands, extra limbs'
+            'Current narrated event: '+event+'. '
+            'Simple polished 2D cartoon story illustration for adults. '
+            'One expressive adult cartoon character when relevant, oversized smooth round bald head, '
+            'tiny dot eyes, tiny simple mouth, compact simplified body, clean dark outlines, flat cel shading. '
+            'Detailed colorful illustrated environment that clearly shows the location, important object, and current action. '
+            'Readable mobile-story composition, charming animated explainer style, one picture only. '
+            'No realism, no photography, no lifelike skin, no 3D render, no anime, no collage, no split screen, no text, no logo, no watermark.'
         )
         gen=torch.Generator(device='cpu').manual_seed(int(seed)&0x7fffffff)
         out=_LOCAL_PIPE(
             prompt=prompt,
-            negative_prompt=negative,
-            image=init,
-            strength=float(os.getenv('LOCAL_CARTOON_STRENGTH','0.72')),
-            guidance_scale=float(os.getenv('LOCAL_CARTOON_GUIDANCE','0.0')),
-            num_inference_steps=int(os.getenv('LOCAL_CARTOON_STEPS','4')),
+            guidance_scale=0.0,
+            num_inference_steps=int(os.getenv('LOCAL_CARTOON_STEPS','2')),
+            height=int(os.getenv('LOCAL_CARTOON_HEIGHT','512')),
+            width=int(os.getenv('LOCAL_CARTOON_WIDTH','512')),
             generator=gen
         ).images[0]
-        out=ImageOps.fit(out.convert('RGB'),(1024,1280),method=Image.Resampling.LANCZOS)
+        out=ImageOps.fit(out.convert('RGB'),(1024,1280),method=Image.Resampling.LANCZOS,centering=(0.5,0.5))
         out.save(dest,'JPEG',quality=94)
-        guide.unlink(missing_ok=True)
         return {
             'query':str(beat)[:500],
             'source_type':'ai-generated-illustration',
-            'model':os.getenv('LOCAL_CARTOON_MODEL','stabilityai/sd-turbo'),
-            'via':'local-diffusion-img2img-no-cost',
+            'model':model,
+            'via':'local-sdxl-turbo-text2image-no-cost',
             'seed':int(seed),
             'visualStyle':'hotel-owner-reference-simple-2d-cartoon'
         }
     except Exception as e:
-        try: Path(str(dest)+'.guide.jpg').unlink(missing_ok=True)
-        except Exception: pass
         Path(dest).unlink(missing_ok=True)
-        print('Local diffusion cartoon generation failed:',str(e)[:500])
+        print('Local SDXL Turbo text-to-image generation failed:',str(e)[:500])
         return None
 
 
@@ -291,8 +284,7 @@ def bind(target):
 
     def ai_image(beat,seed,dest):
         global SERVICE_FAILURES
-        # Prefer the no-cost local diffusion renderer. The primitive procedural frame is used
-        # only as an img2img composition guide and is never allowed through as final media.
+        # Prefer true text-to-image generation. No procedural guide image is allowed to influence production frames.
         local=_local_diffusion_cartoon(beat,seed,dest)
         if local:
             return local
@@ -415,10 +407,14 @@ def bind(target):
         sources=[v.get('source') or {} for v in visuals]
         generated=sum(1 for s in sources if _is_generated(s))
         generated_ratio=generated/max(1,len(visuals))
+        approved_local=sum(1 for s in sources if (s or {}).get('via')=='local-sdxl-turbo-text2image-no-cost')
+        approved_remote=sum(1 for s in sources if (s or {}).get('via')=='vercel-oidc-image-service')
         checks['story_visual_source_ok']=all(_is_generated(s) for s in sources) and len(visuals)>=18
         checks['generated_illustration_ratio_ok']=generated_ratio==1.0 and len(visuals)>=18
         checks['no_realistic_photo_fallback_ok']=all(_is_generated(s) for s in sources)
         checks['no_procedural_clipart_ok']=all((s or {}).get('source_type') != 'procedural-generated-illustration' for s in sources)
+        checks['no_guide_preserving_img2img_ok']=all('img2img' not in str((s or {}).get('via','')).lower() for s in sources)
+        checks['approved_generation_path_ok']=(approved_local+approved_remote)==len(sources) and len(sources)>=18
         target.base.STYLE['generated_illustration_ratio']=round(generated_ratio,4)
         target.base.STYLE['visual_source_policy']='generated-cartoon-only'
         target.base.STYLE['photographic_fallback']='disabled'
