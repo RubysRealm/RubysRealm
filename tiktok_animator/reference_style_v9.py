@@ -20,13 +20,13 @@ def bind(target):
                 except Exception: pass
             event=' '.join(str(beat).replace('\n',' ').split())[:340]
             prompt=(
-                'Illustrate exactly this story event: '+event+'. '
+                'Recreate the user-approved reference visual language as closely as possible for a new story. Illustrate ONLY this exact narrated beat: '+event+'. '
                 'Minimal polished flat 2D adult cartoon for a vertical mobile story. '
                 'Character design is mandatory: very large smooth near-circular bald head, tiny black dot eyes, '
                 'tiny short-line mouth, almost no nose, compact small body, short simple limbs, clean bold outline, '
                 'simple geometric shapes, restrained facial detail, friendly deadpan expression. '
-                'The CURRENT EVENT is the highest priority: show the exact action, exact location, and the specific important objects named in it; do not substitute generic buildings, phones, desks, keys, or repeated props unless the event explicitly calls for them. '
-                'Show the character actively doing the narrated action inside a specific detailed illustrated environment; vary location, props, composition and camera angle from scene to scene, with a strong readable silhouette. '
+                'Narrative specificity is mandatory: literally show the action happening NOW, exact location, people involved, and every important object explicitly named in this beat. Never anticipate later events or insert unexplained information. Props must be identifiable through shape and context without readable text. '
+                'Show the character actively performing the narrated action in a specific detailed environment. Every beat must be compositionally distinct: vary location, staging, pose, camera distance and angle, foreground objects and background details. Never recycle generic desks, phones, buildings, money piles, vehicles, rooms or other props merely because they fit the overall topic. '
                 'Flat cel colors with subtle two-tone shading, crisp digital vector-cartoon finish. One scene only. '
                 'Absolutely no realistic anatomy, no normal human proportions, no detailed eyes, no large eyes, no long nose, '
                 'no realistic face, no photography, no 3D, no anime, no painterly style, no collage, no split screen, no text, no watermark.'
