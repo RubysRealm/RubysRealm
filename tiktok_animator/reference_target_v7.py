@@ -21,7 +21,7 @@ base.STYLE['visual_coverage']=[0.98,1.01]
 base.STYLE['visual_min_gap']=8.0
 base.STYLE['visual_max_gap']=20.0
 base.STYLE['visual_hold']=[7.0,22.0]
-base.STYLE['voice_preference']=['en-US-OnyxTurboMultilingualNeural','en-US-BrianMultilingualNeural','en-US-AndrewMultilingualNeural','en-US-BrianNeural','en-US-AndrewNeural']
+base.STYLE['voice_preference']=['en-US-BrianMultilingualNeural','en-US-AndrewMultilingualNeural','en-US-BrianNeural','en-US-AndrewNeural','en-US-OnyxTurboMultilingualNeural']
 base.STYLE['caption_timing']='direct-neural-word-boundaries'
 base.STYLE['visual_baseline']='continuous-story-image'
 base.STYLE['lower_panel']='none'
@@ -146,7 +146,7 @@ async def narrate(text,audio,event_file):
         tmp=Path(str(audio)+'.partial')
         tmp.unlink(missing_ok=True)
         try:
-            communicate=edge_tts.Communicate(text,voice,rate='+6%',pitch='-1Hz',volume='+0%',boundary='WordBoundary')
+            communicate=edge_tts.Communicate(text,voice,rate='+10%',pitch='-2Hz',volume='+0%',boundary='WordBoundary')
             with open(tmp,'wb') as f:
                 async for chunk in communicate.stream():
                     if chunk['type']=='audio':
