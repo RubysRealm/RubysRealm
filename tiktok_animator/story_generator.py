@@ -3,7 +3,7 @@ import hashlib, os, random
 ROLES=[
  ('Storage Auction Buyer','abandoned self-storage facility','unit 214','a red inventory tag','a sealed metal cash box','an old delivery van','the county records office','a freight company that disappeared twelve years ago'),
  ('Closed Theater Owner','shuttered downtown movie theater','projection booth four','a brass film canister','a locked wall safe','a gray sedan','the city archives','a property company dissolved after a fire'),
- ('Marina Manager','half-empty lakeside marina','dock C-17','a blue key float','a waterproof document tube','a black fishing boat','the harbor office','a development company with no current address'),
+ ('Marina Owner','half-empty lakeside marina','dock C-17','a blue key float','a waterproof document tube','a black fishing boat','the harbor office','a development company with no current address'),
  ('Warehouse Buyer','vacant industrial warehouse','bay twelve','a yellow security badge','a bolted floor compartment','a white box truck','the zoning office','a logistics company that vanished from state records'),
  ('Mountain Lodge Owner','closed mountain lodge','room 308','a numbered wooden key tag','a hidden steel lockbox','a dark green SUV','the county planning office','a land company created for one transaction'),
  ('Old Diner Owner','roadside diner that has been closed for years','the basement pantry','a chipped ceramic token','a fireproof document case','a faded pickup','the courthouse records room','a restaurant supplier that no longer exists'),
