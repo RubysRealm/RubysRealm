@@ -10,9 +10,11 @@ import reference_semantic_v5 as semantic
 import reference_scheduler_v6 as scheduler
 import reference_target_v7 as target
 import reference_generated_v8 as generated
+import reference_style_v9 as style_v9
 from story_generator import generate_story
 
 generated.bind(target)
+style_v9.bind(target)
 
 LAST_STORY_FINGERPRINT=None
 
