@@ -27,8 +27,8 @@ base.STYLE['visual_baseline']='continuous-story-image'
 base.STYLE['lower_panel']='none'
 
 FONT_PATH=base.FONT_PATH
-TITLE_FONT=ImageFont.truetype(FONT_PATH,60)
-PART_FONT=ImageFont.truetype(FONT_PATH,64)
+TITLE_FONT=ImageFont.truetype(FONT_PATH,56)
+PART_FONT=ImageFont.truetype(FONT_PATH,46)
 
 
 def set_story_context(title):
@@ -39,14 +39,21 @@ def set_story_context(title):
 def _texture(size,seed):
     rng=random.Random(seed)
     w,h=size
-    im=Image.new('RGB',(w,h),(13,14,17))
+    im=Image.new('RGB',(w,h),(22,25,38))
     px=im.load()
+    top=(35,30,62); bottom=(12,22,38)
     for y in range(h):
+        t=y/max(1,h-1)
+        basec=tuple(int(top[i]*(1-t)+bottom[i]*t) for i in range(3))
         for x in range(w):
-            g=rng.randint(-5,5)
-            px[x,y]=(max(0,15+g),max(0,16+g),max(0,19+g))
-    return im.filter(ImageFilter.GaussianBlur(.25))
-
+            g=rng.randint(-3,3)
+            px[x,y]=tuple(max(0,min(255,v+g)) for v in basec)
+    im=im.filter(ImageFilter.GaussianBlur(.35))
+    d=ImageDraw.Draw(im,'RGBA')
+    for i in range(9):
+        x=rng.randint(-80,w+80); y=rng.randint(-80,h+80); rr=rng.randint(55,150)
+        d.ellipse((x-rr,y-rr,x+rr,y+rr),fill=(255,190,90,rng.randint(4,11)))
+    return im.filter(ImageFilter.GaussianBlur(9))
 
 def _fit(draw,text,font,width,max_lines=2):
     words=str(text).split(); lines=[]; cur=''
@@ -62,32 +69,38 @@ def _fit(draw,text,font,width,max_lines=2):
 
 
 def compose_frame(title,part,photo,seed,out,active=True,secondary=None,tertiary=None,quaternary=None):
-    # Reference target: persistent title header + ONE full-width story illustration.
-    # Supporting illustrations change only at meaningful narrated beats; never a collage.
+    # Persistent polished header + exactly ONE story illustration.
     im=Image.new('RGB',(W,H),(12,13,15))
-    im.paste(_texture((W,HEADER_END),seed),(0,0))
+    header=_texture((W,HEADER_END),seed)
+    im.paste(header,(0,0))
     stage_h=H-HEADER_END
     if photo is not None and Path(photo).exists():
         with Image.open(photo) as src:
             src=ImageOps.exif_transpose(src).convert('RGB')
             src=ImageOps.fit(src,(W,stage_h),method=Image.Resampling.LANCZOS,centering=(.5,.5))
             src=ImageEnhance.Contrast(src).enhance(1.05)
-            src=ImageEnhance.Color(src).enhance(1.04)
+            src=ImageEnhance.Color(src).enhance(1.05)
             src=ImageEnhance.Sharpness(src).enhance(1.04)
             im.paste(src,(0,HEADER_END))
     else:
         im.paste(_texture((W,stage_h),seed+3),(0,HEADER_END))
-    d=ImageDraw.Draw(im)
-    d.rectangle((0,HEADER_END-3,W,HEADER_END+2),fill=(3,4,5))
-    lines=_fit(d,title,TITLE_FONT,630,2)
-    y=75 if len(lines)>1 else 112
+    d=ImageDraw.Draw(im,'RGBA')
+    # polished card/header treatment
+    d.rounded_rectangle((38,42,W-38,HEADER_END-34),radius=34,fill=(9,12,23,218),outline=(255,255,255,28),width=2)
+    d.rectangle((0,HEADER_END-4,W,HEADER_END+2),fill=(255,183,65,230))
+    lines=_fit(d,title,TITLE_FONT,585,2)
+    y=82 if len(lines)>1 else 112
     for line in lines:
-        b=d.textbbox((0,0),line,font=TITLE_FONT,stroke_width=2); tw=b[2]-b[0]
-        d.text(((W-tw)/2,y),line,font=TITLE_FONT,fill=(255,205,31),stroke_width=3,stroke_fill=(55,41,0)); y+=70
-    b=d.textbbox((0,0),part,font=PART_FONT,stroke_width=2); tw=b[2]-b[0]
-    d.text(((W-tw)/2,y+5),part,font=PART_FONT,fill=(72,255,31),stroke_width=3,stroke_fill=(8,61,5))
+        b=d.textbbox((0,0),line,font=TITLE_FONT,stroke_width=1); tw=b[2]-b[0]
+        d.text(((W-tw)/2+2,y+3),line,font=TITLE_FONT,fill=(0,0,0,125),stroke_width=2,stroke_fill=(0,0,0,90))
+        d.text(((W-tw)/2,y),line,font=TITLE_FONT,fill=(255,244,218,255),stroke_width=1,stroke_fill=(255,177,55,220))
+        y+=64
+    label=str(part or 'Part 1').upper()
+    b=d.textbbox((0,0),label,font=PART_FONT); tw=b[2]-b[0]
+    px=(W-tw)/2
+    d.rounded_rectangle((px-22,y+4,px+tw+22,y+58),radius=24,fill=(255,177,55,235))
+    d.text((px,y+7),label,font=PART_FONT,fill=(20,21,29,255))
     im.save(out,quality=95)
-
 
 def caption_cues(_text,events):
     # One word per cue, using the TTS engine's own word-boundary timestamps.
