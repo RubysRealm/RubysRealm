@@ -115,7 +115,7 @@ def bind(target):
                 except Exception: pass
             event=' '.join(str(beat).replace('\n',' ').split())[:420]
             gen=torch.Generator(device='cpu').manual_seed(int(seed)&0x7fffffff)
-            bg=_PIPE(prompt=_background_prompt(event),guidance_scale=0.0,num_inference_steps=int(os.getenv('LOCAL_CARTOON_STEPS','4')),height=512,width=512,generator=gen).images[0]
+            bg=_PIPE(prompt=('High-quality polished story illustration matching the approved Ruby\'s Realm reference image: oversized bald adult cartoon character, tiny dot-like eyes, minimal mouth and nose, compact body, clean black linework, sophisticated cel shading, detailed cinematic environment, strong depth and lighting. Depict LITERALLY and ONLY this exact current narrated event: '+event+'. Every named person, object, action and location must be visibly represented. Do not anticipate later narration. Change staging and environment with the beat. One coherent scene, no collage, no readable text, no watermark.'),guidance_scale=0.0,num_inference_steps=int(os.getenv('LOCAL_CARTOON_STEPS','4')),height=512,width=512,generator=gen).images[0]
             bg=ImageOps.fit(bg.convert('RGB'),(1024,1280),method=Image.Resampling.LANCZOS).convert('RGBA')
             pose,prop,second=_scene_layout(event)
             # consistent reusable SuperMii-like protagonist sprite, not redrawn by AI
