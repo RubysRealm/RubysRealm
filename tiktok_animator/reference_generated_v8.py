@@ -220,6 +220,16 @@ def _procedural_cartoon(beat,seed,dest):
 
 _LOCAL_PIPE=None
 
+def _premium_scene_prompt(beat):
+    event=' '.join(str(beat).replace('\n',' ').split())[:700]
+    return (
+      "Create ONE standalone vertical 9:16 story illustration for this exact narrated beat: "+event+
+      ". Match the supplied Hotel Owner reference visual language: polished simple 2D adult cartoon, oversized rounded head, compact body, clean dark outlines, restrained expressive face, cinematic environmental lighting, richly detailed scene-specific background. "
+      "Literally depict WHO is present, WHERE they are, WHAT is happening, and all important objects stated in the beat. "
+      "The action and location must be unmistakable at a glance. Keep the recurring protagonist visually consistent between consecutive scenes. "
+      "No generic props, no unrelated objects, no collage, no photorealism, no 3D render, no anime, no text, captions, logos, watermark, UI, or speech bubbles."
+    )
+
 def _local_diffusion_cartoon(beat,seed,dest):
     global _LOCAL_PIPE
     try:
@@ -243,7 +253,7 @@ def _local_diffusion_cartoon(beat,seed,dest):
             _LOCAL_PIPE.set_progress_bar_config(disable=True)
         event=' '.join(str(beat).replace('\n',' ').split())[:320]
         prompt=(
-            'Current narrated event: '+event+'. '
+            _premium_scene_prompt(event)+' '
             'Simple polished 2D cartoon story illustration for adults. '
             'One expressive adult cartoon character when relevant, oversized smooth round bald head, '
             'tiny dot eyes, tiny simple mouth, compact simplified body, clean dark outlines, flat cel shading. '
