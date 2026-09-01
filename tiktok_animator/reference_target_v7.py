@@ -125,10 +125,10 @@ def caption_cues(_text,events):
 
 def write_ass(cues,path):
     # Right margin protects the TikTok interaction rail; vertical placement stays within the image.
-    head=f'''[Script Info]\nScriptType: v4.00+\nPlayResX: {W}\nPlayResY: {H}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\nStyle: Caption,DejaVu Sans,52,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,0,2,62,155,235,1\n\n[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n'''
+    head=f'''[Script Info]\nScriptType: v4.00+\nPlayResX: {W}\nPlayResY: {H}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\nStyle: Caption,DejaVu Sans,52,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,0,2,62,62,235,1\n\n[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n'''
     rows=[head]
     for c in cues:
-        rows.append(f"Dialogue: 0,{base.atime(c['start'])},{base.atime(c['end'])},Caption,,0,0,0,,{{\\an2}}{base.ass_escape(c['text'])}\n")
+        rows.append(f"Dialogue: 0,{base.atime(c['start'])},{base.atime(c['end'])},Caption,,0,0,235,,{{\\an2\\pos(360,1045)}}{base.ass_escape(c['text'])}\n")
     Path(path).write_text(''.join(rows))
 
 
@@ -300,7 +300,7 @@ def render(_base_frame,visuals,audio,ass,duration,out,title,part,seed,tmp):
         visuals[i]['duration']=span
     rows.append("file '"+str(frames[-1].resolve()).replace("'","'\\''")+"'\n")
     concat.write_text(''.join(rows))
-    vf=f"fps={FPS},scale={W}:{H},subtitles={str(ass)}:force_style='MarginR=155'"
+    vf=f"fps={FPS},scale={W}:{H},subtitles={str(ass)}"
     cmd=['ffmpeg','-y','-loglevel','error','-f','concat','-safe','0','-i',str(concat),'-i',str(audio),'-vf',vf,'-t',str(duration),'-r',str(FPS),'-c:v','libx264','-preset','medium','-crf','18','-pix_fmt','yuv420p','-c:a','aac','-b:a','160k','-af','loudnorm=I=-14:TP=-1:LRA=9','-movflags','+faststart',str(out)]
     base.run(cmd)
 
