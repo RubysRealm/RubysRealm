@@ -55,12 +55,27 @@ jobs:
           mkdir -p tiktok_animator/output tiktok_animator/tmp
           export STORY_SEED=${GITHUB_RUN_ID}
           ALLOW_REMOTE_IMAGE_GENERATION=1 python tiktok_animator/reference_story_v3.py
+      - name: Upload generated scenes immediately
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubys-realm-generated-scenes-${{ github.run_number }}
+          path: |
+            tiktok_animator/tmp/**/*.png
+            tiktok_animator/tmp/**/*.jpg
+            tiktok_animator/tmp/**/*.jpeg
+            tiktok_animator/output/**/*.png
+            tiktok_animator/output/**/*.jpg
+            tiktok_animator/output/**/*.jpeg
+          if-no-files-found: warn
+          retention-days: 3
       - name: Upload proof MP4
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: rubys-realm-30-second-proof-${{ github.run_number }}
           path: |
             tiktok_animator/output/*.mp4
             tiktok_animator/output/*.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 3
