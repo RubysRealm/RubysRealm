@@ -251,7 +251,7 @@ def main():
  audio=TMP/'narration.mp3'; events_file=TMP/'word-boundaries.json'
  try:
   events=asyncio.run(narrate(story,audio,events_file))
-  if len(events)<100: raise RuntimeError('insufficient word boundaries')
+  if len(events)<(30 if os.getenv('QUICK_PREVIEW')=='1' else 100): raise RuntimeError('insufficient word boundaries')
  except Exception as e:
   print('Edge narration fallback:',e,file=sys.stderr); events=fallback_tts(story,audio); events_file.write_text(json.dumps(events,indent=2))
  duration=media_duration(audio)
