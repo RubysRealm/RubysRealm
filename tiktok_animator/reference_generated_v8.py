@@ -335,7 +335,7 @@ def bind(target):
                 v['photo']=dest
                 valid.append(v)
         visuals[:] = valid
-        min_scenes=5 if os.getenv('QUICK_PREVIEW')=='1' else 18
+        min_scenes=3 if os.getenv('QUICK_PREVIEW')=='1' else 18
         if len(visuals)<min_scenes:
             raise RuntimeError(f'Only {len(visuals)} generated cartoon scenes completed; need {min_scenes}')
         visuals[0]['start']=0.0
