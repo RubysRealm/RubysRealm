@@ -35,7 +35,7 @@ def _select_visuals(beats,duration):
     for item in pack['visuals']:
         st=float(item['start'])
         en=float(item.get('end',st+10.0))
-        out.append({'start':st,'end':en,'duration':max(0.1,en-st),'query':item['beat_text'],'score':10.0,'beat_text':item['beat_text'],'external_url':item['url'],'scene_id':item.get('scene_id',len(out)+1)})
+        out.append({'start':st,'end':en,'duration':max(0.1,en-st),'query':item['beat_text'],'score':10.0,'beat_text':item['beat_text'],'external_url':item['url'],'scene_id':item.get('scene_id',len(out)+1),'continuity':item.get('continuity',{})})
     return out
 
 
