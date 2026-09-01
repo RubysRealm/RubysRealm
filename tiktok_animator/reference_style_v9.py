@@ -1,4 +1,4 @@
-import os
+import os, json, urllib.request, base64
 from pathlib import Path
 from PIL import Image, ImageOps
 
@@ -7,6 +7,21 @@ _PIPE=None
 def bind(target):
     def reference_image(beat,seed,dest):
         global _PIPE
+        # Prefer the real SuperMe service when an authorized API key is configured.
+        superme_key=os.getenv('SUPERME_API_KEY','').strip()
+        if superme_key:
+            try:
+                payload=json.dumps({'prompt':str(beat),'seed':int(seed),'style':'avatar-story','transparent':False}).encode()
+                req=urllib.request.Request('https://api.superme.ai/v1/images/generate',data=payload,method='POST',headers={'Authorization':'Bearer '+superme_key,'Content-Type':'application/json'})
+                with urllib.request.urlopen(req,timeout=150) as r: data=json.loads(r.read().decode())
+                raw=data.get('b64_json') or data.get('image_base64')
+                url=data.get('url') or data.get('image_url')
+                if raw: Path(dest).write_bytes(base64.b64decode(raw))
+                elif url: urllib.request.urlretrieve(url,dest)
+                if Path(dest).exists():
+                    return {'query':str(beat)[:500],'source_type':'superme-avatar','via':'superme-api','seed':int(seed)}
+            except Exception as e:
+                print('SuperMe API generation unavailable; using automated reference-style fallback:',str(e)[:300])
         try:
             import torch
             from diffusers import AutoPipelineForText2Image
