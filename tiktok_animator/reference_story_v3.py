@@ -15,6 +15,29 @@ from story_generator import generate_story
 generated.bind(target)
 
 LAST_STORY_FINGERPRINT=None
+EXTERNAL_PACK_PATH=Path('tiktok_animator/external_visual_pack.json')
+
+
+def _external_pack():
+    if not EXTERNAL_PACK_PATH.exists():
+        return None
+    data=json.loads(EXTERNAL_PACK_PATH.read_text())
+    if not data.get('story') or not data.get('visuals'):
+        raise RuntimeError('External visual pack is incomplete')
+    return data
+
+
+def _select_visuals(beats,duration):
+    pack=_external_pack()
+    if not pack:
+        return target.select_visuals(scheduler,semantic,beats,duration)
+    out=[]
+    for item in pack['visuals']:
+        st=float(item['start'])
+        en=float(item.get('end',st+10.0))
+        out.append({'start':st,'end':en,'duration':max(0.1,en-st),'query':item['beat_text'],'score':10.0,'beat_text':item['beat_text'],'external_url':item['url']})
+    return out
+
 
 # Bind the active renderer to the user's second reference example.
 engine.compose_frame=target.compose_frame
@@ -23,7 +46,7 @@ engine.write_ass=target.write_ass
 engine.narrate=target.narrate
 engine.fallback_tts=target.no_approximate_tts
 engine.render=target.render
-engine.select_visuals=lambda beats,duration: target.select_visuals(scheduler,semantic,beats,duration)
+engine.select_visuals=lambda beats,duration: _select_visuals(beats,duration)
 engine.verify=target.verify
 engine.visual_query=semantic.semantic_query
 
@@ -38,6 +61,24 @@ patch.set_context=set_context
 
 # Production visuals must be generated cartoon illustrations only. No realistic-photo fallback.
 def prepare_visuals(visuals,seed):
+    pack=_external_pack()
+    if pack:
+        valid=[]
+        for i,v in enumerate(visuals):
+            url=str(v.get('external_url') or '').strip()
+            if not url:
+                raise RuntimeError(f'External visual URL missing at scene {i+1}')
+            dest=Path(target.base.__file__).parent/'tmp'/f'external_visual_{i:02d}.jpg'
+            dest.parent.mkdir(parents=True,exist_ok=True)
+            target.base.download(url,dest,timeout=120)
+            v['photo']=dest
+            v['source']={'source_type':'ai-generated-illustration','model':'purpose-generated-external','via':'direct-finished-beat-art','query':v.get('beat_text','')}
+            valid.append(v)
+        visuals[:]=valid
+        target.base.STYLE['generated_illustration_ratio']=1.0
+        target.base.STYLE['visual_source_policy']='generated-cartoon-only'
+        target.base.STYLE['photographic_fallback']='disabled'
+        return len(visuals)
     return target.prepare_visuals(visuals,seed,lambda *_args,**_kwargs: {'source_type':'none','error':'realistic-photo fallback disabled'})
 
 engine.prepare_visuals=prepare_visuals
@@ -50,6 +91,12 @@ def _story_fingerprint(story):
 
 def choose_story(seed):
     global LAST_STORY_FINGERPRINT
+    pack=_external_pack()
+    if pack:
+        info={'title':pack.get('title') or "Ruby's Realm Story",'part':pack.get('part') or 'Part 1','story':pack['story'],'source':'supplied'}
+        LAST_STORY_FINGERPRINT=_story_fingerprint(info['story'])
+        patch.set_context(info['title'])
+        return info
     supplied=os.getenv('STORY_TEXT','').strip()
     if supplied:
         info={'title':os.getenv('STORY_TITLE',"Ruby's Realm Story").strip() or "Ruby's Realm Story",'part':os.getenv('STORY_PART','Part 1').strip() or 'Part 1','story':supplied,'source':'supplied'}
