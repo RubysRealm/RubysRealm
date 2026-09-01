@@ -187,11 +187,11 @@ def _generated_prompt(beat):
     beat=re.sub(r'\s+',' ',str(beat)).strip()
     return (
         "Unmistakably non-photorealistic simplified 2D/2.5D cartoon story illustration matching the supplied Hotel Owner TikTok reference. "
-        "Adult characters use an oversized smooth bald round head, tiny simple eyes, minimal line mouth, clean dark outlines, compact simplified body, flat-to-soft cel shading, and expressive pose. "
+        "Adult characters must have complete intentional human cartoon faces: two clear eyes with pupils, eyebrows, a recognizable nose, a natural mouth, ears when visible, and an expression appropriate to the exact narrated action. Faces must never be blank, faceless, malformed, or reduced to random dots/scribbles. Keep the approved simple Hotel Owner-style proportions, clean dark outlines, compact simplified body, flat-to-soft cel shading, and expressive pose. "
         "Detailed colorful illustrated environment behind the character. Absolutely no realistic, semi-realistic, cinematic-human, photographic, clay, doll, or lifelike 3D people. "
-        "One picture only. No collage, split screen, inset panels, text, letters, captions, logos, or watermark. "
-        "Use the same recurring protagonist design when useful: adult man, smooth bald oversized cartoon head, tiny simple facial features, black work uniform appropriate to the occupation. "
-        "The image must literally depict the current story beat and its important location, object, action, or discovery. "
+        "One picture only. No collage, split screen, inset panels, captions, logos, or watermark. Do not generate decorative writing, fake letters, pseudo-text, gibberish, random symbols, invented signage, illegible labels, or symbol-like marks on objects. If the narrated beat does not require visible wording, every sign, screen, paper, package, storefront, vehicle, device, and prop must contain NO writing at all. If exact wording is essential to the beat, leave a clean blank label area so deterministic real text can be composited later; never ask the image model to draw words. "
+        "Use the same recurring protagonist design when useful: adult cartoon man with a complete expressive face, consistent facial structure and appearance across scenes, and clothing appropriate to the occupation and current action. "
+        "The image must literally depict the complete current narration beat and its important location, people, object, action, or discovery. Generate the finished story illustration itself for this beat; do not use generic scene templates, stock props, avatar overlays, or post-generation character sprites. "
         "Keep the central lower area reasonably uncluttered for overlaid captions. Current story: " + CURRENT_TITLE + ". Beat: " + beat[:900]
     )
 
