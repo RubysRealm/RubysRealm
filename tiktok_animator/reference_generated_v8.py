@@ -335,8 +335,9 @@ def bind(target):
                 v['photo']=dest
                 valid.append(v)
         visuals[:] = valid
-        if len(visuals)<18:
-            raise RuntimeError(f'Only {len(visuals)} generated cartoon scenes completed; refusing realistic-photo fallback')
+        min_scenes=5 if os.getenv('QUICK_PREVIEW')=='1' else 18
+        if len(visuals)<min_scenes:
+            raise RuntimeError(f'Only {len(visuals)} generated cartoon scenes completed; need {min_scenes}')
         visuals[0]['start']=0.0
         target.base.STYLE['generated_illustration_ratio']=1.0
         target.base.STYLE['visual_source_policy']='generated-cartoon-only'
@@ -409,12 +410,13 @@ def bind(target):
         generated_ratio=generated/max(1,len(visuals))
         approved_local=sum(1 for s in sources if (s or {}).get('via')=='local-sdxl-turbo-text2image-no-cost')
         approved_remote=sum(1 for s in sources if (s or {}).get('via')=='vercel-oidc-image-service')
-        checks['story_visual_source_ok']=all(_is_generated(s) for s in sources) and len(visuals)>=18
-        checks['generated_illustration_ratio_ok']=generated_ratio==1.0 and len(visuals)>=18
+        min_scenes=5 if os.getenv('QUICK_PREVIEW')=='1' else 18
+        checks['story_visual_source_ok']=all(_is_generated(s) for s in sources) and len(visuals)>=min_scenes
+        checks['generated_illustration_ratio_ok']=generated_ratio==1.0 and len(visuals)>=min_scenes
         checks['no_realistic_photo_fallback_ok']=all(_is_generated(s) for s in sources)
         checks['no_procedural_clipart_ok']=all((s or {}).get('source_type') != 'procedural-generated-illustration' for s in sources)
         checks['no_guide_preserving_img2img_ok']=all('img2img' not in str((s or {}).get('via','')).lower() for s in sources)
-        checks['approved_generation_path_ok']=(approved_local+approved_remote)==len(sources) and len(sources)>=18
+        checks['approved_generation_path_ok']=(approved_local+approved_remote)==len(sources) and len(sources)>=min_scenes
         target.base.STYLE['generated_illustration_ratio']=round(generated_ratio,4)
         target.base.STYLE['visual_source_policy']='generated-cartoon-only'
         target.base.STYLE['photographic_fallback']='disabled'
