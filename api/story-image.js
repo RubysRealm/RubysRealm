@@ -49,15 +49,15 @@ export default async function handler(req,res){
     const balance=await gatewayCredits(gatewayToken);
     if(balance<=reserve) return res.status(402).json({ok:false,error:'Existing AI Gateway credit reserve reached; no paid top-up will be attempted.',balance,reserve});
 
-    const model=process.env.AI_IMAGE_MODEL||'bfl/flux-2-klein-4b';
+    const model=process.env.AI_IMAGE_MODEL||'google/gemini-3.1-flash-image-preview';
     const prompt=[
-      'Create an unmistakably NON-PHOTOREALISTIC stylized 3D CARTOON story illustration for a vertical social storytelling video.',
-      'The result must look like a polished animated-film still or modern 3D cartoon explainer frame, NOT a photograph and NOT realistic documentary imagery.',
-      'Use simplified geometry, smooth CG materials, slightly exaggerated proportions, expressive cartoon faces, clean readable silhouettes, cinematic lighting, rich dimensional depth, and cohesive stylized environments.',
+      'Create ONE standalone vertical 9:16 story illustration matching the approved Ruby Realm Run 137 visual baseline: polished simple non-realistic Hotel Owner-style adult cartoon artwork.',
+      'Preserve Run 137 visual language: simple expressive adult cartoon characters, clean dark outlines, compact proportions, soft cel shading, detailed colorful environment, one coherent picture only.',
+      'LITERALLY illustrate this exact narration beat. Change the location, objects, action, camera staging, and supporting details to match THIS beat; never recycle a generic room, street, phone, sign, storefront, or unrelated prop.',
       'Do not render photographic skin texture, camera-real faces, documentary photography, stock-photo aesthetics, hyperrealism, or real-person likenesses.',
       'No text, no captions, no labels, no logos, no watermark.',
-      'Use a consistent recurring protagonist when a person belongs in the scene: stylized adult male cartoon character with shaved head, charcoal hoodie, dark pants, simple expressive animated face.',
-      'The image must clearly and literally depict the current story beat, including the most important location, object, action, clue, emotion, or discovery.',
+      'Use a consistent recurring protagonist only when the beat calls for him: simple non-realistic adult cartoon man with a complete expressive face and clothing appropriate to the current story context. Do not insert him when the beat is about an object/location alone.',
+      'The image must clearly and literally depict WHO is present, WHERE the beat occurs, WHAT is happening, and the important scene-specific objects. Every scene must be visibly distinct from adjacent scenes while retaining the exact Run 137 art style.',
       'Compose the important subject center-left or center and keep the lower-center region readable for an overlaid one-word caption.',
       `Story title: ${title}.`,
       `Current beat: ${beat}`
