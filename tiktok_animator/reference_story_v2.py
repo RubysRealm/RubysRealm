@@ -255,7 +255,7 @@ def main():
  except Exception as e:
   print('Edge narration fallback:',e,file=sys.stderr); events=fallback_tts(story,audio); events_file.write_text(json.dumps(events,indent=2))
  duration=media_duration(audio)
- if not STYLE['hard_duration'][0]<=duration<=STYLE['hard_duration'][1]: raise RuntimeError(f'narration duration {duration:.1f}s outside 2-9 minute range')
+ if not ((20<=duration<=45) if os.getenv('QUICK_PREVIEW')=='1' else (STYLE['hard_duration'][0]<=duration<=STYLE['hard_duration'][1])): raise RuntimeError(f'narration duration {duration:.1f}s outside required range')
  cues=caption_cues(story,events); beats=time_beats(split_beats(story),events,duration); visuals=select_visuals(beats,duration); source_count=prepare_visuals(visuals,seed)
  if not visuals or not any(v.get('photo') for v in visuals): raise RuntimeError('No legitimate photographic visuals found; refusing placeholder fallback')
  baseline=next(v['photo'] for v in visuals if v.get('photo')); base=TMP/'base.jpg'; compose_frame(title,part,baseline,seed,base,False); ass=TMP/'captions.ass'; write_ass(cues,ass); name=f'{safe_name(title)}-{seed}'; video=OUT/f'{name}.mp4'; render(base,visuals,audio,ass,duration,video,title,part,seed,TMP)
