@@ -231,7 +231,7 @@ def _premium_scene_prompt(beat):
       ". Match the supplied Hotel Owner reference visual language: polished simple 2D adult cartoon, oversized rounded head, compact body, clean dark outlines, restrained expressive face, cinematic environmental lighting, richly detailed scene-specific background. "
       "Literally depict WHO is present, WHERE they are, WHAT is happening, and all important objects stated in the beat. "
       "The action and location must be unmistakable at a glance. Keep the recurring protagonist visually consistent between consecutive scenes. "
-      "No generic props, no unrelated objects, no collage, no photorealism, no 3D render, no anime, no text, captions, logos, watermark, UI, or speech bubbles."
+      "Show only characters and objects required by this exact beat. No mascot, avatar, narrator figure, sticker character, inset person, repeated stock character, generic prop, unrelated object, collage, photorealism, 3D render, anime, text, captions, logos, watermark, UI, or speech bubbles. One coherent scene only."
     )
 
 def _local_diffusion_cartoon(beat,seed,dest):
@@ -263,6 +263,7 @@ def _local_diffusion_cartoon(beat,seed,dest):
             'tiny dot eyes, tiny simple mouth, compact simplified body, clean dark outlines, flat cel shading. '
             'Detailed colorful illustrated environment that clearly shows the location, important object, and current action. '
             'Readable mobile-story composition, charming animated explainer style, one picture only. '
+            'NO mascot or avatar overlay, NO narrator doll, NO inset character, NO extra person unless explicitly present in the beat. '
             'No realism, no photography, no lifelike skin, no 3D render, no anime, no collage, no split screen, no text, no logo, no watermark.'
         )
         gen=torch.Generator(device='cpu').manual_seed(int(seed)&0x7fffffff)
@@ -302,9 +303,7 @@ def bind(target):
         local=_local_diffusion_cartoon(beat,seed,dest)
         if local:
             return local
-        direct=original_ai(beat,seed,dest)
-        if direct:
-            return direct
+        # Never fall back to legacy renderer imagery: it can inject generic/repeated characters.
         service=str(os.getenv('V7_IMAGE_SERVICE_URL','')).strip()
         token=str(os.getenv('GITHUB_OIDC_TOKEN','')).strip()
         if not service or not token:
@@ -359,7 +358,20 @@ def bind(target):
         return len(visuals)
 
     def select_visuals(scheduler,semantic,beats,duration):
-        visuals=list(original_select(scheduler,semantic,beats,duration))
+        # Build scene schedule directly from narration beats. Legacy visual selection is intentionally bypassed.
+        usable=[b for b in beats if str(b.get('text') or '').strip()]
+        visuals=[]
+        last=-999.0
+        for b in usable:
+            st=float(b.get('start',0) or 0)
+            text=str(b.get('text') or '').strip()
+            # Tight beat alignment: change on narrated beat boundaries, normally every 6-12 seconds.
+            if not visuals or st-last>=6.0:
+                visuals.append({'start':st,'end':min(float(duration),st+10.0),'duration':10.0,'query':semantic.semantic_query(text),'score':float(b.get('score',0) or 0),'beat_text':text})
+                last=st
+        if not visuals and usable:
+            b=usable[0]; text=str(b.get('text') or '').strip(); visuals=[{'start':0.0,'end':min(float(duration),10.0),'duration':10.0,'query':semantic.semantic_query(text),'score':float(b.get('score',0) or 0),'beat_text':text}]
+        visuals.sort(key=lambda v:float(v.get('start',0)))
         visuals.sort(key=lambda v:float(v.get('start',0)))
         # Preserve meaningful story beats while guaranteeing the existing <=24s change-cadence QC.
         # Add the strongest unused beat near the midpoint of any oversized gap.
