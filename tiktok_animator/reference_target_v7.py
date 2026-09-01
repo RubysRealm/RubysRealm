@@ -154,7 +154,8 @@ async def narrate(text,audio,event_file):
                     elif chunk['type']=='WordBoundary':
                         events.append({'text':chunk.get('text',''),'start':chunk.get('offset',0)/10000000,'duration':chunk.get('duration',0)/10000000})
             expected=max(1,len(base.words(text)))
-            if len(events)<max(120,int(expected*.82)):
+            min_events=30 if os.getenv('QUICK_PREVIEW')=='1' else 120
+            if len(events)<max(min_events,int(expected*.82)):
                 raise RuntimeError(f'word-boundary coverage too low: {len(events)}/{expected}')
             Path(audio).unlink(missing_ok=True)
             tmp.replace(audio)
