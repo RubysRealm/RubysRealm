@@ -442,7 +442,8 @@ def bind(target):
         checks['no_realistic_photo_fallback_ok']=all(_is_generated(s) for s in sources)
         checks['no_procedural_clipart_ok']=all((s or {}).get('source_type') != 'procedural-generated-illustration' for s in sources)
         checks['no_guide_preserving_img2img_ok']=all('img2img' not in str((s or {}).get('via','')).lower() for s in sources)
-        checks['approved_generation_path_ok']=(approved_local+approved_remote)==len(sources) and len(sources)>=min_scenes
+        approved_external=sum(1 for s in sources if (s or {}).get('via')=='direct-finished-beat-art' and (s or {}).get('model')=='purpose-generated-external')
+        checks['approved_generation_path_ok']=(approved_local+approved_remote+approved_external)==len(sources) and len(sources)>=min_scenes
         target.base.STYLE['generated_illustration_ratio']=round(generated_ratio,4)
         target.base.STYLE['visual_source_policy']='generated-cartoon-only'
         target.base.STYLE['photographic_fallback']='disabled'
