@@ -1,0 +1,64 @@
+name: Ruby's Realm 30-second visual proof
+
+on:
+  push:
+    paths:
+      - '.github/workflows/quick-visual-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: rubys-realm-quick-visual-proof
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      QUICK_PREVIEW: '1'
+      STORY_TITLE: 'Your Life After Winning the Lottery'
+      STORY_PART: 'Part 1'
+      STORY_TEXT: >-
+        You scan the lottery ticket again, but the screen still tells you to see the retailer.
+        The clerk checks the numbers once, then a second time, and suddenly looks straight at you.
+        You matched every number. You sign the back of the ticket before doing anything else.
+        Then you photograph both sides with your phone and lock the ticket away.
+        The next morning, before anyone else knows, you sit down with an attorney and an accountant to decide what happens next.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install rendering tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          pip install -r tiktok_animator/requirements.txt
+      - name: Mint image-service token
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESPONSE="$(curl -sS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=rubys-realm-image-generator")"
+          TOKEN="$(printf '%s' "$RESPONSE" | python -c 'import json,sys; print(json.load(sys.stdin).get("value", ""))')"
+          test -n "$TOKEN"
+          echo "::add-mask::$TOKEN"
+          echo "GITHUB_OIDC_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+      - name: Render 30-second proof
+        run: |
+          rm -rf tiktok_animator/output tiktok_animator/tmp
+          mkdir -p tiktok_animator/output tiktok_animator/tmp
+          export STORY_SEED=${GITHUB_RUN_ID}
+          ALLOW_REMOTE_IMAGE_GENERATION=1 python tiktok_animator/reference_story_v3.py
+      - name: Upload proof MP4
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubys-realm-30-second-proof-${{ github.run_number }}
+          path: |
+            tiktok_animator/output/*.mp4
+            tiktok_animator/output/*.json
+          if-no-files-found: error
+          retention-days: 3
