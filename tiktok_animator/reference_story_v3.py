@@ -35,7 +35,7 @@ def _select_visuals(beats,duration):
     for item in pack['visuals']:
         st=float(item['start'])
         en=float(item.get('end',st+10.0))
-        out.append({'start':st,'end':en,'duration':max(0.1,en-st),'query':item['beat_text'],'score':10.0,'beat_text':item['beat_text'],'external_url':item['url']})
+        out.append({'start':st,'end':en,'duration':max(0.1,en-st),'query':item['beat_text'],'score':10.0,'beat_text':item['beat_text'],'external_url':item['url'],'scene_id':item.get('scene_id',len(out)+1)})
     return out
 
 
@@ -64,10 +64,14 @@ def prepare_visuals(visuals,seed):
     pack=_external_pack()
     if pack:
         valid=[]
+        seen_urls=set()
         for i,v in enumerate(visuals):
             url=str(v.get('external_url') or '').strip()
             if not url:
                 raise RuntimeError(f'External visual URL missing at scene {i+1}')
+            if url in seen_urls:
+                raise RuntimeError(f'Reused external visual detected at scene {i+1}; every narration beat requires unique finished artwork')
+            seen_urls.add(url)
             dest=Path(target.base.__file__).parent/'tmp'/f'external_visual_{i:02d}.jpg'
             dest.parent.mkdir(parents=True,exist_ok=True)
             target.base.download(url,dest,timeout=120)
