@@ -270,7 +270,9 @@ def select_visuals(scheduler,semantic,beats,duration):
             visuals.append({'start':st,'end':st+6.0,'duration':6.0,'query':semantic.semantic_query(b['text']),'score':b.get('score',0),'beat_text':b['text']})
             if len(visuals)>=target_min: break
     visuals.sort(key=lambda v:float(v['start']))
-    return visuals[:12] if os.getenv('QUICK_PREVIEW')=='1' else visuals[:36]
+    # Long-form production needs frequent literal beat changes; never starve a 5+ minute story of imagery.
+    max_visuals=max(36,int(float(duration)/8.0)+1)
+    return visuals[:12] if os.getenv('QUICK_PREVIEW')=='1' else visuals[:max_visuals]
 
 
 def render(_base_frame,visuals,audio,ass,duration,out,title,part,seed,tmp):
@@ -316,7 +318,7 @@ def verify(video,cues,visuals,narration,source_count):
         'word_boundary_caption_sync_ok':one_word,
         'caption_safe_word_limit_ok':max((int(c.get('words',0)) for c in cues),default=0)<=1,
         'continuous_story_image_ok':bool(visuals) and abs(float(visuals[0].get('start',0)))<0.05,
-        'visual_insert_count_ok':len(visuals)>=max(10,int(actual/28)),
+        'visual_insert_count_ok':len(visuals)>=max(18,int(actual/12)),
         'single_reference_frame_ok':all(int(v.get('panel_count',0))==1 for v in visuals),
         'visual_change_spacing_ok':not gaps or (min(gaps)>=5.0 and max(gaps)<=24.0),
         'story_visual_source_ok':len(valid)==len(visuals),
