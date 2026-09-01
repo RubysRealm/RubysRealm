@@ -18,9 +18,9 @@ base.STYLE['quality_gate']='reference-example-target-v7'
 base.STYLE['caption_words_max']=1
 base.STYLE['caption_chars_max']=22
 base.STYLE['visual_coverage']=[0.98,1.01]
-base.STYLE['visual_min_gap']=8.0
-base.STYLE['visual_max_gap']=20.0
-base.STYLE['visual_hold']=[7.0,22.0]
+base.STYLE['visual_min_gap']=5.0
+base.STYLE['visual_max_gap']=14.0
+base.STYLE['visual_hold']=[5.0,14.0]
 base.STYLE['voice_preference']=['en-US-BrianMultilingualNeural','en-US-AndrewMultilingualNeural','en-US-BrianNeural','en-US-AndrewNeural','en-US-OnyxTurboMultilingualNeural']
 base.STYLE['caption_timing']='direct-neural-word-boundaries'
 base.STYLE['visual_baseline']='continuous-story-image'
@@ -69,25 +69,22 @@ def _fit(draw,text,font,width,max_lines=2):
 
 
 def compose_frame(title,part,photo,seed,out,active=True,secondary=None,tertiary=None,quaternary=None):
-    # Persistent polished header + exactly ONE story illustration.
+    # Exactly ONE full-screen story illustration; persistent title is overlaid on top of it.
     im=Image.new('RGB',(W,H),(12,13,15))
-    header=_texture((W,HEADER_END),seed)
-    im.paste(header,(0,0))
-    stage_h=H-HEADER_END
+    stage_h=H
     if photo is not None and Path(photo).exists():
         with Image.open(photo) as src:
             src=ImageOps.exif_transpose(src).convert('RGB')
-            src=ImageOps.fit(src,(W,stage_h),method=Image.Resampling.LANCZOS,centering=(.5,.5))
+            src=ImageOps.fit(src,(W,H),method=Image.Resampling.LANCZOS,centering=(.5,.5))
             src=ImageEnhance.Contrast(src).enhance(1.05)
             src=ImageEnhance.Color(src).enhance(1.05)
             src=ImageEnhance.Sharpness(src).enhance(1.04)
-            im.paste(src,(0,HEADER_END))
+            im.paste(src,(0,0))
     else:
-        im.paste(_texture((W,stage_h),seed+3),(0,HEADER_END))
+        im.paste(_texture((W,H),seed+3),(0,0))
     d=ImageDraw.Draw(im,'RGBA')
-    # polished card/header treatment
-    d.rounded_rectangle((38,42,W-38,HEADER_END-34),radius=34,fill=(9,12,23,218),outline=(255,255,255,28),width=2)
-    d.rectangle((0,HEADER_END-4,W,HEADER_END+2),fill=(255,183,65,230))
+    # polished translucent title treatment over the full-screen illustration
+    d.rounded_rectangle((38,42,W-38,HEADER_END-34),radius=34,fill=(9,12,23,190),outline=(255,255,255,32),width=2)
     lines=_fit(d,title,TITLE_FONT,585,2)
     y=82 if len(lines)>1 else 112
     for line in lines:
@@ -188,10 +185,10 @@ def _generated_prompt(beat):
     return (
         "Unmistakably non-photorealistic simplified 2D/2.5D cartoon story illustration matching the supplied Hotel Owner TikTok reference. "
         "Adult characters must have complete intentional human cartoon faces: two clear eyes with pupils, eyebrows, a recognizable nose, a natural mouth, ears when visible, and an expression appropriate to the exact narrated action. Faces must never be blank, faceless, malformed, or reduced to random dots/scribbles. Keep the approved simple Hotel Owner-style proportions, clean dark outlines, compact simplified body, flat-to-soft cel shading, and expressive pose. "
-        "Detailed colorful illustrated environment behind the character. Absolutely no realistic, semi-realistic, cinematic-human, photographic, clay, doll, or lifelike 3D people. "
+        "Rich, highly detailed colorful illustrated environment filling the entire vertical frame: layered foreground, midground and background; scene-specific architecture, furniture, vehicles, tools, weather, lighting, secondary people, and small contextual objects that directly support the current narration beat. Avoid empty walls, sparse rooms, generic backgrounds, repeated compositions, and recycled props. Absolutely no realistic, semi-realistic, cinematic-human, photographic, clay, doll, or lifelike 3D people. "
         "One picture only. No collage, split screen, inset panels, captions, logos, or watermark. Do not generate decorative writing, fake letters, pseudo-text, gibberish, random symbols, invented signage, illegible labels, or symbol-like marks on objects. If the narrated beat does not require visible wording, every sign, screen, paper, package, storefront, vehicle, device, and prop must contain NO writing at all. If exact wording is essential to the beat, leave a clean blank label area so deterministic real text can be composited later; never ask the image model to draw words. "
         "Use the same recurring protagonist design when useful: adult cartoon man with a complete expressive face, consistent facial structure and appearance across scenes, and clothing appropriate to the occupation and current action. "
-        "The image must literally depict the complete current narration beat and its important location, people, object, action, or discovery. Generate the finished story illustration itself for this beat; do not use generic scene templates, stock props, avatar overlays, or post-generation character sprites. "
+        "The image must literally depict the complete current narration beat and its important location, people, object, action, or discovery. Include multiple relevant visual details from that exact beat whenever possible so a viewer can understand what is happening even without audio. Every beat should have visibly distinct staging, camera angle, environment and supporting objects. Generate the finished full-screen story illustration itself for this beat; do not use generic scene templates, stock props, avatar overlays, or post-generation character sprites. "
         "Keep the central lower area reasonably uncluttered for overlaid captions. Current story: " + CURRENT_TITLE + ". Beat: " + beat[:900]
     )
 
@@ -271,7 +268,7 @@ def select_visuals(scheduler,semantic,beats,duration):
             if len(visuals)>=target_min: break
     visuals.sort(key=lambda v:float(v['start']))
     # Long-form production needs frequent literal beat changes; never starve a 5+ minute story of imagery.
-    max_visuals=max(36,int(float(duration)/8.0)+1)
+    max_visuals=max(42,int(float(duration)/6.5)+1)
     return visuals[:12] if os.getenv('QUICK_PREVIEW')=='1' else visuals[:max_visuals]
 
 
@@ -318,7 +315,7 @@ def verify(video,cues,visuals,narration,source_count):
         'word_boundary_caption_sync_ok':one_word,
         'caption_safe_word_limit_ok':max((int(c.get('words',0)) for c in cues),default=0)<=1,
         'continuous_story_image_ok':bool(visuals) and abs(float(visuals[0].get('start',0)))<0.05,
-        'visual_insert_count_ok':len(visuals)>=max(18,int(actual/12)),
+        'visual_insert_count_ok':len(visuals)>=max(24,int(actual/9)),
         'single_reference_frame_ok':all(int(v.get('panel_count',0))==1 for v in visuals),
         'visual_change_spacing_ok':not gaps or (min(gaps)>=5.0 and max(gaps)<=24.0),
         'story_visual_source_ok':len(valid)==len(visuals),
