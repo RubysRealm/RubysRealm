@@ -259,7 +259,7 @@ def prepare_visuals(visuals,seed,semantic_fetch):
 def select_visuals(scheduler,semantic,beats,duration):
     visuals=list(scheduler.select_visuals(semantic,beats,duration))
     # Keep enough scene changes for the reference feel while avoiding meaningless churn.
-    target_min=max(18,min(34,int(duration/10.0)))
+    target_min=(max(7,min(10,int(duration/5.5))) if os.getenv('QUICK_PREVIEW')=='1' else max(18,min(34,int(duration/10.0))))
     if len(visuals)<target_min:
         candidates=sorted(beats,key=lambda b:(-float(b.get('score',0)),float(b['start'])))
         for b in candidates:
@@ -269,7 +269,7 @@ def select_visuals(scheduler,semantic,beats,duration):
             visuals.append({'start':st,'end':st+6.0,'duration':6.0,'query':semantic.semantic_query(b['text']),'score':b.get('score',0),'beat_text':b['text']})
             if len(visuals)>=target_min: break
     visuals.sort(key=lambda v:float(v['start']))
-    return visuals[:36]
+    return visuals[:12] if os.getenv('QUICK_PREVIEW')=='1' else visuals[:36]
 
 
 def render(_base_frame,visuals,audio,ass,duration,out,title,part,seed,tmp):
@@ -311,7 +311,7 @@ def verify(video,cues,visuals,narration,source_count):
     gaps=[b-a for a,b in zip(starts,starts[1:])]
     one_word=all(int(c.get('words',0))==1 for c in cues) and len(cues)>=max(120,int(actual*2.0))
     checks={
-        'duration_in_range':120<=actual<=540,
+        'duration_in_range':((25<=actual<=120) if os.getenv('QUICK_PREVIEW')=='1' else (120<=actual<=540)),
         'word_boundary_caption_sync_ok':one_word,
         'caption_safe_word_limit_ok':max((int(c.get('words',0)) for c in cues),default=0)<=1,
         'continuous_story_image_ok':bool(visuals) and abs(float(visuals[0].get('start',0)))<0.05,
