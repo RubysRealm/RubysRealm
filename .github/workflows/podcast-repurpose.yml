@@ -41,7 +41,7 @@ jobs:
           PART_TARGET_SECONDS: '180'
           PART_MIN_SECONDS: '105'
           PART_MAX_SECONDS: '220'
-        run: python podcast_repurpose/repurpose.py
+        run: python podcast_repurpose/repurpose_centered.py
 
       - name: Publish prepared part to TikTok
         env:
