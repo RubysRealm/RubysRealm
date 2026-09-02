@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -30,10 +29,7 @@ def api_post(path, token, body):
     req = urllib.request.Request(
         TIKTOK_ROOT + path,
         data=json.dumps(body).encode(),
-        headers={
-            "Authorization": "Bearer " + token,
-            "Content-Type": "application/json; charset=UTF-8",
-        },
+        headers={"Authorization": "Bearer " + token, "Content-Type": "application/json; charset=UTF-8"},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=90) as r:
@@ -51,17 +47,14 @@ def ensure_active_story(queue, state):
     if idx >= len(stories):
         print("No queued stories remain.")
         return None, None, None
-
     story = stories[idx]
     parts = story["parts"]
     next_part = int(state.get("next_part", 1))
     story_day = state.get("story_day")
-
     if story_day is None:
         state["story_day"] = today
         story_day = today
         save_json(STATE_PATH, state)
-
     if next_part > len(parts):
         if story["id"] not in state.get("completed_story_ids", []):
             state.setdefault("completed_story_ids", []).append(story["id"])
@@ -77,30 +70,17 @@ def ensure_active_story(queue, state):
         state["next_part"] = 1
         state["story_day"] = today
         state["last_publish_id"] = None
+        state["last_published_at"] = None
         story = stories[idx]
         parts = story["parts"]
         next_part = 1
         save_json(STATE_PATH, state)
-
-    # If a story was not completed during its intended calendar day, it remains
-    # locked until completion. We never mix a second story into that backlog day.
-    part = parts[next_part - 1]
-    return story, part, len(parts)
+    return story, parts[next_part - 1], len(parts)
 
 
 def download_source(source_url, work):
     template = str(work / "source.%(ext)s")
-    subprocess.run(
-        [
-            "yt-dlp",
-            "--no-playlist",
-            "--merge-output-format", "mp4",
-            "-f", "bv*+ba/b",
-            "-o", template,
-            source_url,
-        ],
-        check=True,
-    )
+    subprocess.run(["yt-dlp", "--no-playlist", "--merge-output-format", "mp4", "-f", "bv*+ba/b", "-o", template, source_url], check=True)
     candidates = sorted(work.glob("source.*"))
     if not candidates:
         raise RuntimeError("Source video download produced no file")
@@ -112,43 +92,23 @@ def render_part(source, part, output):
     end = float(part["end"])
     if end <= start:
         raise RuntimeError(f"Bad part range: {start}..{end}")
-
     vf = (
         "[0:v]split=2[bg][fg];"
-        "[bg]scale=1080:1920:force_original_aspect_ratio=increase,"
-        "crop=1080:1920,gblur=sigma=24[bg2];"
+        "[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=24[bg2];"
         "[fg]scale=1080:1920:force_original_aspect_ratio=decrease[fg2];"
         "[bg2][fg2]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]"
     )
-    subprocess.run(
-        [
-            "ffmpeg", "-y", "-v", "error",
-            "-ss", f"{start:.3f}",
-            "-to", f"{end:.3f}",
-            "-i", str(source),
-            "-filter_complex", vf,
-            "-map", "[v]",
-            "-map", "0:a?",
-            "-c:v", "libx264",
-            "-preset", "medium",
-            "-crf", "20",
-            "-r", "30",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-movflags", "+faststart",
-            str(output),
-        ],
-        check=True,
-    )
+    subprocess.run([
+        "ffmpeg", "-y", "-v", "error", "-ss", f"{start:.3f}", "-to", f"{end:.3f}", "-i", str(source),
+        "-filter_complex", vf, "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "medium",
+        "-crf", "20", "-r", "30", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(output)
+    ], check=True)
     if not output.exists() or output.stat().st_size < 100_000:
         raise RuntimeError("Rendered TikTok part is missing or unexpectedly small")
 
 
 def caption_for(story, part, total):
-    return (
-        f"{story['title']} — Part {part['number']}/{total}: {part['label']} "
-        "#storytime #storytok #pov #rubysrealm"
-    )
+    return f"{story['title']} — Part {part['number']}/{total}: {part['label']} #storytime #storytok #pov #rubysrealm"
 
 
 def publish(video, caption, token):
@@ -156,50 +116,22 @@ def publish(video, caption, token):
     privacy_options = creator.get("privacy_level_options") or []
     if "PUBLIC_TO_EVERYONE" not in privacy_options:
         raise RuntimeError(f"Public TikTok posting is not available for this authorization: {privacy_options}")
-
     size = video.stat().st_size
-    init = api_post(
-        "/v2/post/publish/video/init/",
-        token,
-        {
-            "post_info": {
-                "title": caption,
-                "privacy_level": "PUBLIC_TO_EVERYONE",
-                "disable_duet": False,
-                "disable_comment": False,
-                "disable_stitch": False,
-                "video_cover_timestamp_ms": 1000,
-            },
-            "source_info": {
-                "source": "FILE_UPLOAD",
-                "video_size": size,
-                "chunk_size": size,
-                "total_chunk_count": 1,
-            },
-        },
-    )
-    upload_url = init["upload_url"]
-    publish_id = init["publish_id"]
+    init = api_post("/v2/post/publish/video/init/", token, {
+        "post_info": {"title": caption, "privacy_level": "PUBLIC_TO_EVERYONE", "disable_duet": False, "disable_comment": False, "disable_stitch": False, "video_cover_timestamp_ms": 1000},
+        "source_info": {"source": "FILE_UPLOAD", "video_size": size, "chunk_size": size, "total_chunk_count": 1},
+    })
+    upload_url, publish_id = init["upload_url"], init["publish_id"]
     data = video.read_bytes()
-    req = urllib.request.Request(
-        upload_url,
-        data=data,
-        headers={
-            "Content-Type": "video/mp4",
-            "Content-Length": str(size),
-            "Content-Range": f"bytes 0-{size-1}/{size}",
-        },
-        method="PUT",
-    )
+    req = urllib.request.Request(upload_url, data=data, headers={"Content-Type": "video/mp4", "Content-Length": str(size), "Content-Range": f"bytes 0-{size-1}/{size}"}, method="PUT")
     with urllib.request.urlopen(req, timeout=600) as r:
         r.read()
-
     for _ in range(90):
         status = api_post("/v2/post/publish/status/fetch/", token, {"publish_id": publish_id})
-        state = (status.get("status") or status.get("publish_status") or "").upper()
-        if state in ("PUBLISH_COMPLETE", "SUCCESS", "COMPLETED", "POSTED"):
+        publish_state = (status.get("status") or status.get("publish_status") or "").upper()
+        if publish_state in ("PUBLISH_COMPLETE", "SUCCESS", "COMPLETED", "POSTED"):
             return publish_id
-        if state in ("FAILED", "PUBLISH_FAILED", "ERROR"):
+        if publish_state in ("FAILED", "PUBLISH_FAILED", "ERROR"):
             raise RuntimeError(f"TikTok publish failed: {status}")
         time.sleep(10)
     raise RuntimeError(f"TikTok publish did not confirm completion for {publish_id}; part counter was NOT advanced")
@@ -209,20 +141,26 @@ def main():
     token = os.environ.get("TT_TOKEN", "").strip()
     if not token:
         raise RuntimeError("TT_TOKEN is not configured")
-
     queue = load_json(QUEUE_PATH)
     state = load_json(STATE_PATH)
+
+    last = state.get("last_published_at")
+    cadence_hours = float(queue.get("show", {}).get("cadence_hours", 1))
+    if last:
+        last_dt = datetime.fromisoformat(last)
+        remaining = timedelta(hours=cadence_hours) - (datetime.now(TZ) - last_dt)
+        if remaining.total_seconds() > 0:
+            print(f"Cadence lock active; next part is not eligible for another {int(remaining.total_seconds() // 60) + 1} minutes.")
+            return 0
+
     story, part, total = ensure_active_story(queue, state)
     if story is None:
         return 0
-
     expected = int(state.get("next_part", 1))
     if int(part["number"]) != expected:
         raise RuntimeError(f"Ordering lock failed: expected Part {expected}, got Part {part['number']}")
-
     print(f"Locked story: {story['title']}")
     print(f"Publishing Part {part['number']}/{total}: {part['label']}")
-
     with tempfile.TemporaryDirectory(prefix="rubys-podcast-") as td:
         work = Path(td)
         source = download_source(story["source_url"], work)
@@ -231,8 +169,6 @@ def main():
         caption = caption_for(story, part, total)
         print("Caption:", caption)
         publish_id = publish(output, caption, token)
-
-    # Advance only after TikTok explicitly confirms this exact part completed.
     state["last_publish_id"] = publish_id
     state["last_published_at"] = datetime.now(TZ).isoformat()
     state["next_part"] = expected + 1
