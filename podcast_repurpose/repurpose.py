@@ -71,12 +71,19 @@ def metadata(url):
     return json.loads(raw)
 
 
+def enforce_story_lock(state, selected):
+    current = state.get("current") or {}
+    locked_id = current.get("id")
+    if locked_id and selected.get("id") != locked_id:
+        raise RuntimeError(f"Story lock violation: active story {locked_id}, attempted {selected.get('id')}")
+    return selected
+
 def choose_episode(state, items):
     current = state.get("current")
     if current and current.get("id"):
         for item in items:
             if item["id"] == current["id"]:
-                return item, int(current.get("next_part") or 1)
+                return enforce_story_lock(state, item), int(current.get("next_part") or 1)
         # Keep working a current episode even if it dropped off the first page.
         if current.get("url"):
             return {
