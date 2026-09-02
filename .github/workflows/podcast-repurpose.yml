@@ -35,7 +35,7 @@ jobs:
           sudo apt-get install -y ffmpeg fonts-dejavu-core
           python -m pip install --upgrade pip yt-dlp
 
-      - name: Prepare next long-form story part
+      - name: Prepare corrected next long-form story part
         env:
           PODCAST_VIDEO_SOURCE: https://www.dailymotion.com/user/MasterPOVYT/videos
           PART_TARGET_SECONDS: '180'
@@ -43,19 +43,110 @@ jobs:
           PART_MAX_SECONDS: '220'
         run: python podcast_repurpose/repurpose_centered.py
 
-      - name: Publish prepared part to TikTok
-        env:
-          TT_TOKEN: ${{ secrets.TT_TOKEN }}
-        run: python podcast_repurpose/publish.py
-
-      - name: Save successful queue position
+      - name: Convert manifest for existing Buffer TikTok publisher
         run: |
-          set -e
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('podcast_repurpose/output/manifest.json')
+          m=json.loads(p.read_text())
+          src=m['source']
+          out={
+            'platform':'rubys-realm-podcast-repost-v1',
+            'storyId':src['id'],
+            'title':src['title'],
+            'partNumber':int(m['part']),
+            'totalParts':int(m['totalParts']),
+            'partLabel':f"Story segment {int(m['part'])}",
+            'storyTitleBurnedIn':True,
+            'partLabelBurnedIn':True,
+            'captionsBurnedIn':True,
+            'captionTiming':'word-timestamped narration transcription',
+            'durationSeconds':float(m['durationSeconds']),
+            'file':Path(m['video']).name,
+            'sourceUrl':src['url']
+          }
+          p.write_text(json.dumps(out,indent=2)+'\n')
+          print(json.dumps(out,indent=2))
+          PY
+
+      - name: Publish corrected part as release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="podcast-part-${GITHUB_RUN_ID}"
+          MANIFEST='podcast_repurpose/output/manifest.json'
+          VIDEO="$(find podcast_repurpose/output -maxdepth 1 -name '*.mp4' -print -quit)"
+          test -n "$VIDEO"
+          gh release delete "$TAG" --yes --cleanup-tag >/dev/null 2>&1 || true
+          gh release create "$TAG" "$VIDEO" "$MANIFEST#manifest.json"             --title "Ruby's Realm corrected podcast part ${GITHUB_RUN_NUMBER}"             --notes "Corrected centered title layout; routed through the existing Buffer-connected TikTok publisher."
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+
+      - name: Wait for existing Buffer TikTok endpoint
+        run: |
+          set -euo pipefail
+          URL='https://rubys-realm.vercel.app/api/auto-post'
+          for i in $(seq 1 48); do
+            CODE="$(curl -sS -o /tmp/probe.json -w '%{http_code}' "$URL" || true)"
+            if [ "$CODE" = '400' ]; then
+              exit 0
+            fi
+            sleep 5
+          done
+          cat /tmp/probe.json || true
+          exit 1
+
+      - name: Send corrected part through Buffer to TikTok
+        run: |
+          set -euo pipefail
+          URL="https://rubys-realm.vercel.app/api/auto-post?tag=${RELEASE_TAG}"
+          RESPONSE=''
+          for i in $(seq 1 20); do
+            RESPONSE="$(curl -sS --max-time 90 "$URL" || true)"
+            if printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("ok") else 1)' 2>/dev/null; then
+              break
+            fi
+            sleep 10
+          done
+          printf '%s\n' "$RESPONSE"
+          printf '%s' "$RESPONSE" > /tmp/post-response.json
+          POST_ID="$(python -c 'import json; d=json.load(open("/tmp/post-response.json")); assert d.get("ok"), d; print(d.get("postId") or "")')"
+          test -n "$POST_ID"
+          echo "POST_ID=$POST_ID" >> "$GITHUB_ENV"
+
+      - name: Advance only after Buffer accepts the TikTok post
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          state_path=Path('podcast_repurpose/state.json')
+          state=json.loads(state_path.read_text()) if state_path.exists() else {'current':None,'completed':[]}
+          manifest=json.loads(Path('podcast_repurpose/output/manifest.json').read_text())
+          part=int(manifest['partNumber'])
+          total=int(manifest['totalParts'])
+          story_id=manifest['storyId']
+          if part >= total:
+              done=list(state.get('completed') or [])
+              if story_id not in done: done.append(story_id)
+              state['completed']=done[-500:]
+              state['current']=None
+          else:
+              state['current']={
+                'id':story_id,
+                'url':manifest['sourceUrl'],
+                'title':manifest['title'],
+                'next_part':part+1,
+                'total_parts':total
+              }
+          state_path.write_text(json.dumps(state,indent=2)+'\n')
+          PY
           git config user.name 'rubys-realm-bot'
           git config user.email 'actions@users.noreply.github.com'
           git add podcast_repurpose/state.json
           if ! git diff --cached --quiet; then
-            git commit -m 'Advance podcast TikTok queue [skip ci]'
+            git commit -m 'Advance podcast TikTok queue after Buffer acceptance [skip ci]'
             git push
           fi
 
