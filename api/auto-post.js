@@ -114,7 +114,7 @@ export default async function handler(req,res){
   if(req.method!=='GET') return res.status(405).json({ok:false,error:'Method not allowed'});
   try{
     const tag=String(req.query?.tag||'').trim();
-    if(/^podcast-part-[0-9]+$/.test(tag)) return await postPodcast(tag,res);
+    if(/^podcast-part-[A-Za-z0-9_-]+$/.test(tag)) return await postPodcast(tag,res);
     if(!/^reference-story-[0-9]+$/.test(tag)) return res.status(400).json({ok:false,error:'A valid reference-story or podcast-part release tag is required.'});
     const base=`https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/releases/download/${encodeURIComponent(tag)}`;
     const manifestUrl=`${base}/manifest.json`;
