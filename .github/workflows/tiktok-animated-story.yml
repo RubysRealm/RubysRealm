@@ -1,15 +1,12 @@
-name: Generate and publish reference-style TikTok story
+name: Ruby's Realm clean TikTok production
 
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
-      - 'tiktok_animator/**'
-      - 'api/auto-post.js'
-      - 'api/buffer.js'
-      - 'api/buffer-status.js'
+      - 'production/**'
       - 'api/story-image.js'
-      - 'package.json'
       - '.github/workflows/tiktok-animated-story.yml'
   schedule:
     - cron: '0 14 * * *'
@@ -19,24 +16,30 @@ permissions:
   id-token: write
 
 concurrency:
-  group: rubys-realm-reference-story
+  group: rubys-realm-clean-production
   cancel-in-progress: true
 
 jobs:
-  render-and-publish:
+  render-review-candidate:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout clean rebuild
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install system tools
+
+      - name: Install system renderer
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-dejavu-core
-      - name: Install renderer dependencies
-        run: pip install -r tiktok_animator/requirements.txt
+
+      - name: Install clean platform dependencies
+        run: pip install -r production/requirements.txt
+
       - name: Mint protected image-service token
         shell: bash
         run: |
@@ -46,94 +49,95 @@ jobs:
           test -n "$TOKEN"
           echo "::add-mask::$TOKEN"
           echo "GITHUB_OIDC_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-      - name: Wait for protected image service deployment
+
+      - name: Wait for rebuilt protected image service
         run: |
           set -euo pipefail
           URL="https://rubys-realm.vercel.app/api/story-image"
-          for i in $(seq 1 36); do
+          for i in $(seq 1 48); do
             CODE="$(curl -sS -o /dev/null -w '%{http_code}' "$URL" || true)"
             if [ "$CODE" = "405" ]; then
-              echo "Generated-image service is deployed."
+              echo "Clean image service deployed."
               exit 0
             fi
             sleep 5
           done
-          echo "Generated-image service did not become ready in time."
+          echo "Clean image service did not deploy in time."
           exit 1
-      - name: Generate exact-target illustrated story with automatic QC retry
+
+      - name: Build from scratch
+        env:
+          STORY_SEED: ${{ github.run_id }}
         run: |
-          set +e
-          PASSED=0
-          for ATTEMPT in 0 1; do
-            rm -rf tiktok_animator/output tiktok_animator/tmp
-            mkdir -p tiktok_animator/output tiktok_animator/tmp
-            export STORY_SEED=$((GITHUB_RUN_ID + ATTEMPT * 104729))
-            echo "Reference-target render attempt $((ATTEMPT+1))/2 with seed ${STORY_SEED}"
-            ALLOW_REMOTE_IMAGE_GENERATION=1 python tiktok_animator/reference_story_v3.py
-            RC=$?
-            if [ "$RC" -eq 0 ]; then
-              PASSED=1
-              echo "Quality-approved target render completed on attempt $((ATTEMPT+1))"
-              break
-            fi
-            echo "Attempt $((ATTEMPT+1)) failed strict target QC; rebuilding with a fresh story seed and fresh visual selection."
-          done
-          if [ "$PASSED" -ne 1 ]; then
-            echo "Strict visual QC failed twice; preserving the newest rendered candidate for human review instead of discarding it."
-          fi
-      - name: Verify exact-target manifest and final media
+          set -euo pipefail
+          rm -rf production/work production/output
+          python production/pipeline.py
+
+      - name: Validate rebuilt manifest and actual frame samples
         run: |
           python - <<'PY'
-          import json, pathlib, subprocess
-          manifests=sorted(pathlib.Path('tiktok_animator/output').glob('*.json'))
-          videos=sorted(pathlib.Path('tiktok_animator/output').glob('*.mp4'))
-          if not manifests or not videos: raise SystemExit('missing final output')
-          data=json.loads(manifests[-1].read_text())
-          # Strict production validation: do not release anything that failed visual/source checks.
-          if data.get('renderer')!='reference-illustrated-story-v7': raise SystemExit('wrong renderer')
-          if data.get('qualityGate')!='reference-example-target-v7': raise SystemExit('wrong quality gate')
-          if data.get('storySource') not in ('ai-gateway-original','procedural-original-v3','supplied'):
-              raise SystemExit('story source is not approved')
-          checks=data.get('checks') or {}
-          failed=[k for k,v in checks.items() if not bool(v)]
+          import json
+          from pathlib import Path
+
+          p=Path('production/output/manifest.json')
+          if not p.exists():
+              raise SystemExit('manifest missing')
+          d=json.loads(p.read_text())
+          if d.get('platform')!='rubys-realm-clean-rebuild-v1':
+              raise SystemExit('legacy renderer detected')
+          if not d.get('qualityPassed'):
+              raise SystemExit('clean rebuild quality gate failed')
+          if d.get('publicationAllowed') is not False:
+              raise SystemExit('publication unexpectedly enabled')
+          checks=d.get('checks') or {}
+          failed=[k for k,v in checks.items() if not v]
           if failed:
-              print('Human-review candidate has QC warnings: '+', '.join(failed))
-          if int(data.get('captionMaxWords') or 99)!=1: raise SystemExit('captions are not direct word-boundary cues')
-          style=data.get('style') or {}
-          if style.get('lower_panel')!='none': raise SystemExit('lower teal panel still enabled')
-          if style.get('caption_timing')!='direct-neural-word-boundaries': raise SystemExit('caption timing is not tied directly to narration')
-          if float(style.get('generated_illustration_ratio') or 0) < 0.999:
-              raise SystemExit('generated illustration ratio is not 100%')
-          if style.get('visual_source_policy')!='generated-cartoon-only':
-              raise SystemExit('visual source policy is not generated-cartoon-only')
-          subprocess.run(['ffprobe','-v','error','-show_entries','format=duration','-of','default=nw=1:nk=1',str(videos[-1])],check=True)
-          print(json.dumps({'checks':checks,'voice':style.get('voice_used'),'generatedIllustrationRatio':style.get('generated_illustration_ratio')},indent=2))
+              raise SystemExit('failed checks: '+', '.join(failed))
+          samples=d.get('reviewSamples') or []
+          if len(samples)<6:
+              raise SystemExit('not enough actual-frame inspection samples')
+          for sample in samples:
+              frame=Path(sample['file'])
+              if not frame.exists() or frame.stat().st_size<10000:
+                  raise SystemExit(f"missing frame sample: {frame}")
+          print(json.dumps({
+              'title':d.get('title'),
+              'duration':d.get('durationSeconds'),
+              'scenes':d.get('sceneCount'),
+              'samples':len(samples),
+              'checks':checks
+          }, indent=2))
           PY
-      - name: Create public review release
+
+      - name: Package review frames
+        run: |
+          cd production/output
+          zip -j review-frames.zip review_frames/*.jpg
+
+      - name: Create viewable MP4 review release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="reference-story-${GITHUB_RUN_ID}"
-          VIDEO="$(find tiktok_animator/output -maxdepth 1 -name '*.mp4' -print -quit)"
-          MANIFEST="$(find tiktok_animator/output -maxdepth 1 -name '*.json' -print -quit)"
-          cp "$MANIFEST" manifest.json
+          TAG="clean-rebuild-${GITHUB_RUN_ID}"
+          VIDEO="$(find production/output -maxdepth 1 -name '*.mp4' -print -quit)"
+          test -n "$VIDEO"
           gh release delete "$TAG" --yes --cleanup-tag >/dev/null 2>&1 || true
-          gh release create "$TAG" "$VIDEO" manifest.json --title "Ruby's Realm Reference Target ${GITHUB_RUN_NUMBER}" --notes "Human-review candidate. Publication remains blocked. Fresh story-matched cartoon illustrations, no lower teal panel, neural narration, and direct word-boundary captions."
-          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
-      - name: Hold publication for actual-frame reference inspection
+          gh release create "$TAG"             "$VIDEO"             production/output/manifest.json             production/output/review-frames.zip             --title "Ruby's Realm Clean Rebuild #${GITHUB_RUN_NUMBER}"             --notes "Fresh clean-platform review candidate. Every scene is generated for its exact narration beat, cuts are tied to narration word boundaries, one image is visible at a time, the persistent polished header uses a semantically complete occupation title, and publication remains blocked pending approval."
+
+      - name: Keep TikTok publication blocked
         run: |
-          echo "Publishing disabled until extracted frames are visually validated against the supplied Hotel Owner reference."
-          exit 0
-      - name: Upload generated MP4 and manifest backup
+          echo "No TikTok/Buffer publication occurs in the clean rebuild until the new example is approved."
+
+      - name: Upload review backup
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: reference-target-v7-tiktok-story-${{ github.run_number }}
+          name: rubys-realm-clean-rebuild-${{ github.run_number }}
           path: |
-            tiktok_animator/output/*.mp4
-            tiktok_animator/output/*.json
-          if-no-files-found: error
+            production/output/*.mp4
+            production/output/manifest.json
+            production/output/review_frames/*.jpg
+            production/output/review-frames.zip
+          if-no-files-found: warn
           retention-days: 7
-
-# Manual production trigger: 2026-08-29T10:20:00-04:00
