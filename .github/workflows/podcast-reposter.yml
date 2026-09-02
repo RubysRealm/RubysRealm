@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/podcast-reposter.yml'
+      - 'tiktok_animator/podcast_prepare.py'
   schedule:
     - cron: '19 * * * *'
 
@@ -31,11 +32,11 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install video tools
+      - name: Install video and caption tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
-          python -m pip install --upgrade pip yt-dlp
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          python -m pip install --upgrade pip yt-dlp faster-whisper
 
       - name: Refill next story chronologically when current story is complete
         run: |
@@ -56,6 +57,8 @@ jobs:
           git push
 
       - name: Prepare exactly the next allowed part
+        env:
+          WHISPER_MODEL: small.en
         run: |
           set -euo pipefail
           rm -rf tiktok_animator/podcast_output
@@ -65,6 +68,28 @@ jobs:
           else
             echo 'READY=0' >> "$GITHUB_ENV"
           fi
+
+      - name: Enforce visible story title, part number, and synced captions
+        if: env.READY == '1'
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          m=json.loads(Path('tiktok_animator/podcast_output/manifest.json').read_text())
+          required={
+              'storyTitleBurnedIn': True,
+              'partLabelBurnedIn': True,
+              'captionsBurnedIn': True,
+          }
+          for key,value in required.items():
+              if m.get(key) is not value:
+                  raise SystemExit(f'Blocked: {key} is not enabled')
+          if m.get('captionTiming') != 'word-timestamped narration transcription':
+              raise SystemExit('Blocked: captions are not narration word-timestamped')
+          if not m.get('title') or not m.get('partNumber') or not m.get('totalParts'):
+              raise SystemExit('Blocked: story/part identity missing')
+          print(f"Approved: {m['title']} — Part {m['partNumber']}/{m['totalParts']} with synced captions")
+          PY
 
       - name: Publish part as a GitHub release asset
         if: env.READY == '1'
@@ -76,7 +101,7 @@ jobs:
           MANIFEST='tiktok_animator/podcast_output/manifest.json'
           VIDEO="$(python -c 'import json; print("tiktok_animator/podcast_output/"+json.load(open("tiktok_animator/podcast_output/manifest.json"))["file"])')"
           gh release delete "$TAG" --yes --cleanup-tag >/dev/null 2>&1 || true
-          gh release create "$TAG" "$VIDEO" "$MANIFEST#manifest.json" --title "Ruby's Realm ordered podcast part ${GITHUB_RUN_NUMBER}" --notes "Prepared from the locked daily story queue."
+          gh release create "$TAG" "$VIDEO" "$MANIFEST#manifest.json" --title "Ruby's Realm ordered podcast part ${GITHUB_RUN_NUMBER}" --notes "Prepared from the locked daily story queue with persistent story/part title and narration-synced captions."
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
 
       - name: Wait for existing TikTok posting endpoint deployment
