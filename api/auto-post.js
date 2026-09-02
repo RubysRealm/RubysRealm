@@ -51,6 +51,10 @@ function validatePodcastManifest(m){
   if(!Number.isFinite(duration)||duration<30||duration>600) throw new Error('Blocked: podcast part duration outside 30 seconds to 10 minutes.');
   if(!m.file || !String(m.file).endsWith('.mp4')) throw new Error('Blocked: invalid podcast video file.');
   if(!m.partLabel) throw new Error('Blocked: missing podcast part label.');
+  if(m.storyTitleBurnedIn!==true) throw new Error('Blocked: podcast story title is not burned into the video.');
+  if(m.partLabelBurnedIn!==true) throw new Error('Blocked: podcast part number is not burned into the video.');
+  if(m.captionsBurnedIn!==true) throw new Error('Blocked: podcast narration captions are not burned into the video.');
+  if(m.captionTiming!=='word-timestamped narration transcription') throw new Error('Blocked: podcast captions are not narration-synced.');
 }
 
 function releaseTagFromSource(source){
@@ -99,11 +103,11 @@ async function postPodcast(tag,res){
   if(!target) throw new Error('No TikTok channel is connected in Buffer.');
   const existing=await recentPosts(target);
   const caption=`${manifest.title} — Part ${manifest.partNumber}/${manifest.totalParts}: ${manifest.partLabel} #storytime #storytok #pov #rubysrealm`;
-  const duplicate=existing.find(p=>p?.assets?.some(a=>a?.source===videoUrl) || String(p?.text||'').trim()===caption);
+  const duplicate=existing.find(p=>p?.assets?.some(a=>a?.source===videoUrl));
   if(duplicate) return res.status(200).json({ok:true,skipped:true,postId:duplicate.id,status:duplicate.status,externalLink:duplicate.externalLink||null,caption,storyId:manifest.storyId,partNumber:Number(manifest.partNumber)});
   const dueAt=new Date(Date.now()+60*1000).toISOString();
   const post=await createBufferVideoPost({channelId:target.channel.id,caption,videoUrl,dueAt});
-  return res.status(200).json({ok:true,postId:post.id,status:post.status,dueAt,caption,storyId:manifest.storyId,partNumber:Number(manifest.partNumber),totalParts:Number(manifest.totalParts),videoUrl,renderer:'podcast-repost-v1'});
+  return res.status(200).json({ok:true,postId:post.id,status:post.status,dueAt,caption,storyId:manifest.storyId,partNumber:Number(manifest.partNumber),totalParts:Number(manifest.totalParts),videoUrl,renderer:'podcast-repost-v2'});
 }
 
 export default async function handler(req,res){
