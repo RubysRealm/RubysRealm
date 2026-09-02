@@ -13,7 +13,6 @@ QUEUE_PATH = ROOT / 'tiktok_animator' / 'podcast_queue.json'
 STATE_PATH = ROOT / 'tiktok_animator' / 'podcast_state.json'
 OUT = ROOT / 'tiktok_animator' / 'podcast_output'
 TZ = ZoneInfo('America/New_York')
-FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
 
 
 def load(path): return json.loads(path.read_text())
@@ -48,7 +47,7 @@ def active_part(queue, state):
 def cadence_ready(queue, state):
     last = state.get('last_published_at')
     if not last: return True
-    hours = float(queue.get('show', {}).get('cadence_hours', 1))
+    hours = float(queue.get('show', {}).get('cadence_hours', 1.5))
     remaining = timedelta(hours=hours) - (datetime.now(TZ) - datetime.fromisoformat(last))
     if remaining.total_seconds() > 0:
         print(f'Cadence lock active for another {int(remaining.total_seconds()//60)+1} minutes.')
@@ -91,8 +90,9 @@ def ass_escape(text):
     return text.replace('\\', r'\\').replace('{', r'\{').replace('}', r'\}').replace('\n', ' ')
 
 
-def write_synced_captions(audio, ass_path):
+def write_synced_captions(audio, ass_path, story_title, part_number, total_parts, clip_duration):
     from faster_whisper import WhisperModel
+
     model_name = os.environ.get('WHISPER_MODEL', 'small.en').strip() or 'small.en'
     model = WhisperModel(model_name, device='cpu', compute_type='int8')
     segments_gen, _ = model.transcribe(
@@ -106,23 +106,27 @@ def write_synced_captions(audio, ass_path):
             text = (word.word or '').strip()
             if text and word.start is not None and word.end is not None:
                 timed_words.append({'text': text, 'start': float(word.start), 'end': float(word.end)})
+
     entries, current = [], []
     def flush():
         nonlocal current
         if not current: return
         entries.append((current[0]['start'], current[-1]['end'] + 0.04, ' '.join(w['text'] for w in current).strip()))
         current = []
+
     for word in timed_words:
         if current and word['start'] - current[-1]['end'] > 0.48: flush()
         current.append(word)
         if len(current) >= 5 or (len(current) >= 3 and word['text'].endswith(('.', '!', '?', ',', ';', ':'))): flush()
     flush()
+
     if not entries:
         for segment in segments:
             text = (segment.text or '').strip()
             if text: entries.append((float(segment.start), float(segment.end), text))
     if not entries:
         raise RuntimeError('Speech transcription returned no captions; refusing to publish an uncaptioned part')
+
     header = """[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -132,31 +136,31 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Header,DejaVu Sans,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H70000000,-1,0,0,0,100,100,0,0,3,10,0,8,70,70,85,1
 Style: Captions,DejaVu Sans,68,&H00FFFFFF,&H00FFFFFF,&H00000000,&H66000000,-1,0,0,0,100,100,0,0,1,5,1,2,80,80,340,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    lines = [header]
+    title_text = f"{ass_escape(story_title)}\\NPart {int(part_number)}/{int(total_parts)}"
+    lines = [header, f'Dialogue: 1,0:00:00.00,{ass_time(clip_duration)},Header,,0,0,0,,{title_text}\n']
     for start, end, text in entries:
         lines.append(f'Dialogue: 0,{ass_time(start)},{ass_time(end)},Captions,,0,0,0,,{ass_escape(text)}\n')
     ass_path.write_text(''.join(lines), encoding='utf-8')
-    print(f'Generated {len(entries)} narration-synced caption events with {model_name}.')
+    print(f'Generated persistent story/part header plus {len(entries)} narration-synced caption events with {model_name}.')
 
 
-def render(source, part, total, captions, output):
+def render(source, part, captions, output):
     start, end = float(part['start']), float(part['end'])
     length = end - start
     if length <= 0: raise RuntimeError(f'Bad part range: {start}..{end}')
-    part_text = f'PART {int(part["number"])}/{int(total)}'
     subtitle_path = str(captions).replace('\\', '/').replace("'", r"\'")
     vf=(
       '[0:v]split=2[bg][fg];'
       '[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=24[bg2];'
       '[fg]scale=1080:1920:force_original_aspect_ratio=decrease[fg2];'
       '[bg2][fg2]overlay=(W-w)/2:(H-h)/2[base];'
-      f"[base]drawtext=fontfile={FONT}:text='{part_text}':fontcolor=white:fontsize=58:borderw=4:bordercolor=black@0.85:box=1:boxcolor=black@0.38:boxborderw=18:x=(w-text_w)/2:y=115[labeled];"
-      f"[labeled]subtitles='{subtitle_path}',format=yuv420p[v]"
+      f"[base]subtitles='{subtitle_path}',format=yuv420p[v]"
     )
     subprocess.run([
         'ffmpeg','-y','-v','error','-ss',f'{start:.3f}','-t',f'{length:.3f}','-i',str(source),
@@ -180,17 +184,18 @@ def main():
         work = Path(td)
         source = download(story['source_url'], work)
         start, end = float(part['start']), float(part['end'])
+        clip_length = end - start
         audio, captions = work / 'narration.wav', work / 'captions.ass'
         extract_part_audio(source, start, end, audio)
-        write_synced_captions(audio, captions)
+        write_synced_captions(audio, captions, story['title'], expected, total, clip_length)
         filename = f"{story['id']}-part-{expected:02d}.mp4"
         video = OUT / filename
-        render(source, part, total, captions, video)
+        render(source, part, captions, video)
     manifest = {
       'platform':'rubys-realm-podcast-repost-v1',
       'storyId':story['id'], 'title':story['title'], 'partNumber':expected,
       'totalParts':total, 'partLabel':part['label'],
-      'partLabelBurnedIn':True, 'captionsBurnedIn':True,
+      'storyTitleBurnedIn':True, 'partLabelBurnedIn':True, 'captionsBurnedIn':True,
       'captionTiming':'word-timestamped narration transcription',
       'durationSeconds':round(duration(video),3), 'file':filename,
       'sourceUrl':story['source_url'], 'preparedAt':datetime.now(TZ).isoformat()
