@@ -19,7 +19,7 @@ concurrency:
 jobs:
   post-next-part:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,22 +37,89 @@ jobs:
           sudo apt-get install -y ffmpeg
           python -m pip install --upgrade pip yt-dlp
 
-      - name: Publish exactly the next allowed part
-        env:
-          TT_TOKEN: ${{ secrets.TT_TOKEN }}
+      - name: Prepare exactly the next allowed part
         run: |
           set -euo pipefail
-          python tiktok_animator/podcast_reposter.py
-
-      - name: Persist sequence state only after successful publish
-        run: |
-          set -euo pipefail
-          if git diff --quiet -- tiktok_animator/podcast_state.json; then
-            echo 'No state advancement to persist.'
-            exit 0
+          rm -rf tiktok_animator/podcast_output
+          python tiktok_animator/podcast_prepare.py
+          if [ -f tiktok_animator/podcast_output/manifest.json ]; then
+            echo 'READY=1' >> "$GITHUB_ENV"
+          else
+            echo 'READY=0' >> "$GITHUB_ENV"
           fi
+
+      - name: Publish part as a GitHub release asset
+        if: env.READY == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="podcast-part-${GITHUB_RUN_ID}"
+          MANIFEST='tiktok_animator/podcast_output/manifest.json'
+          VIDEO="$(python -c 'import json; print("tiktok_animator/podcast_output/"+json.load(open("tiktok_animator/podcast_output/manifest.json"))["file"])')"
+          gh release delete "$TAG" --yes --cleanup-tag >/dev/null 2>&1 || true
+          gh release create "$TAG" "$VIDEO" "$MANIFEST#manifest.json" --title "Ruby's Realm ordered podcast part ${GITHUB_RUN_NUMBER}" --notes "Prepared from the locked daily story queue."
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+
+      - name: Wait for podcast posting endpoint deployment
+        if: env.READY == '1'
+        run: |
+          set -euo pipefail
+          URL='https://rubys-realm.vercel.app/api/podcast-post'
+          for i in $(seq 1 48); do
+            CODE="$(curl -sS -o /tmp/podcast-probe.json -w '%{http_code}' "$URL" || true)"
+            if [ "$CODE" = '400' ]; then
+              echo 'Podcast posting endpoint is deployed.'
+              exit 0
+            fi
+            sleep 5
+          done
+          cat /tmp/podcast-probe.json || true
+          exit 1
+
+      - name: Send locked part to connected TikTok channel
+        if: env.READY == '1'
+        run: |
+          set -euo pipefail
+          URL="https://rubys-realm.vercel.app/api/podcast-post?tag=${RELEASE_TAG}"
+          RESPONSE=''
+          for i in $(seq 1 20); do
+            RESPONSE="$(curl -sS --max-time 90 "$URL" || true)"
+            if printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("ok") else 1)' 2>/dev/null; then
+              break
+            fi
+            sleep 10
+          done
+          printf '%s\n' "$RESPONSE"
+          printf '%s' "$RESPONSE" > /tmp/podcast-post-response.json
+          POST_ID="$(python -c 'import json; d=json.load(open("/tmp/podcast-post-response.json")); assert d.get("ok"), d; print(d.get("postId") or "")')"
+          test -n "$POST_ID"
+          echo "POST_ID=$POST_ID" >> "$GITHUB_ENV"
+
+      - name: Advance only after connected-channel post is accepted
+        if: env.READY == '1'
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from datetime import datetime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          state_path=Path('tiktok_animator/podcast_state.json')
+          manifest=json.loads(Path('tiktok_animator/podcast_output/manifest.json').read_text())
+          state=json.loads(state_path.read_text())
+          expected=int(state.get('next_part',1))
+          actual=int(manifest['partNumber'])
+          if actual != expected:
+              raise SystemExit(f'refusing state advance: expected {expected}, prepared {actual}')
+          state['last_publish_id']='${{ env.POST_ID }}'
+          state['last_published_at']=datetime.now(ZoneInfo('America/New_York')).isoformat()
+          state['next_part']=expected+1
+          state_path.write_text(json.dumps(state,indent=2)+'\n')
+          print(f'Advanced locked queue from Part {expected} to Part {expected+1}')
+          PY
           git config user.name 'Ruby Realm Publisher'
           git config user.email 'actions@users.noreply.github.com'
           git add tiktok_animator/podcast_state.json
-          git commit -m 'Advance ordered podcast posting state'
+          git commit -m "Advance ordered podcast queue after TikTok acceptance"
           git push
