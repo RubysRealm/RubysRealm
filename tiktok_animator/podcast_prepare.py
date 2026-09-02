@@ -108,24 +108,51 @@ def write_synced_captions(audio, ass_path, story_title, part_number, total_parts
                 timed_words.append({'text': text, 'start': float(word.start), 'end': float(word.end)})
 
     entries, current = [], []
+    pause_break = 0.24
+    max_words = 4
+    max_phrase_seconds = 1.75
+
     def flush():
         nonlocal current
-        if not current: return
-        entries.append((current[0]['start'], current[-1]['end'] + 0.04, ' '.join(w['text'] for w in current).strip()))
+        if not current:
+            return
+        start = current[0]['start']
+        end = current[-1]['end']
+        text = ' '.join(w['text'] for w in current).strip()
+        if text and end > start:
+            entries.append((start, end, text))
         current = []
 
     for word in timed_words:
-        if current and word['start'] - current[-1]['end'] > 0.48: flush()
+        if current:
+            gap = max(0.0, word['start'] - current[-1]['end'])
+            phrase_age = max(0.0, word['start'] - current[0]['start'])
+            if gap >= pause_break or len(current) >= max_words or phrase_age >= max_phrase_seconds:
+                flush()
         current.append(word)
-        if len(current) >= 5 or (len(current) >= 3 and word['text'].endswith(('.', '!', '?', ',', ';', ':'))): flush()
+        token = word['text']
+        if len(current) >= 2 and token.endswith(('.', '!', '?', ',', ';', ':')):
+            flush()
     flush()
 
     if not entries:
         for segment in segments:
             text = (segment.text or '').strip()
-            if text: entries.append((float(segment.start), float(segment.end), text))
+            if text:
+                entries.append((float(segment.start), float(segment.end), text))
     if not entries:
         raise RuntimeError('Speech transcription returned no captions; refusing to publish an uncaptioned part')
+
+    cleaned = []
+    for i, (start, end, text) in enumerate(entries):
+        start = max(0.0, start)
+        end = max(start + 0.08, end)
+        if i + 1 < len(entries):
+            next_start = entries[i + 1][0]
+            if next_start > start:
+                end = min(end, max(start + 0.08, next_start - 0.02))
+        cleaned.append((start, end, text))
+    entries = cleaned
 
     header = """[Script Info]
 ScriptType: v4.00+
@@ -136,7 +163,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Header,DejaVu Sans,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H70000000,-1,0,0,0,100,100,0,0,3,10,0,8,70,70,85,1
+Style: Header,DejaVu Sans,46,&H00FFFFFF,&H00FFFFFF,&H00000000,&H70000000,-1,0,0,0,100,100,0,0,3,10,0,8,70,70,185,1
 Style: Captions,DejaVu Sans,68,&H00FFFFFF,&H00FFFFFF,&H00000000,&H66000000,-1,0,0,0,100,100,0,0,1,5,1,2,80,80,340,1
 
 [Events]
@@ -147,7 +174,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     for start, end, text in entries:
         lines.append(f'Dialogue: 0,{ass_time(start)},{ass_time(end)},Captions,,0,0,0,,{ass_escape(text)}\n')
     ass_path.write_text(''.join(lines), encoding='utf-8')
-    print(f'Generated persistent story/part header plus {len(entries)} narration-synced caption events with {model_name}.')
+    print(f'Generated lower persistent story/part header plus {len(entries)} pause-aware narration caption phrases with {model_name}.')
 
 
 def render(source, part, captions, output):
@@ -197,6 +224,9 @@ def main():
       'totalParts':total, 'partLabel':part['label'],
       'storyTitleBurnedIn':True, 'partLabelBurnedIn':True, 'captionsBurnedIn':True,
       'captionTiming':'word-timestamped narration transcription',
+      'captionGrouping':'pause-aware 2-4 word phrases',
+      'captionPauseThresholdSeconds':0.24,
+      'headerTopMarginPixels':185,
       'durationSeconds':round(duration(video),3), 'file':filename,
       'sourceUrl':story['source_url'], 'preparedAt':datetime.now(TZ).isoformat()
     }
