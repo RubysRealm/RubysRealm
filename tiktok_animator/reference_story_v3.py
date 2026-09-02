@@ -27,9 +27,13 @@ def _external_pack():
     return data
 
 
+def _use_external_visuals():
+    return str(os.getenv('USE_EXTERNAL_VISUAL_PACK','0')).strip()=='1'
+
+
 def _select_visuals(beats,duration):
     pack=_external_pack()
-    if not pack:
+    if not pack or not _use_external_visuals():
         return target.select_visuals(scheduler,semantic,beats,duration)
     out=[]
     for item in pack['visuals']:
@@ -62,7 +66,7 @@ patch.set_context=set_context
 # Production visuals must be generated cartoon illustrations only. No realistic-photo fallback.
 def prepare_visuals(visuals,seed):
     pack=_external_pack()
-    if pack:
+    if pack and _use_external_visuals():
         valid=[]
         seen_urls=set()
         for i,v in enumerate(visuals):
