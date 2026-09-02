@@ -102,17 +102,25 @@ jobs:
       - name: Send corrected part through Buffer to TikTok
         run: |
           set -euo pipefail
-          URL="https://rubys-realm.vercel.app/api/auto-post?tag=${RELEASE_TAG}"
-          RESPONSE=''
-          for i in $(seq 1 20); do
-            RESPONSE="$(curl -sS --max-time 90 "$URL" || true)"
-            if printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("ok") else 1)' 2>/dev/null; then
-              break
+          BASE="https://rubys-realm.vercel.app/api/auto-post?tag=${RELEASE_TAG}"
+          RESPONSE="$(curl -sS --max-time 90 "$BASE" || true)"
+          if printf '%s' "$RESPONSE" | python -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("ok") else 1)' 2>/dev/null; then
+            printf '%s\n' "$RESPONSE" > /tmp/post-response.json
+          else
+            echo "Initial publish result is uncertain/failed. Holding 10 minutes before any retry."
+            sleep 600
+            CHECK="$(curl -sS --max-time 90 "${BASE}&check=1" || true)"
+            printf '%s\n' "$CHECK"
+            if printf '%s' "$CHECK" | python -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d.get("ok") and d.get("exists") else 1)' 2>/dev/null; then
+              echo "Exact story/part is already present; no repost will be attempted."
+              printf '%s' "$CHECK" > /tmp/post-response.json
+            else
+              echo "Exact story/part was verified absent after 10 minutes; one retry is allowed."
+              RETRY="$(curl -sS --max-time 90 "$BASE" || true)"
+              printf '%s\n' "$RETRY"
+              printf '%s' "$RETRY" > /tmp/post-response.json
             fi
-            sleep 10
-          done
-          printf '%s\n' "$RESPONSE"
-          printf '%s' "$RESPONSE" > /tmp/post-response.json
+          fi
           POST_ID="$(python -c 'import json; d=json.load(open("/tmp/post-response.json")); assert d.get("ok"), d; print(d.get("postId") or "")')"
           test -n "$POST_ID"
           echo "POST_ID=$POST_ID" >> "$GITHUB_ENV"
