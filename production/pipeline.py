@@ -104,7 +104,7 @@ def make_story(seed):
     }
 
 async def narrate(text, mp3, boundaries):
-    comm = edge_tts.Communicate(text=text, voice=VOICE, rate=RATE)
+    comm = edge_tts.Communicate(text=text, voice=VOICE, rate=RATE, boundary="WordBoundary")
     events = []
     with mp3.open("wb") as f:
         async for chunk in comm.stream():
@@ -117,21 +117,10 @@ async def narrate(text, mp3, boundaries):
                     "duration": float(chunk.get("duration", 0)) / 10_000_000.0,
                 })
     boundaries.write_text(json.dumps(events, indent=2))
-    if len(events) < 300:
-        # edge-tts versions may omit boundary events even when audio succeeds.
-        # Recover exact per-word scheduling deterministically from the rendered
-        # narration duration instead of failing the entire production run.
-        duration = probe_duration(mp3)
-        spoken = re.findall(r"\\b[\\w']+\\b", text)
-        weights = [max(1.0, len(w) ** 0.45) for w in spoken]
-        total = sum(weights) or 1.0
-        cursor = 0.0
-        events = []
-        for word, weight in zip(spoken, weights):
-            d = duration * weight / total
-            events.append({"text": word, "start": cursor, "duration": d})
-            cursor += d
-        boundaries.write_text(json.dumps(events, indent=2))
+    expected = len(words(text))
+    minimum = max(300, int(expected * 0.92))
+    if len(events) < minimum:
+        raise RuntimeError(f"exact word-boundary coverage too low: {len(events)}/{expected}")
     return events
 
 def probe_duration(path):
