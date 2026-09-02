@@ -75,8 +75,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="podcast-part-${GITHUB_RUN_ID}"
           MANIFEST='podcast_repurpose/output/manifest.json'
+          STORY_ID="$(python -c 'import json,re; s=str(json.load(open("podcast_repurpose/output/manifest.json"))["storyId"]); print(re.sub(r"[^A-Za-z0-9_-]+","-",s))')"
+          PART_NUMBER="$(python -c 'import json; print(json.load(open("podcast_repurpose/output/manifest.json"))["partNumber"])')"
+          TAG="podcast-part-${STORY_ID}-${PART_NUMBER}"
           VIDEO="$(find podcast_repurpose/output -maxdepth 1 -name '*.mp4' -print -quit)"
           test -n "$VIDEO"
           gh release delete "$TAG" --yes --cleanup-tag >/dev/null 2>&1 || true
@@ -147,6 +149,7 @@ jobs:
           git add podcast_repurpose/state.json
           if ! git diff --cached --quiet; then
             git commit -m 'Advance podcast TikTok queue after Buffer acceptance [skip ci]'
+            git pull --rebase origin main
             git push
           fi
 
