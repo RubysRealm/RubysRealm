@@ -61,15 +61,15 @@ jobs:
           gh release create "$TAG" "$VIDEO" "$MANIFEST#manifest.json" --title "Ruby's Realm ordered podcast part ${GITHUB_RUN_NUMBER}" --notes "Prepared from the locked daily story queue."
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
 
-      - name: Wait for podcast posting endpoint deployment
+      - name: Wait for existing TikTok posting endpoint deployment
         if: env.READY == '1'
         run: |
           set -euo pipefail
-          URL='https://rubys-realm.vercel.app/api/podcast-post'
+          URL='https://rubys-realm.vercel.app/api/auto-post'
           for i in $(seq 1 48); do
             CODE="$(curl -sS -o /tmp/podcast-probe.json -w '%{http_code}' "$URL" || true)"
             if [ "$CODE" = '400' ]; then
-              echo 'Podcast posting endpoint is deployed.'
+              echo 'Combined TikTok posting endpoint is deployed.'
               exit 0
             fi
             sleep 5
@@ -81,7 +81,7 @@ jobs:
         if: env.READY == '1'
         run: |
           set -euo pipefail
-          URL="https://rubys-realm.vercel.app/api/podcast-post?tag=${RELEASE_TAG}"
+          URL="https://rubys-realm.vercel.app/api/auto-post?tag=${RELEASE_TAG}"
           RESPONSE=''
           for i in $(seq 1 20); do
             RESPONSE="$(curl -sS --max-time 90 "$URL" || true)"
