@@ -77,8 +77,13 @@ jobs:
           TAG="podcast-part-${STORY_ID}-${PART_NUMBER}"
           VIDEO="$(find podcast_repurpose/output -maxdepth 1 -name '*.mp4' -print -quit)"
           test -n "$VIDEO"
-          gh release delete "$TAG" --yes --cleanup-tag >/dev/null 2>&1 || true
-          gh release create "$TAG" "$VIDEO" "$MANIFEST#manifest.json"             --title "Ruby's Realm corrected podcast part ${GITHUB_RUN_NUMBER}"             --notes "Corrected centered title layout; routed through the existing Buffer-connected TikTok publisher."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Deterministic release $TAG already exists; preserving it for duplicate detection."
+          else
+            gh release create "$TAG" "$VIDEO" "$MANIFEST#manifest.json" \
+              --title "Ruby's Realm corrected podcast part ${GITHUB_RUN_NUMBER}" \
+              --notes "Corrected centered title layout; routed through the existing Buffer-connected TikTok publisher."
+          fi
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
 
       - name: Wait for existing Buffer TikTok endpoint
