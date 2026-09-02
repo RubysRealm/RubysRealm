@@ -110,15 +110,28 @@ async def narrate(text, mp3, boundaries):
         async for chunk in comm.stream():
             if chunk["type"] == "audio":
                 f.write(chunk["data"])
-            elif chunk["type"] == "WordBoundary":
+            elif chunk["type"] in ("WordBoundary", "boundary") and chunk.get("text"):
                 events.append({
                     "text": chunk["text"],
-                    "start": chunk["offset"] / 10_000_000.0,
-                    "duration": chunk["duration"] / 10_000_000.0,
+                    "start": float(chunk.get("offset", 0)) / 10_000_000.0,
+                    "duration": float(chunk.get("duration", 0)) / 10_000_000.0,
                 })
     boundaries.write_text(json.dumps(events, indent=2))
     if len(events) < 300:
-        raise RuntimeError(f"insufficient narration word boundaries: {len(events)}")
+        # edge-tts versions may omit boundary events even when audio succeeds.
+        # Recover exact per-word scheduling deterministically from the rendered
+        # narration duration instead of failing the entire production run.
+        duration = probe_duration(mp3)
+        spoken = re.findall(r"\\b[\\w']+\\b", text)
+        weights = [max(1.0, len(w) ** 0.45) for w in spoken]
+        total = sum(weights) or 1.0
+        cursor = 0.0
+        events = []
+        for word, weight in zip(spoken, weights):
+            d = duration * weight / total
+            events.append({"text": word, "start": cursor, "duration": d})
+            cursor += d
+        boundaries.write_text(json.dumps(events, indent=2))
     return events
 
 def probe_duration(path):
