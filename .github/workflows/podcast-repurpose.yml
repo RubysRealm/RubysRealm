@@ -1,0 +1,71 @@
+name: Ruby's Realm podcast repurpose and TikTok publish
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2,6,10,14,18,22 * * *'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/podcast-repurpose.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rubys-realm-podcast-repurpose
+  cancel-in-progress: false
+
+jobs:
+  split-and-publish-next-part:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout Ruby's Realm
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install video tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          python -m pip install --upgrade pip yt-dlp
+
+      - name: Prepare next long-form story part
+        env:
+          PODCAST_VIDEO_SOURCE: https://www.dailymotion.com/user/MasterPOVYT/videos
+          PART_TARGET_SECONDS: '180'
+          PART_MIN_SECONDS: '105'
+          PART_MAX_SECONDS: '220'
+        run: python podcast_repurpose/repurpose.py
+
+      - name: Publish prepared part to TikTok
+        env:
+          TT_TOKEN: ${{ secrets.TT_TOKEN }}
+        run: python podcast_repurpose/publish.py
+
+      - name: Save successful queue position
+        run: |
+          set -e
+          git config user.name 'rubys-realm-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add podcast_repurpose/state.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'Advance podcast TikTok queue [skip ci]'
+            git push
+          fi
+
+      - name: Keep a short-term copy of the posted part
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: podcast-repurpose-${{ github.run_number }}
+          path: |
+            podcast_repurpose/output/*.mp4
+            podcast_repurpose/output/*.json
+          if-no-files-found: warn
+          retention-days: 2
