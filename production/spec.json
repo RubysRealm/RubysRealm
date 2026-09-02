@@ -1,0 +1,70 @@
+{
+  "version": "2026-09-01-clean-rebuild-v1",
+  "sourceOfTruth": "production/pipeline.py",
+  "format": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "aspectRatio": "9:16"
+  },
+  "story": {
+    "series": "Your Life as a <semantically complete occupation>",
+    "durationSeconds": [150, 420],
+    "partLabel": "PART 1",
+    "originalOnly": true,
+    "requiredTitleExamples": [
+      "Your Life as a Marina Owner",
+      "Your Life as a Hotel Owner",
+      "Your Life as a Storage Facility Owner"
+    ]
+  },
+  "visuals": {
+    "onePictureAtATime": true,
+    "style": "simple polished non-realistic adult cartoon matching the latest supplied photo examples",
+    "persistentHeader": true,
+    "sceneRule": "Every image must literally depict the exact narration beat active at that moment.",
+    "prohibit": [
+      "generic repeated props",
+      "reused unrelated locations",
+      "stale visual packs",
+      "stock photography",
+      "photorealistic people",
+      "collages",
+      "split screen",
+      "text baked into generated art",
+      "watermarks"
+    ],
+    "cutRule": "Hard cut to the next image at the exact first narrated word of its beat."
+  },
+  "captions": {
+    "unit": "one spoken word",
+    "timing": "exact neural word-boundary timestamps",
+    "case": "uppercase",
+    "style": "white extra-bold with heavy black outline",
+    "placement": "lower center"
+  },
+  "header": {
+    "persistent": true,
+    "titleCase": true,
+    "panel": "polished translucent rounded dark card",
+    "partPill": "compact accent pill",
+    "occupationMustBeComplete": true
+  },
+  "qualityGate": {
+    "publishOnFailure": false,
+    "require": [
+      "all beats mapped to narration boundaries",
+      "all scenes generated fresh for current story",
+      "all visual cuts beat-aligned",
+      "single image visible at every timestamp",
+      "exact one-word captions",
+      "complete occupation title",
+      "frame samples extracted from multiple timestamps",
+      "duration in allowed range"
+    ]
+  },
+  "publishing": {
+    "enabled": false,
+    "reason": "Keep publication blocked until the rebuilt platform produces a user-approved validated example."
+  }
+}
