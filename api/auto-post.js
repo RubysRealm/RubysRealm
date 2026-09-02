@@ -104,6 +104,8 @@ async function postPodcast(tag,res){
   const existing=await recentPosts(target);
   const caption=`${manifest.title} — Part ${manifest.partNumber}/${manifest.totalParts}: ${manifest.partLabel} #storytime #storytok #pov #rubysrealm`;
   const duplicate=existing.find(p=>p?.assets?.some(a=>a?.source===videoUrl));
+  const checkOnly=String(res.req?.query?.check||'')==='1';
+  if(checkOnly) return res.status(200).json({ok:true,exists:Boolean(duplicate),postId:duplicate?.id||null,status:duplicate?.status||null,externalLink:duplicate?.externalLink||null,caption,storyId:manifest.storyId,partNumber:Number(manifest.partNumber),videoUrl});
   if(duplicate) return res.status(200).json({ok:true,skipped:true,postId:duplicate.id,status:duplicate.status,externalLink:duplicate.externalLink||null,caption,storyId:manifest.storyId,partNumber:Number(manifest.partNumber)});
   const dueAt=new Date(Date.now()+60*1000).toISOString();
   const post=await createBufferVideoPost({channelId:target.channel.id,caption,videoUrl,dueAt});
