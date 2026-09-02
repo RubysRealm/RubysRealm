@@ -37,6 +37,24 @@ jobs:
           sudo apt-get install -y ffmpeg
           python -m pip install --upgrade pip yt-dlp
 
+      - name: Refill next story chronologically when current story is complete
+        run: |
+          set -euo pipefail
+          python tiktok_animator/podcast_catalog.py
+
+      - name: Persist newly discovered next story
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- tiktok_animator/podcast_queue.json; then
+            echo 'No new story discovered.'
+            exit 0
+          fi
+          git config user.name 'Ruby Realm Publisher'
+          git config user.email 'actions@users.noreply.github.com'
+          git add tiktok_animator/podcast_queue.json
+          git commit -m 'Queue next Master POV story chronologically'
+          git push
+
       - name: Prepare exactly the next allowed part
         run: |
           set -euo pipefail
