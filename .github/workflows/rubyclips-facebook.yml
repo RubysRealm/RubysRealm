@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: rubyclips-facebook-source
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   upload-next-oldest:
@@ -65,6 +65,8 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'],'a') as f:
               f.write(f'video_id={vid}\n')
               f.write(f'file={m["file"]}\n')
+              f.write(f'segment_index={int(m.get("segmentIndex",1))}\n')
+              f.write(f'segment_total={int(m.get("segmentTotal",1))}\n')
           PY
 
       - name: Publish immutable source release
@@ -82,7 +84,7 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$VIDEO" rubyclips/facebook_output/manifest.json --clobber
           else
-            gh release create "$TAG" "$VIDEO" rubyclips/facebook_output/manifest.json --title "RubyClips Facebook ${VIDEO_ID}" --notes "Existing user-provided Facebook video copied without generated scenes or story replacement."
+            gh release create "$TAG" "$VIDEO" rubyclips/facebook_output/manifest.json --title "RubyClips Facebook ${VIDEO_ID}" --notes "Existing user-provided Facebook video. If the source exceeds TikTok's API duration limit, it is divided only as technically required; no generated scenes or story replacement are added."
           fi
 
       - name: Wait for RubyClips publisher deployment
@@ -101,17 +103,16 @@ jobs:
 
       - name: Upload existing video to @rubaradaclips
         if: steps.backlog.outputs.complete != 'true'
-        id: publish
         env:
           TAG: ${{ env.RUBYCLIPS_FB_TAG }}
         run: |
           python - <<'PY'
-          import json, os, time, urllib.request, urllib.error
+          import json, os, time, urllib.request
           tag=os.environ['TAG']
           url=f'https://rubys-realm.vercel.app/api/auto-post?tag={tag}'
           last=None
           data=None
-          for attempt in range(15):
+          for attempt in range(12):
               try:
                   with urllib.request.urlopen(url, timeout=90) as r:
                       data=json.loads(r.read().decode())
@@ -123,7 +124,7 @@ jobs:
               except Exception as exc:
                   last=exc
                   print(f'publish attempt {attempt+1}: {exc}')
-                  time.sleep(20)
+                  time.sleep(15)
           else:
               raise SystemExit(f'publish failed: {last}')
           open('rubyclips/facebook_output/publish.json','w').write(json.dumps(data,indent=2))
@@ -142,7 +143,7 @@ jobs:
                   print('Already sent:',data['externalLink'])
                   raise SystemExit(0)
               raise SystemExit('Buffer returned no post id')
-          for i in range(30):
+          for i in range(35):
               url=f'https://rubys-realm.vercel.app/api/buffer-status?post_id={post_id}'
               with urllib.request.urlopen(url, timeout=60) as r:
                   outer=json.loads(r.read().decode())
@@ -160,7 +161,7 @@ jobs:
           raise SystemExit('TikTok send did not complete in time; state not advanced so it can retry safely.')
           PY
 
-      - name: Mark Facebook video as posted
+      - name: Mark Facebook video or technical segment as posted
         if: steps.backlog.outputs.complete != 'true'
         run: |
           python - <<'PY'
@@ -172,17 +173,27 @@ jobs:
           manifest=json.load(open('rubyclips/facebook_output/manifest.json'))
           publish=json.load(open('rubyclips/facebook_output/publish.json'))
           vid=str(manifest['sourceVideoId'])
+          idx=int(manifest.get('segmentIndex',1))
+          total=int(manifest.get('segmentTotal',1))
           posted=[str(x) for x in state.get('postedVideoIds',[])]
-          if vid not in posted: posted.append(vid)
+          progress={str(k):int(v) for k,v in (state.get('segmentProgress') or {}).items()}
+          if idx >= total:
+              if vid not in posted: posted.append(vid)
+              progress.pop(vid,None)
+          else:
+              progress[vid]=idx+1
           state.update({
               'sourceShareUrl': manifest['sourceShareUrl'],
               'sourceMode': 'existing-facebook-videos-oldest-to-newest',
               'preserveExistingParts': True,
               'postedVideoIds': posted,
+              'segmentProgress': progress,
               'lastResolvedPageUrl': manifest.get('resolvedPageUrl'),
               'lastPostedAt': datetime.now(timezone.utc).isoformat(),
               'lastTikTokUrl': publish.get('externalLink'),
               'lastFacebookVideoId': vid,
+              'lastSegmentIndex': idx,
+              'lastSegmentTotal': total,
           })
           state_path.write_text(json.dumps(state,indent=2)+'\n')
           PY
