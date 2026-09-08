@@ -4,10 +4,14 @@ const RELEASE_OWNER = 'RubysRealm';
 const RELEASE_REPO = 'RubysRealm';
 const RUBYCLIPS_CHANNEL_ID = '6a9f6ff1cd8b9c702c2897e1';
 const RUBYCLIPS_CHANNEL = 'rubaradaclips';
+const FACEBOOK_PRESET_PLATFORM = 'rubyclips-facebook-existing-v2';
 
 function validateManifest(m) {
-  if (m?.platform !== 'rubyclips-facebook-repost-v1') throw new Error('Blocked: invalid RubyClips Facebook manifest.');
+  if (m?.platform !== FACEBOOK_PRESET_PLATFORM) throw new Error('Blocked: invalid RubyClips Facebook preset-part manifest.');
   if (m?.sourceOwnership !== 'user-provided-facebook-page') throw new Error('Blocked: source is not the user-provided Facebook page.');
+  if (m?.presetPartPreserved !== true || m?.technicalSplitOnly !== false) throw new Error('Blocked: Facebook preset part was modified or split.');
+  if (m?.titleBurnedIn !== false || m?.partLabelBurnedIn !== false) throw new Error('Blocked: preset Facebook part contains generated overlays.');
+  if (Number(m?.segmentIndex || 0) !== 1 || Number(m?.segmentTotal || 0) !== 1) throw new Error('Blocked: preset Facebook part segmentation is not allowed.');
   if (!/^\d+$/.test(String(m?.sourceVideoId || ''))) throw new Error('Blocked: missing source video id.');
   if (!m?.sourceUrl || !String(m.sourceUrl).includes('facebook.com')) throw new Error('Blocked: invalid Facebook source URL.');
   if (!m?.file || !String(m.file).endsWith('.mp4')) throw new Error('Blocked: missing MP4.');
@@ -22,8 +26,8 @@ export default async function handler(req, res) {
 
   try {
     const tag = String(req.query?.tag || '').trim();
-    if (!/^rubyclips-fb-\d+(?:-s\d+)?$/.test(tag)) {
-      return res.status(400).json({ ok: false, error: 'A valid RubyClips Facebook release tag is required.' });
+    if (!/^rubyclips-fb-\d+$/.test(tag)) {
+      return res.status(400).json({ ok: false, error: 'A valid RubyClips Facebook preset-part release tag is required.' });
     }
 
     const base = `https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/releases/download/${encodeURIComponent(tag)}`;
@@ -39,9 +43,8 @@ export default async function handler(req, res) {
     const caption = String(manifest.caption).trim().slice(0, 2200);
     const dueAt = new Date(Date.now() + 45 * 1000).toISOString();
 
-    // Deliberately skip Buffer account/channel discovery and recent-post listing here.
-    // The RubyClips channel ID is pinned and the GitHub workflow/state provides dedupe.
-    // This reduces each publish attempt to a single Buffer API mutation.
+    // The target is pinned to the user's RubyClips TikTok channel. Generic
+    // generated RubyClips publishing remains disabled elsewhere.
     const post = await createBufferVideoPost({
       channelId: RUBYCLIPS_CHANNEL_ID,
       caption,
@@ -59,10 +62,10 @@ export default async function handler(req, res) {
       channelId: RUBYCLIPS_CHANNEL_ID,
       channelName: RUBYCLIPS_CHANNEL,
       sourceVideoId: String(manifest.sourceVideoId),
-      segmentIndex: Number(manifest.segmentIndex || 1),
-      segmentTotal: Number(manifest.segmentTotal || 1),
+      segmentIndex: 1,
+      segmentTotal: 1,
       videoUrl,
-      renderer: 'facebook-existing-video-low-request-v2'
+      renderer: 'facebook-existing-preset-part-v3'
     });
   } catch (error) {
     console.error('rubyclips-post failed', error);
