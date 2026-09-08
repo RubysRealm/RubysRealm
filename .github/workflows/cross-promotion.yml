@@ -2,13 +2,6 @@ name: Three-channel owned promotion engine
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'promotion/run.py'
-      - 'promotion/launcher.py'
-      - 'api/buffer-status.js'
-      - '.github/workflows/cross-promotion.yml'
   schedule:
     - cron: '43 * * * *'
 
@@ -50,6 +43,7 @@ jobs:
           python promotion/launcher.py
 
       - name: Persist deduplication and cooldown state
+        if: success()
         run: |
           set -euo pipefail
           git config user.name "rubysrealm-promotion-bot"
