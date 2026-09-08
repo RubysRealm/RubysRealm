@@ -19,10 +19,16 @@ async function bufferGraphQL(query, variables = {}) {
     body: JSON.stringify({ query, variables })
   });
 
-  const data = await response.json();
-  if (!response.ok) throw new Error(`Buffer HTTP ${response.status}`);
-  if (data.errors?.length) throw new Error(data.errors.map(e => e.message).join('; '));
-  return data.data;
+  let data = null;
+  try { data = await response.json(); } catch { data = null; }
+  if (!response.ok) {
+    const error = new Error(`Buffer HTTP ${response.status}${data?.errors?.[0]?.extensions?.window ? ` (${data.errors[0].extensions.window})` : ''}`);
+    error.status = response.status;
+    error.retryAfter = Number(response.headers.get('retry-after') || 0);
+    throw error;
+  }
+  if (data?.errors?.length) throw new Error(data.errors.map(e => e.message).join('; '));
+  return data?.data;
 }
 
 async function listChannels(includeAll = false) {
@@ -32,19 +38,13 @@ async function listChannels(includeAll = false) {
     const data = await bufferGraphQL(
       `query GetChannels($organizationId: OrganizationId!) {
         channels(input: { organizationId: $organizationId }) {
-          id
-          name
-          displayName
-          service
-          isQueuePaused
+          id name displayName service isQueuePaused
         }
       }`,
       { organizationId: organization.id }
     );
     for (const channel of data?.channels || []) {
-      if (includeAll || String(channel.service).toLowerCase() === 'tiktok') {
-        channels.push({ organization, channel });
-      }
+      if (includeAll || String(channel.service).toLowerCase() === 'tiktok') channels.push({ organization, channel });
     }
   }
   return channels;
@@ -54,12 +54,7 @@ async function getPost(postId) {
   const data = await bufferGraphQL(
     `query GetPost($id: PostId!) {
       post(input: { id: $id }) {
-        id
-        text
-        status
-        dueAt
-        sentAt
-        externalLink
+        id text status dueAt sentAt externalLink
         assets { source }
         channel { id name displayName service }
         error { message }
@@ -78,26 +73,10 @@ async function recentPostsForChannel(target, first = 40, statuses = ['sent']) {
         filter: { status: $statuses, channelIds: [$channelId] },
         sort: [{ field: createdAt, direction: desc }]
       }) {
-        edges {
-          node {
-            id
-            text
-            status
-            dueAt
-            sentAt
-            externalLink
-            assets { source }
-            channel { id name displayName service }
-          }
-        }
+        edges { node { id text status dueAt sentAt externalLink assets { source } channel { id name displayName service } } }
       }
     }`,
-    {
-      organizationId: target.organization.id,
-      channelId: target.channel.id,
-      first: Math.min(60, Math.max(1, Number(first) || 40)),
-      statuses
-    }
+    { organizationId: target.organization.id, channelId: target.channel.id, first: Math.min(60, Math.max(1, Number(first) || 40)), statuses }
   );
   return (data?.posts?.edges || []).map(edge => edge.node);
 }
@@ -121,9 +100,7 @@ function validatePromotionManifest(m) {
   if (m?.platform !== 'rubysrealm-promo-teaser-v1') throw new Error('Invalid promotion manifest.');
   const target = String(m?.targetChannel || '').replace(/^@/, '').toLowerCase();
   const source = String(m?.sourceChannel || '').replace(/^@/, '').toLowerCase();
-  if (!ALLOWED_PROMO_TARGETS.has(target) || !ALLOWED_PROMO_TARGETS.has(source) || target === source) {
-    throw new Error('Promotion channel guard rejected the source/target pair.');
-  }
+  if (!ALLOWED_PROMO_TARGETS.has(target) || !ALLOWED_PROMO_TARGETS.has(source) || target === source) throw new Error('Promotion channel guard rejected the source/target pair.');
   if (!m?.sourceReleaseTag || !m?.file || !String(m.file).endsWith('.mp4')) throw new Error('Promotion manifest is incomplete.');
   const duration = Number(m?.durationSeconds || 0);
   if (!Number.isFinite(duration) || duration < 4 || duration > 30) throw new Error('Promotion teaser duration must be 4-30 seconds.');
@@ -150,9 +127,7 @@ async function postPromotion(tag) {
   const existing = await recentPostsForChannel(targetChannel, 60, ['scheduled', 'sent']);
   const duplicate = existing.find(p => p?.assets?.some(a => a?.source === videoUrl));
   const caption = String(manifest.caption || `From @${source} — full video on @${source} #rubysrealm`).trim().slice(0, 2200);
-  if (duplicate) {
-    return { ok: true, skipped: true, postId: duplicate.id, status: duplicate.status, externalLink: duplicate.externalLink || null, channelName: target, videoUrl };
-  }
+  if (duplicate) return { ok: true, skipped: true, postId: duplicate.id, status: duplicate.status, externalLink: duplicate.externalLink || null, channelName: target, videoUrl };
 
   const dueAt = new Date(Date.now() + 60 * 1000).toISOString();
   const post = await createBufferVideoPost({ channelId: targetChannel.channel.id, caption, videoUrl, dueAt, allowDisabled: true });
@@ -163,6 +138,14 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
+    const postId = String(req.query?.post_id || '').trim();
+    if (postId) {
+      const post = await getPost(postId);
+      if (!post) return res.status(404).json({ ok: false, message: 'Post not found.' });
+      if (String(post?.channel?.id || '') !== RUBYCLIPS_CHANNEL_ID) return res.status(403).json({ ok: false, message: 'Post is not on @rubaradaclips.' });
+      return res.status(200).json({ ok: true, post });
+    }
+
     if (String(req.query?.all || '') === '1') {
       const channels = await listChannels(false);
       return res.status(200).json({ ok: true, channels });
@@ -174,21 +157,14 @@ export default async function handler(req, res) {
     }
 
     const promoTag = String(req.query?.promo_tag || '').trim();
-    if (promoTag) {
-      const result = await postPromotion(promoTag);
-      return res.status(200).json(result);
-    }
+    if (promoTag) return res.status(200).json(await postPromotion(promoTag));
 
     const recentChannel = String(req.query?.recent_channel || '').trim().replace(/^@/, '');
     if (recentChannel) {
       const target = await getBufferTikTokChannel({ channelName: recentChannel, allowDisabled: true });
       if (!target) return res.status(404).json({ ok: false, message: `TikTok channel @${recentChannel} not found.` });
       const posts = await recentPostsForChannel(target, req.query?.limit, ['sent']);
-      return res.status(200).json({
-        ok: true,
-        channel: { id: target.channel.id, name: target.channel.name, displayName: target.channel.displayName },
-        posts
-      });
+      return res.status(200).json({ ok: true, channel: { id: target.channel.id, name: target.channel.name, displayName: target.channel.displayName }, posts });
     }
 
     const deleteId = String(req.query?.delete_post_id || '').trim();
@@ -205,18 +181,10 @@ export default async function handler(req, res) {
 
     const found = await getBufferTikTokChannel();
     if (!found) return res.status(404).json({ ok: false, connected: false, message: 'No TikTok channel found in Buffer.' });
-
-    const postId = String(req.query?.post_id || '');
-    const post = postId ? await getPost(postId) : null;
-
-    return res.status(200).json({
-      ok: true,
-      connected: true,
-      organization: { id: found.organization.id, name: found.organization.name },
-      channel: { id: found.channel.id, name: found.channel.name, service: found.channel.service },
-      post
-    });
+    return res.status(200).json({ ok: true, connected: true, organization: { id: found.organization.id, name: found.organization.name }, channel: { id: found.channel.id, name: found.channel.name, service: found.channel.service }, post: null });
   } catch (error) {
-    return res.status(500).json({ ok: false, connected: false, message: error.message });
+    const status = Number(error?.status) === 429 ? 429 : 500;
+    if (status === 429 && Number(error?.retryAfter) > 0) res.setHeader('Retry-After', String(Math.ceil(error.retryAfter)));
+    return res.status(status).json({ ok: false, connected: false, message: error.message, retryAfter: Number(error?.retryAfter) || null });
   }
 }
