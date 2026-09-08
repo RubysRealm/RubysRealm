@@ -21,10 +21,40 @@ async function bufferGraphQL(query, variables = {}) {
   return data.data;
 }
 
+async function listTikTokChannels() {
+  const account = await bufferGraphQL(`query { account { organizations { id name } } }`);
+  const channels = [];
+  for (const organization of account?.account?.organizations || []) {
+    const data = await bufferGraphQL(
+      `query GetChannels($organizationId: OrganizationId!) {
+        channels(input: { organizationId: $organizationId }) {
+          id
+          name
+          displayName
+          service
+          isQueuePaused
+        }
+      }`,
+      { organizationId: organization.id }
+    );
+    for (const channel of data?.channels || []) {
+      if (String(channel.service).toLowerCase() === 'tiktok') {
+        channels.push({ organization, channel });
+      }
+    }
+  }
+  return channels;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
+    if (String(req.query?.all || '') === '1') {
+      const channels = await listTikTokChannels();
+      return res.status(200).json({ ok: true, channels });
+    }
+
     const found = await getBufferTikTokChannel();
     if (!found) {
       return res.status(404).json({ ok: false, connected: false, message: 'No TikTok channel found in Buffer.' });
