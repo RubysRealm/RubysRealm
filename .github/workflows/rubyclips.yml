@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - 'rubyclips/pipeline.py'
+      - 'rubyclips/renderer_v2.py'
       - 'rubyclips/requirements.txt'
       - '.github/workflows/rubyclips.yml'
   schedule:
@@ -68,7 +69,7 @@ jobs:
           STORY_IMAGE_URL: https://rubys-realm.vercel.app/api/story-image
         run: |
           set -euo pipefail
-          python rubyclips/pipeline.py
+          python rubyclips/renderer_v2.py
 
       - name: Validate output
         run: |
@@ -79,6 +80,8 @@ jobs:
           if not p.exists(): raise SystemExit('manifest missing')
           m=json.loads(p.read_text())
           assert m['platform']=='rubyclips-original-drama-v1'
+          assert m['rendererVersion']=='rubyclips-vector-drama-v2'
+          assert m['captionRenderer']=='ass-v2-linebreak-safe'
           assert m['rightsPolicy']=='original-generated-assets-only'
           assert m['originalOnly'] is True
           assert m['generatedVisualsOnly'] is True
@@ -109,7 +112,7 @@ jobs:
           TAG: ${{ env.RUBYCLIPS_TAG }}
         run: |
           python - <<'PY'
-          import json, os, time, urllib.request, urllib.error
+          import json, os, time, urllib.request
           tag=os.environ['TAG']
           url=f'https://rubys-realm.vercel.app/api/auto-post?tag={tag}'
           last=None
