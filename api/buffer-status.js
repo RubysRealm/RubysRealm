@@ -25,7 +25,7 @@ async function bufferGraphQL(query, variables = {}) {
   return data.data;
 }
 
-async function listTikTokChannels() {
+async function listChannels(includeAll = false) {
   const account = await bufferGraphQL(`query { account { organizations { id name } } }`);
   const channels = [];
   for (const organization of account?.account?.organizations || []) {
@@ -42,7 +42,7 @@ async function listTikTokChannels() {
       { organizationId: organization.id }
     );
     for (const channel of data?.channels || []) {
-      if (String(channel.service).toLowerCase() === 'tiktok') {
+      if (includeAll || String(channel.service).toLowerCase() === 'tiktok') {
         channels.push({ organization, channel });
       }
     }
@@ -164,7 +164,12 @@ export default async function handler(req, res) {
 
   try {
     if (String(req.query?.all || '') === '1') {
-      const channels = await listTikTokChannels();
+      const channels = await listChannels(false);
+      return res.status(200).json({ ok: true, channels });
+    }
+
+    if (String(req.query?.all_services || '') === '1') {
+      const channels = await listChannels(true);
       return res.status(200).json({ ok: true, channels });
     }
 
