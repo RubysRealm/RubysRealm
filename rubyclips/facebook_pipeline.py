@@ -183,7 +183,7 @@ def display_title(meta):
     text = re.sub(r'\s+', ' ', text).strip(' -–—|')
     if not text:
         text = 'RubyClips'
-    lines = textwrap.wrap(text, width=34, break_long_words=False, break_on_hyphens=False)
+    lines = textwrap.wrap(text, width=30, break_long_words=False, break_on_hyphens=False)
     if not lines:
         lines = ['RubyClips']
     if len(lines) > 2:
@@ -213,13 +213,13 @@ def burn_title_and_part(src, dst, title, part, start=None, length=None):
     part_path = part_file.as_posix().replace(':', '\\:').replace("'", "\\'")
     vf = (
         f"drawtext=fontfile={FONT_FILE}:textfile='{title_path}':"
-        "fontcolor=white:fontsize=h/24:line_spacing=8:"
-        "box=1:boxcolor=black@0.68:boxborderw=18:"
-        "x=(w-text_w)/2:y=h*0.035,"
-        f"drawtext=fontfile={FONT_FILE}:textfile='{part_path}':"
-        "fontcolor=white:fontsize=h/30:"
+        "fontcolor=white:fontsize=h/34:line_spacing=6:"
         "box=1:boxcolor=black@0.68:boxborderw=14:"
-        "x=(w-text_w)/2:y=h*0.155"
+        "x=(w-text_w)/2:y=h*0.155,"
+        f"drawtext=fontfile={FONT_FILE}:textfile='{part_path}':"
+        "fontcolor=white:fontsize=h/32:"
+        "box=1:boxcolor=black@0.68:boxborderw=14:"
+        "x=(w-text_w)/2:y=h*0.835"
     )
     cmd += [
         '-vf', vf,
@@ -330,6 +330,7 @@ async def main():
         'partLabel': part,
         'titleBurnedIn': True,
         'partLabelBurnedIn': True,
+        'overlayLayout': 'title-center-top-band-part-center-lower-band-v2',
         'caption': caption_for(chosen, segment_index, segment_total),
         'file': final.name,
         'targetChannel': 'rubaradaclips',
