@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 import asyncio
 import json
-import math
 import re
 import shutil
 import subprocess
-import textwrap
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -18,8 +16,7 @@ STATE_PATH = BASE / 'facebook_state.json'
 WORK = BASE / 'facebook_work'
 OUT = BASE / 'facebook_output'
 SOURCE_URL = 'https://www.facebook.com/share/198HW9AwHZ/?mibextid=wwXIfr'
-MAX_TIKTOK_SECONDS = 585.0
-FONT_FILE = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+MAX_TIKTOK_SECONDS = 599.0
 
 
 def video_id(url):
@@ -169,72 +166,30 @@ def download(meta):
 
 def probe_duration(path):
     p = subprocess.run([
-        'ffprobe','-v','error','-show_entries','format=duration','-of','default=nw=1:nk=1',str(path)
+        'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+        '-of', 'default=nw=1:nk=1', str(path)
     ], check=True, capture_output=True, text=True)
     return float(p.stdout.strip())
 
 
-def display_title(meta):
-    text = str(meta.get('description') or '').strip()
-    if not text:
-        raw = str(meta.get('title') or '').strip()
-        pieces = [p.strip() for p in raw.split('|') if p.strip()]
-        text = pieces[-2] if len(pieces) >= 2 else raw
-    text = re.sub(r'\s+', ' ', text).strip(' -–—|')
-    if not text:
-        text = 'RubyClips'
-    lines = textwrap.wrap(text, width=30, break_long_words=False, break_on_hyphens=False)
-    if not lines:
-        lines = ['RubyClips']
-    if len(lines) > 2:
-        lines = lines[:2]
-        lines[-1] = lines[-1].rstrip(' .,:;-') + '…'
-    return '\n'.join(lines)
+def preserve_source_part(src, dst):
+    # The Facebook uploads are already the user's preset parts. Do not split,
+    # crop, burn titles, add part numbers, or regenerate them.
+    if src.suffix.lower() == '.mp4':
+        shutil.copy2(src, dst)
+        return
+    subprocess.run([
+        'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error', '-i', str(src),
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-movflags', '+faststart', str(dst)
+    ], check=True, timeout=1800)
 
 
-def part_label(segment_index, segment_total):
-    return f'Part {segment_index}/{segment_total}' if segment_total > 1 else 'Part 1'
-
-
-def burn_title_and_part(src, dst, title, part, start=None, length=None):
-    title_file = WORK / 'overlay-title.txt'
-    part_file = WORK / 'overlay-part.txt'
-    title_file.write_text(title, encoding='utf-8')
-    part_file.write_text(part, encoding='utf-8')
-
-    cmd = ['ffmpeg','-y','-hide_banner','-loglevel','error']
-    if start is not None:
-        cmd += ['-ss', f'{start:.3f}']
-    cmd += ['-i', str(src)]
-    if length is not None:
-        cmd += ['-t', f'{length:.3f}']
-
-    title_path = title_file.as_posix().replace(':', '\\:').replace("'", "\\'")
-    part_path = part_file.as_posix().replace(':', '\\:').replace("'", "\\'")
-    vf = (
-        f"drawtext=fontfile={FONT_FILE}:textfile='{title_path}':"
-        "fontcolor=white:fontsize=h/34:line_spacing=6:"
-        "box=1:boxcolor=black@0.68:boxborderw=14:"
-        "x=(w-text_w)/2:y=h*0.155,"
-        f"drawtext=fontfile={FONT_FILE}:textfile='{part_path}':"
-        "fontcolor=white:fontsize=h/32:"
-        "box=1:boxcolor=black@0.68:boxborderw=14:"
-        "x=(w-text_w)/2:y=h*0.835"
-    )
-    cmd += [
-        '-vf', vf,
-        '-c:v','libx264','-preset','veryfast','-crf','18','-pix_fmt','yuv420p',
-        '-c:a','aac','-b:a','160k','-ar','48000','-movflags','+faststart',str(dst)
-    ]
-    subprocess.run(cmd, check=True, timeout=1800)
-
-
-def caption_for(meta, segment_index=1, segment_total=1):
+def caption_for(meta):
     text = meta.get('description') or meta.get('title') or 'RubyClips'
-    text = re.sub(r'\s+', ' ', text).strip()
-    text = f'{text} — {part_label(segment_index, segment_total)}'
-    if len(text) > 2100:
-        text = text[:2100].rstrip()
+    text = re.sub(r'\s+', ' ', str(text)).strip()
+    if len(text) > 2150:
+        text = text[:2150].rstrip()
     if '#rubyclips' not in text.lower():
         text = (text + ' #rubyclips').strip()
     return text
@@ -243,7 +198,6 @@ def caption_for(meta, segment_index=1, segment_total=1):
 async def main():
     state = json.loads(STATE_PATH.read_text()) if STATE_PATH.exists() else {}
     posted = {str(x) for x in state.get('postedVideoIds', [])}
-    segment_progress = {str(k): int(v) for k, v in (state.get('segmentProgress') or {}).items()}
 
     shutil.rmtree(WORK, ignore_errors=True)
     shutil.rmtree(OUT, ignore_errors=True)
@@ -264,54 +218,44 @@ async def main():
             m = metadata(url)
         except Exception as exc:
             print(f'metadata failed for {url}: {exc}')
-            m = {'id': vid, 'url': url, 'title': '', 'description': '', 'timestamp': 0, 'upload_date': '', 'duration': 0}
+            m = {
+                'id': vid, 'url': url, 'title': '', 'description': '',
+                'timestamp': 0, 'upload_date': '', 'duration': 0,
+            }
+        # Facebook page surfaces are normally newest first. This gives us a
+        # deterministic oldest-first fallback when a timestamp is unavailable.
         m['_fallback_order'] = total - i
         metas.append(m)
 
     if not metas:
-        (OUT / 'complete.json').write_text(json.dumps({'complete': True, 'resolvedPageUrl': resolved}, indent=2))
-        print('No unposted Facebook videos remain.')
+        (OUT / 'complete.json').write_text(json.dumps({
+            'complete': True,
+            'resolvedPageUrl': resolved,
+        }, indent=2))
+        print('No unposted Facebook preset parts remain.')
         return
 
     metas.sort(key=lambda m: (0, m['timestamp']) if m.get('timestamp') else (1, m['_fallback_order']))
     chosen = metas[0]
-    if not chosen.get('timestamp'):
-        no_dates = [m for m in metas if not m.get('timestamp')]
-        chosen = sorted(no_dates, key=lambda m: m['_fallback_order'])[0] if no_dates else chosen
 
     src = download(chosen)
     actual_duration = probe_duration(src)
     if actual_duration <= 0:
-        raise RuntimeError('Facebook source duration is invalid')
+        raise RuntimeError('Facebook preset part duration is invalid')
+    if actual_duration > MAX_TIKTOK_SECONDS:
+        raise RuntimeError(
+            f'Facebook preset part {chosen["id"]} is {actual_duration:.2f}s; '
+            'refusing to split it because preset part boundaries must be preserved.'
+        )
 
-    segment_total = max(1, int(math.ceil(actual_duration / MAX_TIKTOK_SECONDS)))
-    requested_index = max(1, segment_progress.get(str(chosen['id']), 1))
-    if requested_index > segment_total:
-        requested_index = 1
-    segment_index = requested_index
-    title = display_title(chosen)
-    part = part_label(segment_index, segment_total)
-
-    if segment_total == 1:
-        final = OUT / f"facebook-{chosen['id']}.mp4"
-        segment_start = 0.0
-        segment_duration = actual_duration
-        burn_title_and_part(src, final, title, part)
-    else:
-        segment_start = (segment_index - 1) * MAX_TIKTOK_SECONDS
-        remaining = max(0.1, actual_duration - segment_start)
-        segment_duration = min(MAX_TIKTOK_SECONDS, remaining)
-        final = OUT / f"facebook-{chosen['id']}-segment-{segment_index:02d}-of-{segment_total:02d}.mp4"
-        burn_title_and_part(src, final, title, part, start=segment_start, length=segment_duration)
-
+    final = OUT / f"facebook-{chosen['id']}.mp4"
+    preserve_source_part(src, final)
     produced_duration = probe_duration(final)
-    if produced_duration > 599.0:
-        raise RuntimeError(f'Produced TikTok segment is still too long: {produced_duration:.2f}s')
     if final.stat().st_size < 100000:
-        raise RuntimeError('Downloaded Facebook MP4 is unexpectedly small')
+        raise RuntimeError('Downloaded Facebook preset part is unexpectedly small')
 
     manifest = {
-        'platform': 'rubyclips-facebook-repost-v1',
+        'platform': 'rubyclips-facebook-existing-v2',
         'sourceOwnership': 'user-provided-facebook-page',
         'sourceShareUrl': SOURCE_URL,
         'resolvedPageUrl': resolved,
@@ -320,22 +264,20 @@ async def main():
         'sourceTimestamp': chosen.get('timestamp') or None,
         'sourceUploadDate': chosen.get('upload_date') or None,
         'sourceDurationSeconds': round(actual_duration, 3),
-        'segmentIndex': segment_index,
-        'segmentTotal': segment_total,
-        'segmentStartSeconds': round(segment_start, 3),
+        'segmentIndex': 1,
+        'segmentTotal': 1,
+        'segmentStartSeconds': 0.0,
         'segmentDurationSeconds': round(produced_duration, 3),
         'originalTitle': chosen.get('title') or '',
         'originalDescription': chosen.get('description') or '',
-        'displayTitle': title.replace('\n', ' '),
-        'partLabel': part,
-        'titleBurnedIn': True,
-        'partLabelBurnedIn': True,
-        'overlayLayout': 'title-center-top-band-part-center-lower-band-v2',
-        'caption': caption_for(chosen, segment_index, segment_total),
+        'caption': caption_for(chosen),
         'file': final.name,
         'targetChannel': 'rubaradaclips',
-        'passThrough': False,
-        'technicalSplitOnly': segment_total > 1,
+        'passThrough': True,
+        'presetPartPreserved': True,
+        'technicalSplitOnly': False,
+        'titleBurnedIn': False,
+        'partLabelBurnedIn': False,
     }
     (OUT / 'manifest.json').write_text(json.dumps(manifest, indent=2))
     print(json.dumps(manifest, indent=2))
