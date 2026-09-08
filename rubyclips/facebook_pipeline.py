@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import asyncio
 import json
+import math
 import re
 import shutil
 import subprocess
+import textwrap
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -16,7 +18,8 @@ STATE_PATH = BASE / 'facebook_state.json'
 WORK = BASE / 'facebook_work'
 OUT = BASE / 'facebook_output'
 SOURCE_URL = 'https://www.facebook.com/share/198HW9AwHZ/?mibextid=wwXIfr'
-MAX_TIKTOK_SECONDS = 599.0
+MAX_TIKTOK_SECONDS = 585.0
+FONT_FILE = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
 
 
 def video_id(url):
@@ -172,24 +175,81 @@ def probe_duration(path):
     return float(p.stdout.strip())
 
 
-def preserve_source_part(src, dst):
-    # The Facebook uploads are already the user's preset parts. Do not split,
-    # crop, burn titles, add part numbers, or regenerate them.
-    if src.suffix.lower() == '.mp4':
-        shutil.copy2(src, dst)
-        return
-    subprocess.run([
-        'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error', '-i', str(src),
-        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
+def clean_title(meta):
+    raw_title = re.sub(r'\s+', ' ', str(meta.get('title') or '')).strip()
+    raw_desc = re.sub(r'\s+', ' ', str(meta.get('description') or '')).strip()
+
+    # yt-dlp Facebook titles often append the Page name. Prefer the actual video title.
+    candidates = []
+    if raw_title:
+        for separator in [' | ', ' • ', ' - ']:
+            if separator in raw_title:
+                pieces = [p.strip() for p in raw_title.split(separator) if p.strip()]
+                candidates.extend(pieces)
+                break
+        else:
+            candidates.append(raw_title)
+    if raw_desc:
+        first = re.split(r'[\n\r]|(?<=[.!?])\s+', raw_desc)[0].strip()
+        if first:
+            candidates.append(first)
+
+    bad = {'facebook', 'polissya bushcraft', 'rubyclips'}
+    title = next((c for c in candidates if c.lower().strip() not in bad and len(c.strip()) >= 4), 'RubyClips')
+    title = re.sub(r'#[A-Za-z0-9_]+', '', title).strip(' -–—|')
+    if len(title) > 76:
+        title = title[:73].rstrip(' ,.;:-') + '…'
+    lines = textwrap.wrap(title, width=31, break_long_words=False, break_on_hyphens=False)
+    return '\n'.join(lines[:2]) if lines else 'RubyClips'
+
+
+def part_label(index, total):
+    return f'Part {index}/{total}' if total > 1 else 'Part 1'
+
+
+def burn_layout(src, dst, title, part, start=0.0, length=None):
+    title_file = WORK / 'overlay-title.txt'
+    part_file = WORK / 'overlay-part.txt'
+    title_file.write_text(title, encoding='utf-8')
+    part_file.write_text(part, encoding='utf-8')
+
+    def esc(path):
+        return path.as_posix().replace(':', '\\:').replace("'", "\\'")
+
+    cmd = ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error']
+    if start > 0:
+        cmd += ['-ss', f'{start:.3f}']
+    cmd += ['-i', str(src)]
+    if length is not None:
+        cmd += ['-t', f'{length:.3f}']
+
+    # Requested layout: smaller title at the former Part position; Part beneath the
+    # visible video area at a comparable distance. Preserve the source image itself.
+    vf = (
+        'scale=1080:1920:force_original_aspect_ratio=decrease,'
+        'pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1,'
+        f"drawtext=fontfile={FONT_FILE}:textfile='{esc(title_file)}':"
+        "fontcolor=white:fontsize=34:line_spacing=5:"
+        "box=1:boxcolor=black@0.62:boxborderw=12:"
+        "x=(w-text_w)/2:y=h*0.155,"
+        f"drawtext=fontfile={FONT_FILE}:textfile='{esc(part_file)}':"
+        "fontcolor=white:fontsize=31:"
+        "box=1:boxcolor=black@0.62:boxborderw=11:"
+        "x=(w-text_w)/2:y=h*0.835"
+    )
+    cmd += [
+        '-vf', vf,
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '19', '-pix_fmt', 'yuv420p',
         '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-movflags', '+faststart', str(dst)
-    ], check=True, timeout=1800)
+    ]
+    subprocess.run(cmd, check=True, timeout=2400)
 
 
-def caption_for(meta):
-    text = meta.get('description') or meta.get('title') or 'RubyClips'
-    text = re.sub(r'\s+', ' ', str(text)).strip()
-    if len(text) > 2150:
-        text = text[:2150].rstrip()
+def caption_for(meta, index, total):
+    text = re.sub(r'\s+', ' ', str(meta.get('description') or meta.get('title') or 'RubyClips')).strip()
+    text = f'{text} — {part_label(index, total)}'
+    if len(text) > 2100:
+        text = text[:2100].rstrip()
     if '#rubyclips' not in text.lower():
         text = (text + ' #rubyclips').strip()
     return text
@@ -198,6 +258,7 @@ def caption_for(meta):
 async def main():
     state = json.loads(STATE_PATH.read_text()) if STATE_PATH.exists() else {}
     posted = {str(x) for x in state.get('postedVideoIds', [])}
+    progress = {str(k): int(v) for k, v in (state.get('segmentProgress') or {}).items()}
 
     shutil.rmtree(WORK, ignore_errors=True)
     shutil.rmtree(OUT, ignore_errors=True)
@@ -209,7 +270,7 @@ async def main():
         raise RuntimeError('No public Facebook video links were discoverable from the supplied page URL.')
 
     metas = []
-    total = len(discovered)
+    total_found = len(discovered)
     for i, url in enumerate(discovered):
         vid = video_id(url)
         if not vid or vid in posted:
@@ -218,44 +279,49 @@ async def main():
             m = metadata(url)
         except Exception as exc:
             print(f'metadata failed for {url}: {exc}')
-            m = {
-                'id': vid, 'url': url, 'title': '', 'description': '',
-                'timestamp': 0, 'upload_date': '', 'duration': 0,
-            }
-        # Facebook page surfaces are normally newest first. This gives us a
-        # deterministic oldest-first fallback when a timestamp is unavailable.
-        m['_fallback_order'] = total - i
+            m = {'id': vid, 'url': url, 'title': '', 'description': '', 'timestamp': 0, 'upload_date': '', 'duration': 0}
+        m['_fallback_order'] = total_found - i
         metas.append(m)
 
     if not metas:
-        (OUT / 'complete.json').write_text(json.dumps({
-            'complete': True,
-            'resolvedPageUrl': resolved,
-        }, indent=2))
-        print('No unposted Facebook preset parts remain.')
+        (OUT / 'complete.json').write_text(json.dumps({'complete': True, 'resolvedPageUrl': resolved}, indent=2))
+        print('No unposted Facebook videos remain.')
         return
 
+    # Oldest source video first; if timestamps are absent, reverse Facebook's usual newest-first surface order.
     metas.sort(key=lambda m: (0, m['timestamp']) if m.get('timestamp') else (1, m['_fallback_order']))
     chosen = metas[0]
 
     src = download(chosen)
     actual_duration = probe_duration(src)
     if actual_duration <= 0:
-        raise RuntimeError('Facebook preset part duration is invalid')
-    if actual_duration > MAX_TIKTOK_SECONDS:
-        raise RuntimeError(
-            f'Facebook preset part {chosen["id"]} is {actual_duration:.2f}s; '
-            'refusing to split it because preset part boundaries must be preserved.'
-        )
+        raise RuntimeError('Facebook source duration is invalid')
 
-    final = OUT / f"facebook-{chosen['id']}.mp4"
-    preserve_source_part(src, final)
+    segment_total = max(1, int(math.ceil(actual_duration / MAX_TIKTOK_SECONDS)))
+    segment_index = max(1, progress.get(str(chosen['id']), 1))
+    if segment_index > segment_total:
+        segment_index = 1
+
+    start = (segment_index - 1) * MAX_TIKTOK_SECONDS
+    remaining = max(0.1, actual_duration - start)
+    length = min(MAX_TIKTOK_SECONDS, remaining)
+    title = clean_title(chosen)
+    part = part_label(segment_index, segment_total)
+
+    if segment_total == 1:
+        final = OUT / f"facebook-{chosen['id']}.mp4"
+    else:
+        final = OUT / f"facebook-{chosen['id']}-segment-{segment_index:02d}-of-{segment_total:02d}.mp4"
+    burn_layout(src, final, title, part, start=start, length=length)
+
     produced_duration = probe_duration(final)
+    if produced_duration > 599.0:
+        raise RuntimeError(f'Produced TikTok segment is too long: {produced_duration:.2f}s')
     if final.stat().st_size < 100000:
-        raise RuntimeError('Downloaded Facebook preset part is unexpectedly small')
+        raise RuntimeError('Produced Facebook MP4 is unexpectedly small')
 
     manifest = {
-        'platform': 'rubyclips-facebook-existing-v2',
+        'platform': 'rubyclips-facebook-repost-v1',
         'sourceOwnership': 'user-provided-facebook-page',
         'sourceShareUrl': SOURCE_URL,
         'resolvedPageUrl': resolved,
@@ -264,20 +330,21 @@ async def main():
         'sourceTimestamp': chosen.get('timestamp') or None,
         'sourceUploadDate': chosen.get('upload_date') or None,
         'sourceDurationSeconds': round(actual_duration, 3),
-        'segmentIndex': 1,
-        'segmentTotal': 1,
-        'segmentStartSeconds': 0.0,
+        'segmentIndex': segment_index,
+        'segmentTotal': segment_total,
+        'segmentStartSeconds': round(start, 3),
         'segmentDurationSeconds': round(produced_duration, 3),
         'originalTitle': chosen.get('title') or '',
         'originalDescription': chosen.get('description') or '',
-        'caption': caption_for(chosen),
+        'displayTitle': title.replace('\n', ' '),
+        'partLabel': part,
+        'caption': caption_for(chosen, segment_index, segment_total),
         'file': final.name,
         'targetChannel': 'rubaradaclips',
-        'passThrough': True,
-        'presetPartPreserved': True,
-        'technicalSplitOnly': False,
-        'titleBurnedIn': False,
-        'partLabelBurnedIn': False,
+        'technicalSplitOnly': segment_total > 1,
+        'titleBurnedIn': True,
+        'partLabelBurnedIn': True,
+        'overlayLayoutVersion': 'title-midtop-part-lower-v2'
     }
     (OUT / 'manifest.json').write_text(json.dumps(manifest, indent=2))
     print(json.dumps(manifest, indent=2))
