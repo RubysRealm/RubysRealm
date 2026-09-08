@@ -1,0 +1,169 @@
+name: RubyClips automated short drama
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'rubyclips/pipeline.py'
+      - 'rubyclips/requirements.txt'
+      - '.github/workflows/rubyclips.yml'
+  schedule:
+    - cron: '20 2,8,14,20 * * *'
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: rubyclips-production
+  cancel-in-progress: false
+
+jobs:
+  render-publish-advance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Checkout RubyClips
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install renderer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          pip install -r rubyclips/requirements.txt
+
+      - name: Mint protected image-service token
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESPONSE="$(curl -sS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=rubys-realm-image-generator")"
+          TOKEN="$(printf '%s' "$RESPONSE" | python -c 'import json,sys; print(json.load(sys.stdin).get("value", ""))')"
+          test -n "$TOKEN"
+          echo "::add-mask::$TOKEN"
+          echo "GITHUB_OIDC_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Wait for production backend
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 24); do
+            CODE="$(curl -sS -o /dev/null -w '%{http_code}' https://rubys-realm.vercel.app/api/story-image || true)"
+            if [ "$CODE" = "405" ]; then
+              sleep 20
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "RubyClips backend did not become reachable."
+          exit 1
+
+      - name: Render next RubyClips episode
+        env:
+          RUBYCLIPS_SEED: ${{ github.run_id }}
+          STORY_IMAGE_URL: https://rubys-realm.vercel.app/api/story-image
+        run: |
+          set -euo pipefail
+          python rubyclips/pipeline.py
+
+      - name: Validate output
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('rubyclips/output/manifest.json')
+          if not p.exists(): raise SystemExit('manifest missing')
+          m=json.loads(p.read_text())
+          assert m['platform']=='rubyclips-original-drama-v1'
+          assert m['rightsPolicy']=='original-generated-assets-only'
+          assert m['originalOnly'] is True
+          assert m['generatedVisualsOnly'] is True
+          assert m['targetChannel']=='rubaradaclips'
+          assert m['qualityPassed'] is True
+          assert m['captionsBurnedIn'] is True
+          assert 35 <= float(m['durationSeconds']) <= 110
+          assert int(m['sceneCount']) >= 6
+          v=Path('rubyclips/output')/m['file']
+          assert v.exists() and v.stat().st_size > 500000
+          print(json.dumps(m, indent=2))
+          PY
+
+      - name: Publish immutable RubyClips release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="rubyclips-${GITHUB_RUN_ID}"
+          echo "RUBYCLIPS_TAG=$TAG" >> "$GITHUB_ENV"
+          VIDEO="$(find rubyclips/output -maxdepth 1 -name '*.mp4' -print -quit)"
+          test -n "$VIDEO"
+          gh release delete "$TAG" --yes --cleanup-tag >/dev/null 2>&1 || true
+          gh release create "$TAG" "$VIDEO" rubyclips/output/manifest.json --title "RubyClips ${TAG}" --notes "Original generated RubyClips short-drama episode. No third-party drama footage is included."
+
+      - name: Send only to @rubaradaclips
+        env:
+          TAG: ${{ env.RUBYCLIPS_TAG }}
+        run: |
+          python - <<'PY'
+          import json, os, time, urllib.request, urllib.error
+          tag=os.environ['TAG']
+          url=f'https://rubys-realm.vercel.app/api/auto-post?tag={tag}'
+          last=None
+          for attempt in range(12):
+              try:
+                  with urllib.request.urlopen(url, timeout=60) as r:
+                      body=r.read().decode()
+                  data=json.loads(body)
+                  if not data.get('ok'):
+                      raise RuntimeError(body)
+                  if str(data.get('channelName','')).lstrip('@').lower() != 'rubaradaclips':
+                      raise RuntimeError('RubyClips channel guard failed: '+body)
+                  open('rubyclips/output/publish-response.json','w').write(json.dumps(data,indent=2))
+                  print(json.dumps(data,indent=2))
+                  break
+              except Exception as e:
+                  last=e
+                  print(f'publish attempt {attempt+1} failed: {e}')
+                  time.sleep(15)
+          else:
+              raise SystemExit(f'RubyClips publish failed after retries: {last}')
+          PY
+
+      - name: Advance RubyClips episode state
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('rubyclips/state.json')
+          s=json.loads(p.read_text())
+          total=int(s.get('totalEpisodes',8))
+          ep=int(s.get('episodeNumber',1))+1
+          season=int(s.get('seasonNumber',1))
+          if ep>total:
+              ep=1
+              season+=1
+          s['episodeNumber']=ep
+          s['seasonNumber']=season
+          p.write_text(json.dumps(s,indent=2)+'\n')
+          print(s)
+          PY
+          git config user.name "rubyclips-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add rubyclips/state.json
+          git diff --cached --quiet || git commit -m "Advance RubyClips episode [skip ci]"
+          git push
+
+      - name: Save production diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubyclips-${{ github.run_number }}
+          path: |
+            rubyclips/output/manifest.json
+            rubyclips/output/publish-response.json
+          if-no-files-found: warn
+          retention-days: 14
