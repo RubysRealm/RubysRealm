@@ -19,7 +19,7 @@ permissions:
 
 concurrency:
   group: rubyclips-production
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   render-publish-advance:
@@ -37,7 +37,7 @@ jobs:
       - name: Install renderer
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          sudo apt-get install -y ffmpeg fonts-dejavu-core espeak-ng
           pip install -r rubyclips/requirements.txt
 
       - name: Mint protected image-service token
