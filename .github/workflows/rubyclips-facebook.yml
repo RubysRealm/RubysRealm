@@ -1,0 +1,206 @@
+name: RubyClips existing Facebook videos
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'rubyclips/facebook_pipeline.py'
+      - 'rubyclips/facebook_requirements.txt'
+      - '.github/workflows/rubyclips-facebook.yml'
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rubyclips-facebook-source
+  cancel-in-progress: false
+
+jobs:
+  upload-next-oldest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Facebook source tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          pip install -r rubyclips/facebook_requirements.txt
+          python -m playwright install chromium --with-deps
+
+      - name: Find and download oldest unposted Facebook video
+        run: |
+          set -euo pipefail
+          python rubyclips/facebook_pipeline.py
+
+      - name: Stop cleanly when Facebook backlog is complete
+        id: backlog
+        run: |
+          if [ -f rubyclips/facebook_output/complete.json ]; then
+            echo "complete=true" >> "$GITHUB_OUTPUT"
+            echo "All discovered Facebook videos have been handled."
+          else
+            echo "complete=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Read source video identity
+        if: steps.backlog.outputs.complete != 'true'
+        id: source
+        run: |
+          python - <<'PY'
+          import json, os
+          m=json.load(open('rubyclips/facebook_output/manifest.json'))
+          vid=str(m['sourceVideoId'])
+          if not vid.isdigit(): raise SystemExit('invalid Facebook video id')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
+              f.write(f'video_id={vid}\n')
+              f.write(f'file={m["file"]}\n')
+          PY
+
+      - name: Publish immutable source release
+        if: steps.backlog.outputs.complete != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VIDEO_ID: ${{ steps.source.outputs.video_id }}
+          FILE_NAME: ${{ steps.source.outputs.file }}
+        run: |
+          set -euo pipefail
+          TAG="rubyclips-fb-${VIDEO_ID}"
+          echo "RUBYCLIPS_FB_TAG=$TAG" >> "$GITHUB_ENV"
+          VIDEO="rubyclips/facebook_output/${FILE_NAME}"
+          test -s "$VIDEO"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$VIDEO" rubyclips/facebook_output/manifest.json --clobber
+          else
+            gh release create "$TAG" "$VIDEO" rubyclips/facebook_output/manifest.json --title "RubyClips Facebook ${VIDEO_ID}" --notes "Existing user-provided Facebook video copied without generated scenes or story replacement."
+          fi
+
+      - name: Wait for RubyClips publisher deployment
+        if: steps.backlog.outputs.complete != 'true'
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            CODE="$(curl -sS -o /tmp/check.json -w '%{http_code}' 'https://rubys-realm.vercel.app/api/auto-post?tag=invalid' || true)"
+            if [ "$CODE" = "400" ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Publisher did not become ready."
+          exit 1
+
+      - name: Upload existing video to @rubaradaclips
+        if: steps.backlog.outputs.complete != 'true'
+        id: publish
+        env:
+          TAG: ${{ env.RUBYCLIPS_FB_TAG }}
+        run: |
+          python - <<'PY'
+          import json, os, time, urllib.request, urllib.error
+          tag=os.environ['TAG']
+          url=f'https://rubys-realm.vercel.app/api/auto-post?tag={tag}'
+          last=None
+          data=None
+          for attempt in range(15):
+              try:
+                  with urllib.request.urlopen(url, timeout=90) as r:
+                      data=json.loads(r.read().decode())
+                  if not data.get('ok'):
+                      raise RuntimeError(json.dumps(data))
+                  if str(data.get('channelName','')).lstrip('@').lower()!='rubaradaclips':
+                      raise RuntimeError('wrong TikTok channel: '+json.dumps(data))
+                  break
+              except Exception as exc:
+                  last=exc
+                  print(f'publish attempt {attempt+1}: {exc}')
+                  time.sleep(20)
+          else:
+              raise SystemExit(f'publish failed: {last}')
+          open('rubyclips/facebook_output/publish.json','w').write(json.dumps(data,indent=2))
+          print(json.dumps(data,indent=2))
+          PY
+
+      - name: Confirm TikTok send completed
+        if: steps.backlog.outputs.complete != 'true'
+        run: |
+          python - <<'PY'
+          import json, time, urllib.request
+          data=json.load(open('rubyclips/facebook_output/publish.json'))
+          post_id=data.get('postId')
+          if not post_id:
+              if data.get('skipped') and data.get('externalLink'):
+                  print('Already sent:',data['externalLink'])
+                  raise SystemExit(0)
+              raise SystemExit('Buffer returned no post id')
+          for i in range(30):
+              url=f'https://rubys-realm.vercel.app/api/buffer-status?post_id={post_id}'
+              with urllib.request.urlopen(url, timeout=60) as r:
+                  outer=json.loads(r.read().decode())
+              post=outer.get('post') or {}
+              status=str(post.get('status') or '').lower()
+              print('status:',status,post.get('externalLink'))
+              if status=='sent':
+                  data['status']='sent'
+                  data['externalLink']=post.get('externalLink')
+                  open('rubyclips/facebook_output/publish.json','w').write(json.dumps(data,indent=2))
+                  raise SystemExit(0)
+              if post.get('error'):
+                  raise SystemExit('TikTok send error: '+json.dumps(post['error']))
+              time.sleep(12)
+          raise SystemExit('TikTok send did not complete in time; state not advanced so it can retry safely.')
+          PY
+
+      - name: Mark Facebook video as posted
+        if: steps.backlog.outputs.complete != 'true'
+        run: |
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+          state_path=Path('rubyclips/facebook_state.json')
+          state=json.loads(state_path.read_text()) if state_path.exists() else {}
+          manifest=json.load(open('rubyclips/facebook_output/manifest.json'))
+          publish=json.load(open('rubyclips/facebook_output/publish.json'))
+          vid=str(manifest['sourceVideoId'])
+          posted=[str(x) for x in state.get('postedVideoIds',[])]
+          if vid not in posted: posted.append(vid)
+          state.update({
+              'sourceShareUrl': manifest['sourceShareUrl'],
+              'sourceMode': 'existing-facebook-videos-oldest-to-newest',
+              'preserveExistingParts': True,
+              'postedVideoIds': posted,
+              'lastResolvedPageUrl': manifest.get('resolvedPageUrl'),
+              'lastPostedAt': datetime.now(timezone.utc).isoformat(),
+              'lastTikTokUrl': publish.get('externalLink'),
+              'lastFacebookVideoId': vid,
+          })
+          state_path.write_text(json.dumps(state,indent=2)+'\n')
+          PY
+          git config user.name "rubyclips-facebook-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git pull --rebase
+          git add rubyclips/facebook_state.json
+          git diff --cached --quiet || git commit -m "Advance RubyClips Facebook source [skip ci]"
+          git push
+
+      - name: Save diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubyclips-facebook-${{ github.run_number }}
+          path: |
+            rubyclips/facebook_output/manifest.json
+            rubyclips/facebook_output/publish.json
+            rubyclips/facebook_output/complete.json
+          if-no-files-found: warn
+          retention-days: 7
