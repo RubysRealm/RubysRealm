@@ -46,11 +46,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          REPO='RubysRealm/RubysRealm'
           TAG='rubyclips-fb-1106336092346928-promo'
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" rubyclips-facebook-promo-part1.mp4 --clobber
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" rubyclips-facebook-promo-part1.mp4 --repo "$REPO" --clobber
           else
             gh release create "$TAG" rubyclips-facebook-promo-part1.mp4 \
+              --repo "$REPO" \
               --title 'RubyClips Facebook promo Part 1' \
               --notes '45-second promo excerpt from the user-owned RubyClips/Facebook source video.'
           fi
