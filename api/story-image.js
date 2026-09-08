@@ -5,7 +5,10 @@ import { getVercelOidcToken } from '@vercel/oidc';
 const GITHUB_JWKS = createRemoteJWKSet(new URL('https://token.actions.githubusercontent.com/.well-known/jwks'));
 const AUDIENCE = 'rubys-realm-image-generator';
 const REPOSITORY = 'RubysRealm/RubysRealm';
-const WORKFLOW = '.github/workflows/tiktok-animated-story.yml';
+const ALLOWED_WORKFLOWS = [
+  '.github/workflows/tiktok-animated-story.yml',
+  '.github/workflows/rubyclips.yml',
+];
 const GATEWAY = 'https://ai-gateway.vercel.sh/v1';
 
 async function verifyCaller(auth) {
@@ -18,9 +21,8 @@ async function verifyCaller(auth) {
   if (payload.repository !== REPOSITORY) throw new Error('OIDC repository is not authorized.');
   if (payload.ref !== 'refs/heads/main') throw new Error('OIDC ref is not authorized.');
   const workflowRef = String(payload.workflow_ref || '');
-  if (!workflowRef.includes(`${REPOSITORY}/${WORKFLOW}@refs/heads/main`)) {
-    throw new Error('OIDC workflow is not authorized.');
-  }
+  const allowed = ALLOWED_WORKFLOWS.some(workflow => workflowRef.includes(`${REPOSITORY}/${workflow}@refs/heads/main`));
+  if (!allowed) throw new Error('OIDC workflow is not authorized.');
   if (!['push', 'schedule', 'workflow_dispatch'].includes(String(payload.event_name || ''))) {
     throw new Error('OIDC event is not authorized.');
   }
@@ -51,6 +53,46 @@ function oneLine(value, max = 1600) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
+function rubyClipsPrompt({ beat, previousBeat, nextBeat, title, part, index, seed, cast }) {
+  return [
+    'Create exactly ONE original vertical 9:16 cinematic frame for RubyClips, an original serialized short-drama TikTok series.',
+    'The frame must feel like a premium mobile short drama: dramatic lighting, expressive adult actors, believable modern locations, strong foreground/background depth, polished cinematic composition, realistic proportions, and clear emotion.',
+    'It may look like high-end digital cinema concept art or a stylized live-action frame, but do not depict a real celebrity or identifiable public figure.',
+    'ORIGINALITY RULE: do not reproduce, imitate, adapt, or reference any identifiable scene, actor, costume, logo, title treatment, character, or set from ShortTV, ShortMax, ReelShort, DramaBox, television, films, or other copyrighted productions.',
+    'CONTINUITY RULE: preserve the recurring cast descriptions exactly across episodes while changing pose, expression, wardrobe context, lighting, camera angle, location, and props as the story changes.',
+    cast ? `Recurring cast bible: ${cast}.` : '',
+    'LITERAL SCENE RULE: visibly show the exact current action, location, characters, and important prop described by CURRENT SCENE. Do not depict future events early.',
+    'TEXT RULE: absolutely no readable text, logos, watermarks, subtitles, speech bubbles, signs, UI, or title cards inside the artwork.',
+    'COMPOSITION RULE: keep faces and key action away from the very top and very bottom so the production pipeline can add a title and captions.',
+    `Series: ${title}. ${part}.`,
+    previousBeat ? `Previous scene for continuity only: ${previousBeat}` : '',
+    `CURRENT SCENE TO DEPICT: ${beat}`,
+    nextBeat ? `Next scene for continuity only; do not depict it yet: ${nextBeat}` : '',
+    `Scene index: ${index}. Fresh-generation nonce: ${seed}.`,
+    'Generate only the current scene.'
+  ].filter(Boolean).join(' ');
+}
+
+function legacyPrompt({ beat, previousBeat, nextBeat, title, occupation, part, index, seed, protagonist }) {
+  return [
+    'Create exactly ONE fresh vertical 9:16 illustration for a narrated TikTok story.',
+    'VISUAL REFERENCE: match the latest user-supplied photo examples: polished simple non-realistic adult cartoon artwork, clean dark outlines, compact expressive adult proportions, restrained facial features, soft cel shading, colorful scene-specific environment, mobile-friendly composition.',
+    'Do not imitate photography. Do not create realistic skin, camera-real faces, stock-photo aesthetics, 3D photorealism, anime, a collage, split screen, inset panels, or a talking-head narrator.',
+    'LITERAL BEAT RULE: the picture must visibly show the exact place, people, objects, and action stated in CURRENT BEAT. A viewer should understand the current narrated event from the picture alone.',
+    'SCENE VARIETY RULE: use the location and props demanded by this beat. Do not recycle a generic storefront, phone, car, desk, hallway, sign, room, cash register, or other prop unless CURRENT BEAT explicitly requires it.',
+    'CONTINUITY RULE: keep recurring people visually consistent across the story, but change pose, action, clothing context, camera staging, location, weather, lighting, and objects whenever the narration changes them.',
+    protagonist ? `Recurring protagonist bible: ${protagonist}.` : '',
+    'TEXT RULE: absolutely no text, captions, signs with readable writing, logos, labels, UI, subtitles, speech bubbles, or watermarks inside the generated artwork.',
+    'COMPOSITION RULE: one coherent full-frame scene. Keep important action clear in the center and lower-middle while leaving enough visual breathing room near the top for a persistent title overlay and near the lower center for one-word captions.',
+    `Series title: ${title}. Occupation: ${occupation}. ${part}.`,
+    previousBeat ? `Previous beat for continuity only: ${previousBeat}` : '',
+    `CURRENT BEAT TO ILLUSTRATE LITERALLY: ${beat}`,
+    nextBeat ? `Next beat for continuity only; do not depict it early: ${nextBeat}` : '',
+    `Scene index: ${index}. Fresh-generation nonce: ${seed}.`,
+    'Generate only the current scene. Do not include events from the previous or next beat unless the current beat itself states them.'
+  ].filter(Boolean).join(' ');
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
 
@@ -58,6 +100,7 @@ export default async function handler(req, res) {
     await verifyCaller(req.headers.authorization);
 
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+    const mode = oneLine(body.mode, 80) || 'legacy';
     const beat = oneLine(body.beat);
     const previousBeat = oneLine(body.previousBeat);
     const nextBeat = oneLine(body.nextBeat);
@@ -69,10 +112,12 @@ export default async function handler(req, res) {
     const protagonist = body.protagonist && typeof body.protagonist === 'object'
       ? oneLine(body.protagonist.description, 700)
       : '';
+    const cast = oneLine(body.cast || protagonist, 1400);
 
-    if (!beat) throw new Error('Exact current narration beat is required.');
+    if (!beat) throw new Error('Exact current scene/beat is required.');
     if (!Number.isInteger(index) || index < 0 || index > 80) throw new Error('Invalid scene index.');
-    if (!occupation) throw new Error('Complete occupation is required.');
+    if (mode !== 'rubyclips-drama' && !occupation) throw new Error('Complete occupation is required.');
+    if (mode === 'rubyclips-drama' && !title) throw new Error('RubyClips series title is required.');
 
     const token = await gatewayToken();
     if (!token) throw new Error('Vercel AI Gateway authorization is unavailable.');
@@ -89,24 +134,9 @@ export default async function handler(req, res) {
     }
 
     const model = process.env.AI_IMAGE_MODEL || 'google/gemini-3.1-flash-image-preview';
-
-    const prompt = [
-      'Create exactly ONE fresh vertical 9:16 illustration for a narrated TikTok story.',
-      'VISUAL REFERENCE: match the latest user-supplied photo examples: polished simple non-realistic adult cartoon artwork, clean dark outlines, compact expressive adult proportions, restrained facial features, soft cel shading, colorful scene-specific environment, mobile-friendly composition.',
-      'Do not imitate photography. Do not create realistic skin, camera-real faces, stock-photo aesthetics, 3D photorealism, anime, a collage, split screen, inset panels, or a talking-head narrator.',
-      'LITERAL BEAT RULE: the picture must visibly show the exact place, people, objects, and action stated in CURRENT BEAT. A viewer should understand the current narrated event from the picture alone.',
-      'SCENE VARIETY RULE: use the location and props demanded by this beat. Do not recycle a generic storefront, phone, car, desk, hallway, sign, room, cash register, or other prop unless CURRENT BEAT explicitly requires it.',
-      'CONTINUITY RULE: keep recurring people visually consistent across the story, but change pose, action, clothing context, camera staging, location, weather, lighting, and objects whenever the narration changes them.',
-      protagonist ? `Recurring protagonist bible: ${protagonist}.` : '',
-      'TEXT RULE: absolutely no text, captions, signs with readable writing, logos, labels, UI, subtitles, speech bubbles, or watermarks inside the generated artwork.',
-      'COMPOSITION RULE: one coherent full-frame scene. Keep important action clear in the center and lower-middle while leaving enough visual breathing room near the top for a persistent title overlay and near the lower center for one-word captions.',
-      `Series title: ${title}. Occupation: ${occupation}. ${part}.`,
-      previousBeat ? `Previous beat for continuity only: ${previousBeat}` : '',
-      `CURRENT BEAT TO ILLUSTRATE LITERALLY: ${beat}`,
-      nextBeat ? `Next beat for continuity only; do not depict it early: ${nextBeat}` : '',
-      `Scene index: ${index}. Fresh-generation nonce: ${seed}.`,
-      'Generate only the current scene. Do not include events from the previous or next beat unless the current beat itself states them.'
-    ].filter(Boolean).join(' ');
+    const prompt = mode === 'rubyclips-drama'
+      ? rubyClipsPrompt({ beat, previousBeat, nextBeat, title, part, index, seed, cast })
+      : legacyPrompt({ beat, previousBeat, nextBeat, title, occupation, part, index, seed, protagonist });
 
     const r = await fetch(`${GATEWAY}/images/generations`, {
       method: 'POST',
@@ -149,12 +179,12 @@ export default async function handler(req, res) {
 
     res.setHeader('Content-Type', 'image/jpeg');
     res.setHeader('Cache-Control', 'no-store, max-age=0');
-    res.setHeader('X-Rubys-Realm-Platform', 'clean-rebuild-v1');
+    res.setHeader('X-Rubys-Realm-Platform', mode === 'rubyclips-drama' ? 'rubyclips-v1' : 'clean-rebuild-v1');
     res.setHeader('X-Rubys-Realm-Image-Model', model);
     res.setHeader('X-Rubys-Realm-Scene-Index', String(index));
     return res.status(200).send(output);
   } catch (e) {
-    console.error('clean rebuild story-image failed', e);
+    console.error('story-image failed', e);
     return res.status(500).json({ ok: false, error: e.message });
   }
 }
