@@ -66,3 +66,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+# Production trigger: corrected v2 narration, captions, and scene-aware visuals.
