@@ -5,6 +5,7 @@ import math
 import re
 import shutil
 import subprocess
+import textwrap
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -18,6 +19,7 @@ WORK = BASE / 'facebook_work'
 OUT = BASE / 'facebook_output'
 SOURCE_URL = 'https://www.facebook.com/share/198HW9AwHZ/?mibextid=wwXIfr'
 MAX_TIKTOK_SECONDS = 585.0
+FONT_FILE = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
 
 
 def video_id(url):
@@ -172,39 +174,65 @@ def probe_duration(path):
     return float(p.stdout.strip())
 
 
-def mp4_copy(src, dst):
-    if src.suffix.lower() == '.mp4':
-        shutil.copy2(src, dst)
-        return
-    try:
-        subprocess.run([
-            'ffmpeg','-y','-hide_banner','-loglevel','error','-i',str(src),
-            '-c','copy','-movflags','+faststart',str(dst)
-        ], check=True, timeout=300)
-    except Exception:
-        subprocess.run([
-            'ffmpeg','-y','-hide_banner','-loglevel','error','-i',str(src),
-            '-c:v','libx264','-preset','veryfast','-crf','18','-pix_fmt','yuv420p',
-            '-c:a','aac','-b:a','160k','-movflags','+faststart',str(dst)
-        ], check=True, timeout=1200)
+def display_title(meta):
+    text = str(meta.get('description') or '').strip()
+    if not text:
+        raw = str(meta.get('title') or '').strip()
+        pieces = [p.strip() for p in raw.split('|') if p.strip()]
+        text = pieces[-2] if len(pieces) >= 2 else raw
+    text = re.sub(r'\s+', ' ', text).strip(' -–—|')
+    if not text:
+        text = 'RubyClips'
+    lines = textwrap.wrap(text, width=34, break_long_words=False, break_on_hyphens=False)
+    if not lines:
+        lines = ['RubyClips']
+    if len(lines) > 2:
+        lines = lines[:2]
+        lines[-1] = lines[-1].rstrip(' .,:;-') + '…'
+    return '\n'.join(lines)
 
 
-def extract_tiktok_segment(src, dst, start, length):
-    # This is only used when TikTok/Buffer cannot accept the original duration.
-    # No overlays, crops, new scenes, generated media, or story edits are added.
-    subprocess.run([
-        'ffmpeg','-y','-hide_banner','-loglevel','error',
-        '-ss',f'{start:.3f}','-i',str(src),'-t',f'{length:.3f}',
+def part_label(segment_index, segment_total):
+    return f'Part {segment_index}/{segment_total}' if segment_total > 1 else 'Part 1'
+
+
+def burn_title_and_part(src, dst, title, part, start=None, length=None):
+    title_file = WORK / 'overlay-title.txt'
+    part_file = WORK / 'overlay-part.txt'
+    title_file.write_text(title, encoding='utf-8')
+    part_file.write_text(part, encoding='utf-8')
+
+    cmd = ['ffmpeg','-y','-hide_banner','-loglevel','error']
+    if start is not None:
+        cmd += ['-ss', f'{start:.3f}']
+    cmd += ['-i', str(src)]
+    if length is not None:
+        cmd += ['-t', f'{length:.3f}']
+
+    title_path = title_file.as_posix().replace(':', '\\:').replace("'", "\\'")
+    part_path = part_file.as_posix().replace(':', '\\:').replace("'", "\\'")
+    vf = (
+        f"drawtext=fontfile={FONT_FILE}:textfile='{title_path}':"
+        "fontcolor=white:fontsize=h/24:line_spacing=8:"
+        "box=1:boxcolor=black@0.68:boxborderw=18:"
+        "x=(w-text_w)/2:y=h*0.035,"
+        f"drawtext=fontfile={FONT_FILE}:textfile='{part_path}':"
+        "fontcolor=white:fontsize=h/30:"
+        "box=1:boxcolor=black@0.68:boxborderw=14:"
+        "x=(w-text_w)/2:y=h*0.155"
+    )
+    cmd += [
+        '-vf', vf,
         '-c:v','libx264','-preset','veryfast','-crf','18','-pix_fmt','yuv420p',
         '-c:a','aac','-b:a','160k','-ar','48000','-movflags','+faststart',str(dst)
-    ], check=True, timeout=1800)
+    ]
+    subprocess.run(cmd, check=True, timeout=1800)
 
 
 def caption_for(meta, segment_index=1, segment_total=1):
     text = meta.get('description') or meta.get('title') or 'RubyClips'
     text = re.sub(r'\s+', ' ', text).strip()
-    if segment_total > 1:
-        text = f'{text} — {segment_index}/{segment_total}'
+    text = f'{text} — {part_label(segment_index, segment_total)}'
     if len(text) > 2100:
         text = text[:2100].rstrip()
     if '#rubyclips' not in text.lower():
@@ -261,18 +289,20 @@ async def main():
     if requested_index > segment_total:
         requested_index = 1
     segment_index = requested_index
+    title = display_title(chosen)
+    part = part_label(segment_index, segment_total)
 
     if segment_total == 1:
         final = OUT / f"facebook-{chosen['id']}.mp4"
-        mp4_copy(src, final)
         segment_start = 0.0
         segment_duration = actual_duration
+        burn_title_and_part(src, final, title, part)
     else:
         segment_start = (segment_index - 1) * MAX_TIKTOK_SECONDS
         remaining = max(0.1, actual_duration - segment_start)
         segment_duration = min(MAX_TIKTOK_SECONDS, remaining)
         final = OUT / f"facebook-{chosen['id']}-segment-{segment_index:02d}-of-{segment_total:02d}.mp4"
-        extract_tiktok_segment(src, final, segment_start, segment_duration)
+        burn_title_and_part(src, final, title, part, start=segment_start, length=segment_duration)
 
     produced_duration = probe_duration(final)
     if produced_duration > 599.0:
@@ -296,10 +326,14 @@ async def main():
         'segmentDurationSeconds': round(produced_duration, 3),
         'originalTitle': chosen.get('title') or '',
         'originalDescription': chosen.get('description') or '',
+        'displayTitle': title.replace('\n', ' '),
+        'partLabel': part,
+        'titleBurnedIn': True,
+        'partLabelBurnedIn': True,
         'caption': caption_for(chosen, segment_index, segment_total),
         'file': final.name,
         'targetChannel': 'rubaradaclips',
-        'passThrough': segment_total == 1,
+        'passThrough': False,
         'technicalSplitOnly': segment_total > 1,
     }
     (OUT / 'manifest.json').write_text(json.dumps(manifest, indent=2))
