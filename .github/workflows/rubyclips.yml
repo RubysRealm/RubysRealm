@@ -7,6 +7,7 @@ on:
     paths:
       - 'rubyclips/pipeline.py'
       - 'rubyclips/renderer_v2.py'
+      - 'rubyclips/launcher_v2.py'
       - 'rubyclips/requirements.txt'
       - '.github/workflows/rubyclips.yml'
   schedule:
@@ -69,7 +70,7 @@ jobs:
           STORY_IMAGE_URL: https://rubys-realm.vercel.app/api/story-image
         run: |
           set -euo pipefail
-          python rubyclips/renderer_v2.py
+          python rubyclips/launcher_v2.py
 
       - name: Validate output
         run: |
