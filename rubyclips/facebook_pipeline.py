@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import asyncio
 import json
-import os
+import math
 import re
 import shutil
 import subprocess
@@ -17,6 +17,7 @@ STATE_PATH = BASE / 'facebook_state.json'
 WORK = BASE / 'facebook_work'
 OUT = BASE / 'facebook_output'
 SOURCE_URL = 'https://www.facebook.com/share/198HW9AwHZ/?mibextid=wwXIfr'
+MAX_TIKTOK_SECONDS = 585.0
 
 
 def video_id(url):
@@ -164,6 +165,13 @@ def download(meta):
     return max(files, key=lambda f: f.stat().st_size)
 
 
+def probe_duration(path):
+    p = subprocess.run([
+        'ffprobe','-v','error','-show_entries','format=duration','-of','default=nw=1:nk=1',str(path)
+    ], check=True, capture_output=True, text=True)
+    return float(p.stdout.strip())
+
+
 def mp4_copy(src, dst):
     if src.suffix.lower() == '.mp4':
         shutil.copy2(src, dst)
@@ -181,10 +189,22 @@ def mp4_copy(src, dst):
         ], check=True, timeout=1200)
 
 
-def caption_for(meta):
+def extract_tiktok_segment(src, dst, start, length):
+    # This is only used when TikTok/Buffer cannot accept the original duration.
+    # No overlays, crops, new scenes, generated media, or story edits are added.
+    subprocess.run([
+        'ffmpeg','-y','-hide_banner','-loglevel','error',
+        '-ss',f'{start:.3f}','-i',str(src),'-t',f'{length:.3f}',
+        '-c:v','libx264','-preset','veryfast','-crf','18','-pix_fmt','yuv420p',
+        '-c:a','aac','-b:a','160k','-ar','48000','-movflags','+faststart',str(dst)
+    ], check=True, timeout=1800)
+
+
+def caption_for(meta, segment_index=1, segment_total=1):
     text = meta.get('description') or meta.get('title') or 'RubyClips'
     text = re.sub(r'\s+', ' ', text).strip()
-    # Keep the existing Facebook post copy. Only add the channel tag if room remains.
+    if segment_total > 1:
+        text = f'{text} — {segment_index}/{segment_total}'
     if len(text) > 2100:
         text = text[:2100].rstrip()
     if '#rubyclips' not in text.lower():
@@ -195,6 +215,7 @@ def caption_for(meta):
 async def main():
     state = json.loads(STATE_PATH.read_text()) if STATE_PATH.exists() else {}
     posted = {str(x) for x in state.get('postedVideoIds', [])}
+    segment_progress = {str(k): int(v) for k, v in (state.get('segmentProgress') or {}).items()}
 
     shutil.rmtree(WORK, ignore_errors=True)
     shutil.rmtree(OUT, ignore_errors=True)
@@ -206,8 +227,6 @@ async def main():
         raise RuntimeError('No public Facebook video links were discoverable from the supplied page URL.')
 
     metas = []
-    # Facebook normally presents newest first. Preserve that order as a fallback while
-    # using real timestamps whenever yt-dlp can read them.
     total = len(discovered)
     for i, url in enumerate(discovered):
         vid = video_id(url)
@@ -229,13 +248,35 @@ async def main():
     metas.sort(key=lambda m: (0, m['timestamp']) if m.get('timestamp') else (1, m['_fallback_order']))
     chosen = metas[0]
     if not chosen.get('timestamp'):
-        # When dates are unavailable, reverse Facebook's normal newest-first display order.
         no_dates = [m for m in metas if not m.get('timestamp')]
         chosen = sorted(no_dates, key=lambda m: m['_fallback_order'])[0] if no_dates else chosen
 
     src = download(chosen)
-    final = OUT / f"facebook-{chosen['id']}.mp4"
-    mp4_copy(src, final)
+    actual_duration = probe_duration(src)
+    if actual_duration <= 0:
+        raise RuntimeError('Facebook source duration is invalid')
+
+    segment_total = max(1, int(math.ceil(actual_duration / MAX_TIKTOK_SECONDS)))
+    requested_index = max(1, segment_progress.get(str(chosen['id']), 1))
+    if requested_index > segment_total:
+        requested_index = 1
+    segment_index = requested_index
+
+    if segment_total == 1:
+        final = OUT / f"facebook-{chosen['id']}.mp4"
+        mp4_copy(src, final)
+        segment_start = 0.0
+        segment_duration = actual_duration
+    else:
+        segment_start = (segment_index - 1) * MAX_TIKTOK_SECONDS
+        remaining = max(0.1, actual_duration - segment_start)
+        segment_duration = min(MAX_TIKTOK_SECONDS, remaining)
+        final = OUT / f"facebook-{chosen['id']}-segment-{segment_index:02d}-of-{segment_total:02d}.mp4"
+        extract_tiktok_segment(src, final, segment_start, segment_duration)
+
+    produced_duration = probe_duration(final)
+    if produced_duration > 599.0:
+        raise RuntimeError(f'Produced TikTok segment is still too long: {produced_duration:.2f}s')
     if final.stat().st_size < 100000:
         raise RuntimeError('Downloaded Facebook MP4 is unexpectedly small')
 
@@ -248,13 +289,18 @@ async def main():
         'sourceUrl': chosen['url'],
         'sourceTimestamp': chosen.get('timestamp') or None,
         'sourceUploadDate': chosen.get('upload_date') or None,
-        'sourceDurationSeconds': chosen.get('duration') or None,
+        'sourceDurationSeconds': round(actual_duration, 3),
+        'segmentIndex': segment_index,
+        'segmentTotal': segment_total,
+        'segmentStartSeconds': round(segment_start, 3),
+        'segmentDurationSeconds': round(produced_duration, 3),
         'originalTitle': chosen.get('title') or '',
         'originalDescription': chosen.get('description') or '',
-        'caption': caption_for(chosen),
+        'caption': caption_for(chosen, segment_index, segment_total),
         'file': final.name,
         'targetChannel': 'rubaradaclips',
-        'passThrough': True,
+        'passThrough': segment_total == 1,
+        'technicalSplitOnly': segment_total > 1,
     }
     (OUT / 'manifest.json').write_text(json.dumps(manifest, indent=2))
     print(json.dumps(manifest, indent=2))
