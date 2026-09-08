@@ -75,6 +75,15 @@ function validateRubyClipsManifest(m){
   if(!/^sha256:[a-f0-9]{64}$/i.test(String(m.videoFingerprint||''))) throw new Error('Blocked: RubyClips video fingerprint missing.');
 }
 
+function validateFacebookRubyClipsManifest(m){
+  if(m?.platform!=='rubyclips-facebook-repost-v1') throw new Error('Blocked: invalid Facebook RubyClips manifest.');
+  if(m?.sourceOwnership!=='user-provided-facebook-page') throw new Error('Blocked: Facebook source is not marked as user-provided.');
+  if(!/^\d+$/.test(String(m?.sourceVideoId||''))) throw new Error('Blocked: missing Facebook video id.');
+  if(!m?.sourceUrl || !String(m.sourceUrl).includes('facebook.com')) throw new Error('Blocked: invalid Facebook source URL.');
+  if(!m?.file || !String(m.file).endsWith('.mp4')) throw new Error('Blocked: Facebook source did not produce an MP4.');
+  if(!String(m?.caption||'').trim()) throw new Error('Blocked: missing caption.');
+}
+
 function releaseTagFromSource(source){
   const m=String(source||'').match(/github\.com\/RubysRealm\/RubysRealm\/releases\/download\/([^/]+)\//i);
   if(!m) return null;
@@ -158,13 +167,41 @@ async function postRubyClips(tag,res){
   return res.status(200).json({ok:true,postId:post.id,status:post.status,dueAt,caption,channelId:target.channel.id,channelName:actualName,seriesId:manifest.seriesId,seasonNumber:Number(manifest.seasonNumber),episodeNumber:Number(manifest.episodeNumber),videoUrl,renderer:'rubyclips-original-drama-v1'});
 }
 
+async function postFacebookRubyClips(tag,res){
+  const base=`https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/releases/download/${encodeURIComponent(tag)}`;
+  const mr=await fetch(`${base}/manifest.json`,{redirect:'follow',cache:'no-store'});
+  if(!mr.ok) throw new Error(`Facebook RubyClips manifest unavailable (${mr.status}).`);
+  const manifest=await mr.json();
+  validateFacebookRubyClipsManifest(manifest);
+  const videoUrl=`${base}/${encodeURIComponent(manifest.file)}`;
+  const head=await fetch(videoUrl,{method:'HEAD',redirect:'follow',cache:'no-store'});
+  if(!head.ok) throw new Error(`Facebook RubyClips MP4 unavailable (${head.status}).`);
+
+  const target=await getBufferTikTokChannel({channelName:RUBYCLIPS_CHANNEL,allowDisabled:true});
+  if(!target) throw new Error(`Facebook source target @${RUBYCLIPS_CHANNEL} is not connected in Buffer.`);
+  const actualName=String(target.channel.displayName||target.channel.name||'').replace(/^@/,'').toLowerCase();
+  if(actualName!==RUBYCLIPS_CHANNEL) throw new Error(`Facebook RubyClips channel guard rejected ${actualName||'unknown channel'}.`);
+
+  const existing=await recentPosts(target);
+  const duplicate=existing.find(p=>p?.assets?.some(a=>a?.source===videoUrl));
+  const caption=String(manifest.caption).trim().slice(0,2200);
+  const checkOnly=String(res.req?.query?.check||'')==='1';
+  if(checkOnly) return res.status(200).json({ok:true,exists:Boolean(duplicate),postId:duplicate?.id||null,status:duplicate?.status||null,externalLink:duplicate?.externalLink||null,caption,channelName:actualName,sourceVideoId:String(manifest.sourceVideoId),videoUrl});
+  if(duplicate) return res.status(200).json({ok:true,skipped:true,postId:duplicate.id,status:duplicate.status,externalLink:duplicate.externalLink||null,caption,channelName:actualName,sourceVideoId:String(manifest.sourceVideoId),videoUrl});
+
+  const dueAt=new Date(Date.now()+45*1000).toISOString();
+  const post=await createBufferVideoPost({channelId:target.channel.id,caption,videoUrl,dueAt,allowDisabled:true});
+  return res.status(200).json({ok:true,postId:post.id,status:post.status,dueAt,caption,channelId:target.channel.id,channelName:actualName,sourceVideoId:String(manifest.sourceVideoId),sourceUrl:manifest.sourceUrl,videoUrl,renderer:'facebook-existing-video-pass-through'});
+}
+
 export default async function handler(req,res){
   if(req.method!=='GET') return res.status(405).json({ok:false,error:'Method not allowed'});
   try{
     const tag=String(req.query?.tag||'').trim();
+    if(/^rubyclips-fb-[0-9]+$/.test(tag)) return await postFacebookRubyClips(tag,res);
     if(/^rubyclips-[A-Za-z0-9_-]+$/.test(tag)) return await postRubyClips(tag,res);
     if(/^podcast-part-[A-Za-z0-9_-]+$/.test(tag)) return await postPodcast(tag,res);
-    if(!/^reference-story-[0-9]+$/.test(tag)) return res.status(400).json({ok:false,error:'A valid RubyClips, reference-story, or podcast-part release tag is required.'});
+    if(!/^reference-story-[0-9]+$/.test(tag)) return res.status(400).json({ok:false,error:'A valid RubyClips, Facebook RubyClips, reference-story, or podcast-part release tag is required.'});
     const base=`https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/releases/download/${encodeURIComponent(tag)}`;
     const manifestUrl=`${base}/manifest.json`;
     const mr=await fetch(manifestUrl,{redirect:'follow',cache:'no-store'});
