@@ -57,6 +57,7 @@ async function getPost(postId) {
         dueAt
         sentAt
         externalLink
+        assets { source }
         channel { id name displayName service }
         error { message }
       }
@@ -64,6 +65,37 @@ async function getPost(postId) {
     { id: postId }
   );
   return data?.post || null;
+}
+
+async function recentPostsForChannel(target, first = 40) {
+  const data = await bufferGraphQL(
+    `query RecentPosts($organizationId: OrganizationId!, $channelId: ChannelId!, $first: Int!) {
+      posts(first: $first, input: {
+        organizationId: $organizationId,
+        filter: { status: [sent], channelIds: [$channelId] },
+        sort: [{ field: createdAt, direction: desc }]
+      }) {
+        edges {
+          node {
+            id
+            text
+            status
+            dueAt
+            sentAt
+            externalLink
+            assets { source }
+            channel { id name displayName service }
+          }
+        }
+      }
+    }`,
+    {
+      organizationId: target.organization.id,
+      channelId: target.channel.id,
+      first: Math.min(60, Math.max(1, Number(first) || 40))
+    }
+  );
+  return (data?.posts?.edges || []).map(edge => edge.node);
 }
 
 async function deletePost(postId) {
@@ -88,6 +120,18 @@ export default async function handler(req, res) {
     if (String(req.query?.all || '') === '1') {
       const channels = await listTikTokChannels();
       return res.status(200).json({ ok: true, channels });
+    }
+
+    const recentChannel = String(req.query?.recent_channel || '').trim().replace(/^@/, '');
+    if (recentChannel) {
+      const target = await getBufferTikTokChannel({ channelName: recentChannel, allowDisabled: true });
+      if (!target) return res.status(404).json({ ok: false, message: `TikTok channel @${recentChannel} not found.` });
+      const posts = await recentPostsForChannel(target, req.query?.limit);
+      return res.status(200).json({
+        ok: true,
+        channel: { id: target.channel.id, name: target.channel.name, displayName: target.channel.displayName },
+        posts
+      });
     }
 
     const deleteId = String(req.query?.delete_post_id || '').trim();
