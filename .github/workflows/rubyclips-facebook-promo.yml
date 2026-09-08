@@ -1,0 +1,56 @@
+name: RubyClips Facebook promo media
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/rubyclips-facebook-promo.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build-promo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Download owned RubyClips Part 1
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 4 --retry-delay 3 \
+            'https://github.com/RubysRealm/RubysRealm/releases/download/rubyclips-fb-1106336092346928/facebook-1106336092346928-segment-01-of-02.mp4' \
+            -o source.mp4
+          test -s source.mp4
+
+      - name: Make Facebook promo teaser
+        run: |
+          set -euo pipefail
+          ffmpeg -y -hide_banner -loglevel error \
+            -ss 00:00:20 -i source.mp4 -t 00:00:45 \
+            -vf "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black" \
+            -c:v libx264 -preset veryfast -crf 24 -pix_fmt yuv420p \
+            -c:a aac -b:a 128k -ar 48000 -movflags +faststart \
+            rubyclips-facebook-promo-part1.mp4
+          test -s rubyclips-facebook-promo-part1.mp4
+          SIZE=$(stat -c '%s' rubyclips-facebook-promo-part1.mp4)
+          test "$SIZE" -lt 500000000
+          echo "promo bytes: $SIZE"
+
+      - name: Publish promo asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG='rubyclips-fb-1106336092346928-promo'
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" rubyclips-facebook-promo-part1.mp4 --clobber
+          else
+            gh release create "$TAG" rubyclips-facebook-promo-part1.mp4 \
+              --title 'RubyClips Facebook promo Part 1' \
+              --notes '45-second promo excerpt from the user-owned RubyClips/Facebook source video.'
+          fi
