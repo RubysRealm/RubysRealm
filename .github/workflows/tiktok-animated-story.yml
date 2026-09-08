@@ -6,7 +6,6 @@ on:
     branches: [main]
     paths:
       - 'production/**'
-      - 'api/story-image.js'
       - '.github/workflows/tiktok-animated-story.yml'
   schedule:
     - cron: '0 14 * * *'
@@ -123,7 +122,7 @@ jobs:
           VIDEO="$(find production/output -maxdepth 1 -name '*.mp4' -print -quit)"
           test -n "$VIDEO"
           gh release delete "$TAG" --yes --cleanup-tag >/dev/null 2>&1 || true
-          gh release create "$TAG"             "$VIDEO"             production/output/manifest.json             production/output/review-frames.zip             --title "Ruby's Realm Clean Rebuild #${GITHUB_RUN_NUMBER}"             --notes "Fresh clean-platform review candidate. Every scene is generated for its exact narration beat, cuts are tied to narration word boundaries, one image is visible at a time, the persistent polished header uses a semantically complete occupation title, and publication remains blocked pending approval."
+          gh release create "$TAG" "$VIDEO" production/output/manifest.json production/output/review-frames.zip --title "Ruby's Realm Clean Rebuild #${GITHUB_RUN_NUMBER}" --notes "Fresh clean-platform review candidate. Every scene is generated for its exact narration beat, cuts are tied to narration word boundaries, one image is visible at a time, the persistent polished header uses a semantically complete occupation title, and publication remains blocked pending approval."
 
       - name: Keep TikTok publication blocked
         run: |
