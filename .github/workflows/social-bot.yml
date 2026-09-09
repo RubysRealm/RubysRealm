@@ -39,6 +39,10 @@ jobs:
           SOCIALBOT_PAYLOAD: ${{ github.event.inputs.payload }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
+          if [ -z "$SOCIALBOT_KEY" ]; then
+            echo "Social Bot is not configured yet; skipping worker run."
+            exit 0
+          fi
           if [ "$EVENT_NAME" = "schedule" ]; then
             node run.mjs --scheduled
           else
