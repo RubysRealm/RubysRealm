@@ -1,0 +1,46 @@
+name: Social Bot Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      payload:
+        description: Encrypted Social Bot command
+        required: true
+        type: string
+  schedule:
+    - cron: '*/15 * * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: social-bot-global
+  cancel-in-progress: false
+
+jobs:
+  worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install worker packages
+        working-directory: social-bot/runner
+        run: npm install --no-save playwright-core@latest imapflow@latest
+      - name: Run Social Bot worker
+        working-directory: social-bot/runner
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOCIALBOT_KEY: ${{ secrets.SOCIALBOT_KEY }}
+          SOCIALBOT_GMAIL_USER: ${{ secrets.SOCIALBOT_GMAIL_USER }}
+          SOCIALBOT_GMAIL_APP_PASSWORD: ${{ secrets.SOCIALBOT_GMAIL_APP_PASSWORD }}
+          SOCIALBOT_PAYLOAD: ${{ github.event.inputs.payload }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            node run.mjs --scheduled
+          else
+            node run.mjs
+          fi
