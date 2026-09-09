@@ -20,6 +20,7 @@ OUT = BASE / 'facebook_output'
 SOURCE_URL = 'https://www.facebook.com/share/198HW9AwHZ/?mibextid=wwXIfr'
 MAX_TIKTOK_SECONDS = 585.0
 FONT_FILE = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+ENGAGEMENT_TERMS = ('view', 'views', 'reaction', 'reactions', 'like', 'likes', 'comment', 'comments', 'share', 'shares')
 
 
 def video_id(url):
@@ -175,32 +176,83 @@ def probe_duration(path):
     return float(p.stdout.strip())
 
 
+def collapse_text(value):
+    return re.sub(r'\s+', ' ', str(value or '')).strip()
+
+
+def looks_like_engagement_metadata(value):
+    text = collapse_text(value).lower()
+    if not text:
+        return False
+    metric = r'\b\d+(?:\.\d+)?\s*[kmb]?\s*(?:views?|reactions?|likes?|comments?|shares?)\b'
+    if re.search(metric, text, re.I):
+        return True
+    return sum(1 for term in ENGAGEMENT_TERMS if re.search(rf'\b{re.escape(term)}\b', text)) >= 2
+
+
+def scrub_engagement_metadata(value):
+    text = collapse_text(value)
+    text = re.sub(
+        r'\b\d+(?:\.\d+)?\s*[kmb]?\s*(?:views?|reactions?|likes?|comments?|shares?)\b',
+        '',
+        text,
+        flags=re.I,
+    )
+    text = re.sub(
+        r'\b(?:views?|reactions?|likes?|comments?|shares?)\s*[:=]?\s*\d+(?:\.\d+)?\s*[kmb]?\b',
+        '',
+        text,
+        flags=re.I,
+    )
+    text = re.sub(r'(?:\s*[·•|]\s*){2,}', ' | ', text)
+    text = re.sub(r'^[\s·•|,:;\-–—]+|[\s·•|,:;\-–—]+$', '', text)
+    return collapse_text(text)
+
+
 def clean_title(meta):
-    raw_title = re.sub(r'\s+', ' ', str(meta.get('title') or '')).strip()
-    raw_desc = re.sub(r'\s+', ' ', str(meta.get('description') or '')).strip()
-
-    # yt-dlp Facebook titles often append the Page name. Prefer the actual video title.
+    raw_title = str(meta.get('title') or '').strip()
+    raw_desc = str(meta.get('description') or '').strip()
     candidates = []
-    if raw_title:
-        for separator in [' | ', ' • ', ' - ']:
-            if separator in raw_title:
-                pieces = [p.strip() for p in raw_title.split(separator) if p.strip()]
-                candidates.extend(pieces)
-                break
-        else:
-            candidates.append(raw_title)
-    if raw_desc:
-        first = re.split(r'[\n\r]|(?<=[.!?])\s+', raw_desc)[0].strip()
-        if first:
-            candidates.append(first)
 
-    bad = {'facebook', 'polissya bushcraft', 'rubyclips'}
-    title = next((c for c in candidates if c.lower().strip() not in bad and len(c.strip()) >= 4), 'RubyClips')
-    title = re.sub(r'#[A-Za-z0-9_]+', '', title).strip(' -–—|')
+    # Facebook/yt-dlp sometimes reports engagement counts as the metadata title.
+    # Prefer meaningful caption/description text, then fall back to title fragments.
+    for line in re.split(r'[\r\n]+', raw_desc):
+        line = scrub_engagement_metadata(line)
+        if not line:
+            continue
+        candidates.append(line)
+        sentences = re.split(r'(?<=[.!?])\s+', line)
+        candidates.extend(sentences[:2])
+
+    title_line = scrub_engagement_metadata(raw_title)
+    if title_line:
+        split = re.split(r'\s+(?:\||•|·|[-–—])\s+', title_line)
+        candidates.extend([piece for piece in split if piece])
+        candidates.append(title_line)
+
+    bad = {'facebook', 'polissya bushcraft', 'rubyclips', 'rubaradaclips'}
+    title = None
+    for candidate in candidates:
+        candidate = re.sub(r'https?://\S+', '', candidate)
+        candidate = re.sub(r'#[A-Za-z0-9_]+', '', candidate)
+        candidate = scrub_engagement_metadata(candidate).strip(' -–—|')
+        if len(candidate) < 4:
+            continue
+        if candidate.lower().strip() in bad:
+            continue
+        if looks_like_engagement_metadata(candidate):
+            continue
+        if not re.search(r'[A-Za-z]', candidate):
+            continue
+        title = candidate
+        break
+
+    if not title:
+        title = 'Story'
     if len(title) > 76:
         title = title[:73].rstrip(' ,.;:-') + '…'
     lines = textwrap.wrap(title, width=31, break_long_words=False, break_on_hyphens=False)
-    return '\n'.join(lines[:2]) if lines else 'RubyClips'
+    return '\n'.join(lines[:2]) if lines else 'Story'
 
 
 def part_label(index, total):
@@ -223,8 +275,7 @@ def burn_layout(src, dst, title, part, start=0.0, length=None):
     if length is not None:
         cmd += ['-t', f'{length:.3f}']
 
-    # Requested layout: smaller title at the former Part position; Part beneath the
-    # visible video area at a comparable distance. Preserve the source image itself.
+    # Keep the source picture untouched and use a clean title + part label overlay.
     vf = (
         'scale=1080:1920:force_original_aspect_ratio=decrease,'
         'pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1,'
@@ -246,13 +297,19 @@ def burn_layout(src, dst, title, part, start=0.0, length=None):
 
 
 def caption_for(meta, index, total):
-    text = re.sub(r'\s+', ' ', str(meta.get('description') or meta.get('title') or 'RubyClips')).strip()
+    source = str(meta.get('description') or '').strip()
+    text = scrub_engagement_metadata(source)
+    if not text or looks_like_engagement_metadata(text):
+        text = clean_title(meta).replace('\n', ' ')
     text = f'{text} — {part_label(index, total)}'
-    if len(text) > 2100:
-        text = text[:2100].rstrip()
-    if '#rubyclips' not in text.lower():
-        text = (text + ' #rubyclips').strip()
-    return text
+    if len(text) > 2050:
+        text = text[:2050].rstrip()
+    stable_tags = ['#rubyclips', '#storytime', '#storytok']
+    existing = {tag.lower() for tag in re.findall(r'#[A-Za-z0-9_]+', text)}
+    for tag in stable_tags:
+        if tag.lower() not in existing:
+            text += f' {tag}'
+    return text[:2200].strip()
 
 
 async def main():
@@ -344,7 +401,7 @@ async def main():
         'technicalSplitOnly': segment_total > 1,
         'titleBurnedIn': True,
         'partLabelBurnedIn': True,
-        'overlayLayoutVersion': 'title-midtop-part-lower-v2'
+        'overlayLayoutVersion': 'title-metadata-filtered-v3'
     }
     (OUT / 'manifest.json').write_text(json.dumps(manifest, indent=2))
     print(json.dumps(manifest, indent=2))
