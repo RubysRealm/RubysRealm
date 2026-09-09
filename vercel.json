@@ -2,6 +2,17 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build",
   "fluid": true,
+  "git": {
+    "deploymentEnabled": {
+      "social-bot-state": false
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/social-bot",
+      "destination": "/social-bot.html"
+    }
+  ],
   "crons": [
     {
       "path": "/api/auto-post",
