@@ -13,7 +13,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Install yt-dlp
-        run: python3 -m pip install -U yt-dlp
+        run: brew install yt-dlp
       - name: Probe YouTube source
         shell: bash
         run: |
