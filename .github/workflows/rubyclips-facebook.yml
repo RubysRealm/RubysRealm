@@ -29,11 +29,15 @@ jobs:
           python-version: '3.12'
 
       - name: Install source tools
+        env:
+          IMMEDIATE_TRIGGER: ${{ github.event_name == 'push' && '1' || '0' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-dejavu-core
           pip install -r rubyclips/facebook_requirements.txt
-          python -m playwright install chromium --with-deps
+          if [ "$IMMEDIATE_TRIGGER" != '1' ]; then
+            python -m playwright install chromium --with-deps
+          fi
 
       - name: Resolve and render next unposted source
         env:
