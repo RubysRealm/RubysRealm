@@ -12,61 +12,37 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe Piped source transports
+      - name: Probe alternate source relays
         shell: bash
         run: |
           set +e
-          ID='q3h9Ke6boiU'
-          for HOST in \
-            pipedapi.kavin.rocks \
-            pipedapi.tokhmi.xyz \
-            pipedapi.moomoo.me \
-            pipedapi.syncpundit.io \
-            api-piped.mha.fi \
-            piped-api.garudalinux.org \
-            pipedapi.qdi.fi \
-            piped-api.hostux.net \
-            pdapi.vern.cc \
-            pipedapi.pfcd.me \
-            pipedapi.frontendfriendly.xyz \
-            api.piped.yt \
-            pipedapi.astartes.nl \
-            pipedapi.osphost.fi \
-            pipedapi.simpleprivacy.fr \
-            pipedapi.drgns.space \
-            piapi.ggtyler.dev \
-            api.watch.pluto.lat
-          do
-            echo "=== $HOST ==="
-            rm -f /tmp/piped.json /tmp/range.bin /tmp/h
-            CODE=$(curl -L --connect-timeout 5 --max-time 25 -sS -w '%{http_code}' "https://$HOST/streams/$ID" -o /tmp/piped.json)
-            echo "HTTP=$CODE SIZE=$(wc -c < /tmp/piped.json 2>/dev/null || echo 0)"
-            if [ "$CODE" = "200" ]; then
-              python3 - "$HOST" <<'PY'
-import json,sys
-host=sys.argv[1]
-try: d=json.load(open('/tmp/piped.json'))
-except Exception as e:
- print('JSON_ERROR',e); raise SystemExit
-print('TITLE',d.get('title'),'DURATION',d.get('duration'))
-streams=[]
-for x in d.get('videoStreams') or []:
- u=x.get('url')
- if u: streams.append((x.get('quality'),x.get('format'),x.get('videoOnly'),u))
-for x in d.get('audioStreams') or []:
- u=x.get('url')
- if u: streams.append((x.get('quality'),x.get('format'),'audio',u))
-for row in streams[:8]: print('STREAM',*row)
-if streams: open('/tmp/first_url','w').write(streams[0][3])
+          SRC='https://www.youtube.com/watch?v=q3h9Ke6boiU'
+          for API in 'https://cobalt-api.meowing.de/' 'https://capi.3kh0.net/'; do
+            echo "PROBING $API"
+            CODE="$(curl -L -sS --max-time 60 -o /tmp/cobalt.json -w '%{http_code}' \
+              -H 'Accept: application/json' -H 'Content-Type: application/json' \
+              -H 'User-Agent: rubys-realm-source/1.0 (+https://github.com/RubysRealm/RubysRealm)' \
+              --data "{\"url\":\"$SRC\",\"videoQuality\":\"720\",\"downloadMode\":\"auto\",\"youtubeVideoCodec\":\"h264\"}" \
+              "$API")"
+            echo "HTTP $CODE"
+            cat /tmp/cobalt.json || true
+            echo
+            if [ "$CODE" = '200' ]; then
+              URL="$(python3 - <<'PY'
+import json
+try:
+ d=json.load(open('/tmp/cobalt.json'))
+ print(d.get('url') or '')
+except Exception:
+ print('')
 PY
-              if [ -s /tmp/first_url ]; then
-                URL=$(cat /tmp/first_url)
-                RC=$(curl -L --connect-timeout 5 --max-time 25 -sS -r 0-1048575 -w '%{http_code}' "$URL" -o /tmp/range.bin)
-                echo "RANGE_HTTP=$RC RANGE_SIZE=$(wc -c < /tmp/range.bin 2>/dev/null || echo 0)"
-                if [ -s /tmp/range.bin ]; then
-                  echo "WORKING_HOST=$HOST"
-                  exit 0
-                fi
+)"
+              if [ -n "$URL" ]; then
+                echo "SOURCE_URL_OK"
+                RC="$(curl -L -sS --connect-timeout 5 --max-time 30 -r 0-1048575 -o /tmp/source.bin -w '%{http_code}' "$URL")"
+                SIZE="$(wc -c </tmp/source.bin 2>/dev/null || echo 0)"
+                echo "RANGE_HTTP=$RC SIZE=$SIZE"
+                if [ "$SIZE" -gt 100000 ]; then exit 0; fi
               fi
             fi
           done
