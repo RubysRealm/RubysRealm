@@ -40,29 +40,10 @@ jobs:
           npm ci
           npx tsc
           cd "$GITHUB_WORKSPACE"
-          python -m playwright install chromium --with-deps
 
-      - name: Resolve and render next unposted source
-        env:
-          IMMEDIATE_TRIGGER: ${{ github.event_name == 'push' && '1' || '0' }}
+      - name: Resolve and render next unposted YouTube source
         run: |
           set -euo pipefail
-          rm -rf rubyclips/facebook_output rubyclips/facebook_work
-          if [ "$IMMEDIATE_TRIGGER" = '1' ]; then
-            echo "Immediate trigger: trying configured Facebook source first."
-          else
-            echo "Scheduled/manual run: trying configured Facebook source first."
-          fi
-
-          python rubyclips/facebook_pipeline.py || true
-          if [ -f rubyclips/facebook_output/manifest.json ]; then exit 0; fi
-
-          echo "Trying expanded Facebook discovery."
-          rm -rf rubyclips/facebook_output rubyclips/facebook_work
-          python rubyclips/facebook_discovery_fallback.py || true
-          if [ -f rubyclips/facebook_output/manifest.json ]; then exit 0; fi
-
-          echo "Facebook sources unavailable; trying same-creator fallback feed."
           rm -rf rubyclips/facebook_output rubyclips/facebook_work
           python rubyclips/creator_fallback_pipeline.py
           test -s rubyclips/facebook_output/manifest.json
@@ -77,14 +58,11 @@ jobs:
           platform=str(m.get('platform') or '')
           idx=int(m.get('segmentIndex',1))
           total=int(m.get('segmentTotal',1))
-          if platform == 'rubyclips-facebook-repost-v1':
-              if not vid.isdigit(): raise SystemExit('Invalid Facebook video id')
-              tag=f'rubyclips-fb-{vid}' + (f'-s{idx}' if total > 1 else '')
-          elif platform == 'rubyclips-creator-feed-v1':
-              if not re.fullmatch(r'[A-Za-z0-9_-]{6,20}', vid): raise SystemExit('Invalid creator source id')
-              tag=f'rubyclips-src-{vid}' + (f'-s{idx}' if total > 1 else '')
-          else:
+          if platform != 'rubyclips-creator-feed-v1':
               raise SystemExit(f'Unsupported manifest platform: {platform}')
+          if not re.fullmatch(r'[A-Za-z0-9_-]{6,20}', vid):
+              raise SystemExit('Invalid creator source id')
+          tag=f'rubyclips-src-{vid}' + (f'-s{idx}' if total > 1 else '')
           with open(os.environ['GITHUB_OUTPUT'],'a') as f:
               f.write(f'video_id={vid}\n')
               f.write(f'platform={platform}\n')
@@ -127,7 +105,7 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$VIDEO" rubyclips/facebook_output/manifest.json --clobber
           else
-            gh release create "$TAG" "$VIDEO" rubyclips/facebook_output/manifest.json --title "RubyClips ${VIDEO_ID} Part ${SEGMENT_INDEX}/${SEGMENT_TOTAL}" --notes "RubyClips configured source footage; divided only when the automatic TikTok duration limit requires it."
+            gh release create "$TAG" "$VIDEO" rubyclips/facebook_output/manifest.json --title "RubyClips ${VIDEO_ID} Part ${SEGMENT_INDEX}/${SEGMENT_TOTAL}" --notes "RubyClips YouTube source footage; divided only when the automatic TikTok duration limit requires it."
           fi
           echo "RUBYCLIPS_TAG=$TAG" >> "$GITHUB_ENV"
 
@@ -181,30 +159,20 @@ jobs:
           vid=str(m['sourceVideoId'])
           idx=int(m.get('segmentIndex',1))
           total=int(m.get('segmentTotal',1))
-          platform=str(m.get('platform') or '')
-          if platform == 'rubyclips-creator-feed-v1':
-              progress_key='creatorFallbackSegmentProgress'
-              posted_key='creatorFallbackPostedVideoIds'
-          elif platform == 'rubyclips-facebook-repost-v1':
-              progress_key='segmentProgress'
-              posted_key='postedVideoIds'
-          else:
-              raise SystemExit(f'Unsupported state platform: {platform}')
-          progress=state.setdefault(progress_key,{})
+          progress=state.setdefault('creatorFallbackSegmentProgress',{})
           if idx < total:
               progress[vid]=idx+1
           else:
               progress.pop(vid,None)
-              posted=[str(x) for x in state.get(posted_key,[])]
+              posted=[str(x) for x in state.get('creatorFallbackPostedVideoIds',[])]
               if vid not in posted: posted.append(vid)
-              state[posted_key]=posted
+              state['creatorFallbackPostedVideoIds']=posted
           state['lastPostedAt']=datetime.now(timezone.utc).isoformat()
           state['lastBufferPostId']=str(accepted['postId'])
-          state['lastSourcePlatform']=platform
+          state['lastSourcePlatform']='rubyclips-creator-feed-v1'
           state['lastSourceVideoId']=vid
           state['lastSourcePart']=idx
           state['lastSourcePartTotal']=total
-          if m.get('resolvedPageUrl'): state['lastResolvedPageUrl']=m.get('resolvedPageUrl')
           state_path.write_text(json.dumps(state,indent=2)+'\n')
           PY
           git config user.name "rubyclips-publisher-bot"
