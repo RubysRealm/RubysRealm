@@ -14,8 +14,8 @@ ROOT = HERE.parent
 STATE_PATH = HERE / 'facebook_state.json'
 WORK = HERE / 'facebook_work'
 OUT = HERE / 'facebook_output'
-CHANNEL_URL = 'https://www.youtube.com/@PolissyaBushcraft/videos'
-CHANNEL_HANDLE = '@PolissyaBushcraft'
+CHANNEL_URL = 'https://www.youtube.com/@bushcraftinthewildforest/videos'
+CHANNEL_HANDLE = '@bushcraftinthewildforest'
 MAX_SECONDS = 585.0
 
 SPEC = importlib.util.spec_from_file_location('rubyclips_facebook_pipeline', HERE / 'facebook_pipeline.py')
@@ -37,7 +37,7 @@ def norm_title(value):
 
 def display_title(value):
     text = re.sub(r'\s+', ' ', str(value or '')).strip()
-    text = re.sub(r'\s*@PolissyaBushcraft\b', '', text, flags=re.I).strip(' -|')
+    text = re.sub(r'\s*@bushcraftinthewildforest\b', '', text, flags=re.I).strip(' -|')
     text = base.scrub_engagement_metadata(text)
     if not text or base.looks_like_engagement_metadata(text):
         text = 'Bushcraft Story'
@@ -69,7 +69,7 @@ def list_channel_entries():
             continue
         entries.append({'id': vid, 'title': title, 'url': f'https://www.youtube.com/watch?v={vid}'})
     if not entries:
-        raise RuntimeError('Same-creator YouTube feed returned no usable videos.')
+        raise RuntimeError('Configured YouTube channel returned no usable videos.')
     return entries
 
 
@@ -141,7 +141,7 @@ def choose_entry(entries, posted, progress):
             continue
         eligible.append(e)
     if not eligible:
-        raise RuntimeError('No unposted same-creator fallback videos remain.')
+        raise RuntimeError('No unposted videos remain on the configured YouTube channel.')
     return eligible[-1]
 
 
@@ -211,7 +211,7 @@ async def main():
         'titleBurnedIn': True,
         'partLabelBurnedIn': True,
         'overlayLayoutVersion': 'title-metadata-filtered-v3',
-        'fallbackReason': 'facebook-public-discovery-unavailable'
+        'fallbackReason': 'configured-user-youtube-channel'
     }
     (OUT / 'manifest.json').write_text(json.dumps(manifest, indent=2))
     print(json.dumps(manifest, indent=2))
