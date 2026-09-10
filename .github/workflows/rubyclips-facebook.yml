@@ -4,6 +4,9 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '15 1,7,13,19 * * *'
+  push:
+    paths:
+      - 'rubyclips/manual_publish_next_story.trigger'
 
 permissions:
   contents: write
@@ -61,6 +64,18 @@ jobs:
               f.write(f'file={m["file"]}\n')
               f.write(f'segment_index={int(m.get("segmentIndex",1))}\n')
               f.write(f'segment_total={int(m.get("segmentTotal",1))}\n')
+          PY
+
+      - name: Guard immediate trigger as new-story Part 1
+        if: steps.backlog.outputs.complete != 'true' && github.event_name == 'push'
+        run: |
+          python - <<'PY'
+          import json
+          m=json.load(open('rubyclips/facebook_output/manifest.json'))
+          idx=int(m.get('segmentIndex',1))
+          if idx != 1:
+              raise SystemExit(f'Immediate trigger refused: expected new-story Part 1, got Part {idx}.')
+          print(f'Immediate new-story trigger validated: source={m.get("sourceVideoId")}, Part 1/{m.get("segmentTotal",1)}')
           PY
 
       - name: Publish immutable source release
