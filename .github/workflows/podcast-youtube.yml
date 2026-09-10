@@ -2,6 +2,9 @@ name: Ruby's Realm podcast repurpose to YouTube Shorts
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - 'podcast_repurpose/youtube-trigger.txt'
   schedule:
     - cron: '30 4,10,16,22 * * *'
 
