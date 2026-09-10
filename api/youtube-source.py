@@ -29,12 +29,7 @@ def youtube_oembed(video_id):
     return json.loads(raw)
 
 
-def clipzui_discover(video_id):
-    meta = youtube_oembed(video_id)
-    title = str(meta.get('title') or '').strip()
-    if not title:
-        raise RuntimeError('oEmbed title unavailable')
-    search_url = 'https://www.clipzui.cc/?q=' + urllib.parse.quote_plus(title)
+def inspect_page(search_url, title):
     page = fetch_text(search_url, timeout=35)
     decoded = html.unescape(page)
     links = []
@@ -45,12 +40,30 @@ def clipzui_discover(video_id):
     media = []
     for u in re.findall(r'https?://[^\s"\'<>]+', decoded, flags=re.I):
         low = u.lower()
-        if any(x in low for x in ('.mp4', 'videoplayback', 'googlevideo', 'download')) and u not in media:
+        if any(x in low for x in ('.mp4', '.m3u8', 'videoplayback', 'googlevideo', 'download', 'embed')) and u not in media:
             media.append(u)
     marker = title.lower()[:48]
     pos = decoded.lower().find(marker)
-    snippet = decoded[max(0, pos - 2500):pos + 6000] if pos >= 0 else decoded[:8000]
-    return {'title': title, 'searchUrl': search_url, 'links': links[:120], 'media': media[:40], 'snippet': snippet}
+    snippet = decoded[max(0, pos - 3000):pos + 9000] if pos >= 0 else decoded[:12000]
+    return {'searchUrl': search_url, 'links': links[:200], 'media': media[:80], 'snippet': snippet}
+
+
+def mirror_debug(video_id):
+    meta = youtube_oembed(video_id)
+    title = str(meta.get('title') or '').strip()
+    if not title:
+        raise RuntimeError('oEmbed title unavailable')
+    out = {'title': title}
+    targets = {
+        'salda': 'https://salda.ws/video.php?q=' + urllib.parse.quote_plus(title),
+        'clipzui': 'https://www.clipzui.cc/?q=' + urllib.parse.quote_plus(title),
+    }
+    for name, target in targets.items():
+        try:
+            out[name] = inspect_page(target, title)
+        except Exception as exc:
+            out[name] = {'error': f'{type(exc).__name__}: {exc}'}
+    return out
 
 
 def cobalt_resolve(url):
@@ -92,9 +105,9 @@ def youtube_source(v: str = Query(..., min_length=6, max_length=20), debug: bool
 
     if debug:
         try:
-            return JSONResponse({'ok': True, 'clipzui': clipzui_discover(v)})
+            return JSONResponse({'ok': True, 'mirrors': mirror_debug(v)})
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f'clipzui debug: {exc}')
+            raise HTTPException(status_code=502, detail=f'mirror debug: {exc}')
 
     try:
         direct, api, filename = cobalt_resolve(url)
