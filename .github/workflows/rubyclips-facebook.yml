@@ -1,4 +1,4 @@
-name: RubyClips existing Facebook videos
+name: RubyClips existing creator videos
 
 on:
   workflow_dispatch:
@@ -28,111 +28,136 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install Facebook source tools
+      - name: Install source tools
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-dejavu-core
           pip install -r rubyclips/facebook_requirements.txt
           python -m playwright install chromium --with-deps
 
-      - name: Find and download oldest unposted Facebook video
+      - name: Resolve and render next unposted source
         run: |
-          set -euo pipefail
-          python rubyclips/facebook_pipeline.py
-          if [ -f rubyclips/facebook_output/complete.json ]; then
-            echo "Primary Facebook route exposed no additional videos; trying broader page routes."
-            rm -f rubyclips/facebook_output/complete.json
-            python rubyclips/facebook_discovery_fallback.py
+          set -uo pipefail
+          rm -rf rubyclips/facebook_output rubyclips/facebook_work
+
+          echo "Trying configured Facebook source first."
+          python rubyclips/facebook_pipeline.py || true
+          if [ -f rubyclips/facebook_output/manifest.json ]; then
+            exit 0
           fi
 
-      - name: Stop cleanly when Facebook backlog is complete
-        id: backlog
-        run: |
-          if [ -f rubyclips/facebook_output/complete.json ]; then
-            echo "complete=true" >> "$GITHUB_OUTPUT"
-            echo "All discovered Facebook videos have been handled."
-          else
-            echo "complete=false" >> "$GITHUB_OUTPUT"
+          echo "Facebook primary route exposed no new source; trying expanded Facebook discovery."
+          rm -rf rubyclips/facebook_output rubyclips/facebook_work
+          python rubyclips/facebook_discovery_fallback.py || true
+          if [ -f rubyclips/facebook_output/manifest.json ]; then
+            exit 0
           fi
 
-      - name: Read source video identity
-        if: steps.backlog.outputs.complete != 'true'
+          echo "Facebook public discovery is unavailable; using the same creator's configured fallback feed."
+          rm -rf rubyclips/facebook_output rubyclips/facebook_work
+          python rubyclips/creator_fallback_pipeline.py
+          test -s rubyclips/facebook_output/manifest.json
+
+      - name: Read source identity
         id: source
         run: |
           python - <<'PY'
-          import json, os
+          import json, os, re
           m=json.load(open('rubyclips/facebook_output/manifest.json'))
-          vid=str(m['sourceVideoId'])
-          if not vid.isdigit(): raise SystemExit('invalid Facebook video id')
+          vid=str(m['sourceVideoId']).strip()
+          platform=str(m.get('platform') or '')
+          idx=int(m.get('segmentIndex',1))
+          total=int(m.get('segmentTotal',1))
+          if platform == 'rubyclips-facebook-repost-v1':
+              if not vid.isdigit(): raise SystemExit('Invalid Facebook video id')
+              tag=f'rubyclips-fb-{vid}' + (f'-s{idx}' if total > 1 else '')
+          elif platform == 'rubyclips-creator-feed-v1':
+              if not re.fullmatch(r'[A-Za-z0-9_-]{6,20}', vid): raise SystemExit('Invalid creator source id')
+              tag=f'rubyclips-src-{vid}' + (f'-s{idx}' if total > 1 else '')
+          else:
+              raise SystemExit(f'Unsupported manifest platform: {platform}')
           with open(os.environ['GITHUB_OUTPUT'],'a') as f:
               f.write(f'video_id={vid}\n')
+              f.write(f'platform={platform}\n')
               f.write(f'file={m["file"]}\n')
-              f.write(f'segment_index={int(m.get("segmentIndex",1))}\n')
-              f.write(f'segment_total={int(m.get("segmentTotal",1))}\n')
+              f.write(f'segment_index={idx}\n')
+              f.write(f'segment_total={total}\n')
+              f.write(f'tag={tag}\n')
+          print(f'Selected {platform}: {vid}, Part {idx}/{total}, title={m.get("displayTitle")}')
           PY
 
       - name: Guard immediate trigger as new-story Part 1
-        if: steps.backlog.outputs.complete != 'true' && github.event_name == 'push'
+        if: github.event_name == 'push'
         run: |
           python - <<'PY'
-          import json
+          import json, re
           m=json.load(open('rubyclips/facebook_output/manifest.json'))
           idx=int(m.get('segmentIndex',1))
+          title=str(m.get('displayTitle') or '').strip()
           if idx != 1:
               raise SystemExit(f'Immediate trigger refused: expected new-story Part 1, got Part {idx}.')
-          print(f'Immediate new-story trigger validated: source={m.get("sourceVideoId")}, Part 1/{m.get("segmentTotal",1)}')
+          if not title:
+              raise SystemExit('Immediate trigger refused: missing title.')
+          if re.search(r'\b\d+(?:\.\d+)?\s*[kmb]?\s*(?:views?|reactions?|likes?|comments?|shares?)\b', title, re.I):
+              raise SystemExit(f'Immediate trigger refused: engagement metadata leaked into title: {title}')
+          print(f'Immediate new-story Part 1 validated: {title}')
           PY
 
       - name: Publish immutable source release
-        if: steps.backlog.outputs.complete != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          VIDEO_ID: ${{ steps.source.outputs.video_id }}
+          TAG: ${{ steps.source.outputs.tag }}
           FILE_NAME: ${{ steps.source.outputs.file }}
+          VIDEO_ID: ${{ steps.source.outputs.video_id }}
           SEGMENT_INDEX: ${{ steps.source.outputs.segment_index }}
           SEGMENT_TOTAL: ${{ steps.source.outputs.segment_total }}
         run: |
           set -euo pipefail
-          if [ "$SEGMENT_TOTAL" -gt 1 ]; then
-            TAG="rubyclips-fb-${VIDEO_ID}-s${SEGMENT_INDEX}"
-          else
-            TAG="rubyclips-fb-${VIDEO_ID}"
-          fi
-          echo "RUBYCLIPS_FB_TAG=$TAG" >> "$GITHUB_ENV"
           VIDEO="rubyclips/facebook_output/${FILE_NAME}"
           test -s "$VIDEO"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$VIDEO" rubyclips/facebook_output/manifest.json --clobber
           else
-            gh release create "$TAG" "$VIDEO" rubyclips/facebook_output/manifest.json --title "RubyClips Facebook ${VIDEO_ID} Part ${SEGMENT_INDEX}/${SEGMENT_TOTAL}" --notes "Existing user-provided Facebook footage. Divided only when the automatic TikTok duration limit requires it."
+            gh release create "$TAG" "$VIDEO" rubyclips/facebook_output/manifest.json --title "RubyClips ${VIDEO_ID} Part ${SEGMENT_INDEX}/${SEGMENT_TOTAL}" --notes "RubyClips configured source footage; divided only when the automatic TikTok duration limit requires it."
           fi
+          echo "RUBYCLIPS_TAG=$TAG" >> "$GITHUB_ENV"
 
-      - name: Wait for RubyClips publisher endpoint
-        if: steps.backlog.outputs.complete != 'true'
+      - name: Wait for current RubyClips publisher
         run: |
           set -euo pipefail
           URL='https://rubys-realm.vercel.app/api/rubyclips-post?health=1'
-          for i in $(seq 1 48); do
+          for i in $(seq 1 60); do
             CODE="$(curl -sS -o /tmp/rubyclips-probe.json -w '%{http_code}' "$URL" || true)"
             if [ "$CODE" = '200' ]; then
-              exit 0
+              if python - <<'PY'
+          import json
+          try:
+              d=json.load(open('/tmp/rubyclips-probe.json'))
+          except Exception:
+              raise SystemExit(1)
+          raise SystemExit(0 if d.get('version') == 'existing-video-parts-v6-creator-fallback' else 1)
+          PY
+              then
+                cat /tmp/rubyclips-probe.json
+                exit 0
+              fi
             fi
             sleep 5
           done
           cat /tmp/rubyclips-probe.json || true
+          echo "Current RubyClips publisher version did not become available."
           exit 1
 
       - name: Send next RubyClips part through Buffer once
-        if: steps.backlog.outputs.complete != 'true'
         env:
-          TAG: ${{ env.RUBYCLIPS_FB_TAG }}
+          TAG: ${{ env.RUBYCLIPS_TAG }}
         run: |
           set -euo pipefail
           URL="https://rubys-realm.vercel.app/api/rubyclips-post?tag=${TAG}"
           CODE="$(curl -sS --max-time 90 -o /tmp/rubyclips-post-response.json -w '%{http_code}' "$URL" || true)"
           cat /tmp/rubyclips-post-response.json || true
           if [ "$CODE" != '200' ]; then
-            echo "RubyClips publisher was not accepted this cycle; state will not advance."
+            echo "RubyClips publisher was not accepted; state will not advance."
             exit 1
           fi
           python - <<'PY'
@@ -143,16 +168,16 @@ jobs:
           if str(d.get('channelName','')).lstrip('@').lower()!='rubaradaclips':
               raise SystemExit('Wrong TikTok target returned by publisher.')
           open('rubyclips/facebook_output/publish.json','w').write(json.dumps(d,indent=2))
-          print('Accepted by Buffer:', d['postId'])
+          print('Accepted by Buffer:', d['postId'], 'deduplicated=', bool(d.get('deduplicated')))
           PY
 
-      - name: Advance only after Buffer accepts the RubyClips post
-        if: steps.backlog.outputs.complete != 'true'
+      - name: Advance exactly once after Buffer acceptance
         run: |
           python - <<'PY'
           import json
           from datetime import datetime, timezone
           from pathlib import Path
+
           state_path=Path('rubyclips/facebook_state.json')
           manifest_path=Path('rubyclips/facebook_output/manifest.json')
           publish_path=Path('rubyclips/facebook_output/publish.json')
@@ -160,39 +185,57 @@ jobs:
           accepted=json.loads(publish_path.read_text())
           if not accepted.get('ok') or not accepted.get('postId'):
               raise SystemExit('Refusing to advance without a valid Buffer post id.')
-          state=json.loads(state_path.read_text())
+
+          state=json.loads(state_path.read_text()) if state_path.exists() else {}
           m=json.loads(manifest_path.read_text())
           vid=str(m['sourceVideoId'])
           idx=int(m.get('segmentIndex',1))
           total=int(m.get('segmentTotal',1))
-          progress=state.setdefault('segmentProgress',{})
+          platform=str(m.get('platform') or '')
+
+          if platform == 'rubyclips-creator-feed-v1':
+              progress_key='creatorFallbackSegmentProgress'
+              posted_key='creatorFallbackPostedVideoIds'
+          elif platform == 'rubyclips-facebook-repost-v1':
+              progress_key='segmentProgress'
+              posted_key='postedVideoIds'
+          else:
+              raise SystemExit(f'Unsupported state platform: {platform}')
+
+          progress=state.setdefault(progress_key,{})
           if idx < total:
               progress[vid]=idx+1
           else:
               progress.pop(vid,None)
-              posted=[str(x) for x in state.get('postedVideoIds',[])]
-              if vid not in posted: posted.append(vid)
-              state['postedVideoIds']=posted
-          state['lastResolvedPageUrl']=m.get('resolvedPageUrl')
+              posted=[str(x) for x in state.get(posted_key,[])]
+              if vid not in posted:
+                  posted.append(vid)
+              state[posted_key]=posted
+
           state['lastPostedAt']=datetime.now(timezone.utc).isoformat()
           state['lastBufferPostId']=str(accepted['postId'])
+          state['lastSourcePlatform']=platform
+          state['lastSourceVideoId']=vid
+          state['lastSourcePart']=idx
+          state['lastSourcePartTotal']=total
+          if m.get('resolvedPageUrl'):
+              state['lastResolvedPageUrl']=m.get('resolvedPageUrl')
           state_path.write_text(json.dumps(state,indent=2)+'\n')
           PY
-          git config user.name "rubyclips-facebook-bot"
+          git config user.name "rubyclips-publisher-bot"
           git config user.email "actions@users.noreply.github.com"
           git pull --rebase
           git add rubyclips/facebook_state.json
-          git diff --cached --quiet || git commit -m "Advance RubyClips Facebook queue after Buffer acceptance [skip ci]"
+          git diff --cached --quiet || git commit -m "Advance RubyClips queue after Buffer acceptance [skip ci]"
           git push
 
       - name: Save diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: rubyclips-facebook-${{ github.run_number }}
+          name: rubyclips-source-${{ github.run_number }}
           path: |
             rubyclips/facebook_output/manifest.json
             rubyclips/facebook_output/publish.json
-            rubyclips/facebook_output/complete.json
           if-no-files-found: warn
           retention-days: 7
