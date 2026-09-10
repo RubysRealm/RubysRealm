@@ -13,29 +13,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Probe resilient source routes
+        shell: bash
         run: |
           set +e
-          ID='q3h9Ke6boiU'
-          for HOST in inv.nadeko.net invidious.nerdvpn.de yt.chocolatemoo53.com; do
-            echo "=== $HOST API ==="
-            curl -A 'Mozilla/5.0' -L --max-time 25 -sS -w '\nHTTP:%{http_code}\n' "https://${HOST}/api/v1/videos/${ID}" -o "/tmp/${HOST}.json"
-            head -c 12000 "/tmp/${HOST}.json"
+          ID=q3h9Ke6boiU
+          for HOST in inv.nadeko.net invidious.nerdvpn.de yt.chocolatemoo53.com
+          do
+            echo "HOST=$HOST"
+            curl -A "Mozilla/5.0" -L --max-time 25 -sS "https://$HOST/api/v1/videos/$ID" -o "/tmp/out.json"
+            echo "STATUS=$? SIZE=$(wc -c < /tmp/out.json 2>/dev/null || echo 0)"
+            head -c 20000 /tmp/out.json 2>/dev/null
             echo
-            echo "=== $HOST PROXY TEST URLS ==="
-            python - "$HOST" "/tmp/${HOST}.json" <<'PY'
-import json,sys
-host,path=sys.argv[1:]
-try:
- d=json.load(open(path))
-except Exception as e:
- print('json error',e); raise SystemExit
-for key in ('formatStreams','adaptiveFormats'):
- for x in d.get(key,[])[:12]:
-  print(key, x.get('qualityLabel') or x.get('quality'), x.get('type'), x.get('url'))
-PY
           done
-          echo '=== SALDA ==='
-          curl -A 'Mozilla/5.0' -L --max-time 25 -sS -D /tmp/sheaders "https://salda.ws/video.php?id=${ID}" -o /tmp/s.html
-          head -20 /tmp/sheaders
-          grep -Eo 'https?[^"'"'"' <>]+' /tmp/s.html | sed 's/&amp;/\&/g' | grep -Ei 'mp4|m3u8|googlevideo|videoplayback|download' | head -80
-          grep -Ei 'source|video|mp4|m3u8|player' /tmp/s.html | head -100
+          echo SALDA
+          curl -A "Mozilla/5.0" -L --max-time 25 -sS "https://salda.ws/video.php?id=$ID" -o /tmp/salda.html
+          echo "SALDA_SIZE=$(wc -c < /tmp/salda.html 2>/dev/null || echo 0)"
+          grep -Eio 'https?[^" <>]+' /tmp/salda.html | grep -Ei 'mp4|m3u8|videoplayback|googlevideo' | head -80
+          grep -Ei 'mp4|m3u8|source|player' /tmp/salda.html | head -80
