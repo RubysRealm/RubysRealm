@@ -12,17 +12,30 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe alternate public source routes
+      - name: Probe resilient source routes
         run: |
           set +e
           ID='q3h9Ke6boiU'
-          echo '=== OEMBED ==='
-          curl -A 'Mozilla/5.0' -L --max-time 20 -sS "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${ID}&format=json" | head -c 4000
-          echo
-          echo '=== ZOLOTUBE STATUS ==='
-          curl -A 'Mozilla/5.0' -L --max-time 30 -sS -D /tmp/zheaders "https://zolotube.com/watch?v=${ID}" -o /tmp/z.html
-          head -30 /tmp/zheaders
-          echo '=== ZOLOTUBE URLS ==='
-          grep -Eo 'https?[^"'"'"' <>]+' /tmp/z.html | sed 's/&amp;/\&/g' | grep -Ei 'mp4|download|googlevideo|videoplayback' | head -50
-          echo '=== ZOLOTUBE HTML MARKERS ==='
-          grep -Ei '720|360|mp4|download|video' /tmp/z.html | head -80
+          for HOST in inv.nadeko.net invidious.nerdvpn.de yt.chocolatemoo53.com; do
+            echo "=== $HOST API ==="
+            curl -A 'Mozilla/5.0' -L --max-time 25 -sS -w '\nHTTP:%{http_code}\n' "https://${HOST}/api/v1/videos/${ID}" -o "/tmp/${HOST}.json"
+            head -c 12000 "/tmp/${HOST}.json"
+            echo
+            echo "=== $HOST PROXY TEST URLS ==="
+            python - "$HOST" "/tmp/${HOST}.json" <<'PY'
+import json,sys
+host,path=sys.argv[1:]
+try:
+ d=json.load(open(path))
+except Exception as e:
+ print('json error',e); raise SystemExit
+for key in ('formatStreams','adaptiveFormats'):
+ for x in d.get(key,[])[:12]:
+  print(key, x.get('qualityLabel') or x.get('quality'), x.get('type'), x.get('url'))
+PY
+          done
+          echo '=== SALDA ==='
+          curl -A 'Mozilla/5.0' -L --max-time 25 -sS -D /tmp/sheaders "https://salda.ws/video.php?id=${ID}" -o /tmp/s.html
+          head -20 /tmp/sheaders
+          grep -Eo 'https?[^"'"'"' <>]+' /tmp/s.html | sed 's/&amp;/\&/g' | grep -Ei 'mp4|m3u8|googlevideo|videoplayback|download' | head -80
+          grep -Ei 'source|video|mp4|m3u8|player' /tmp/s.html | head -100
