@@ -177,7 +177,7 @@ jobs:
           PY
           git config user.name "rubyclips-publisher-bot"
           git config user.email "actions@users.noreply.github.com"
-          git pull --rebase
+          git pull --rebase --autostash
           git add rubyclips/facebook_state.json
           git diff --cached --quiet || git commit -m "Advance RubyClips queue after Buffer acceptance [skip ci]"
           git push
