@@ -10,20 +10,64 @@ permissions:
 
 jobs:
   probe:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
-      - name: Install yt-dlp
-        run: brew install yt-dlp
-      - name: Probe YouTube source
+      - name: Probe Piped source transports
         shell: bash
         run: |
-          set -euo pipefail
-          SRC='https://www.youtube.com/watch?v=q3h9Ke6boiU'
-          yt-dlp --no-playlist --dump-single-json "$SRC" > /tmp/meta.json
-          python3 - <<'PY'
-          import json
-          d=json.load(open('/tmp/meta.json'))
-          print('SOURCE_OK', d.get('id'), d.get('title'), d.get('duration'))
-          PY
-          yt-dlp --no-playlist -f 'b[ext=mp4]/b' --max-filesize 20M -o /tmp/probe.mp4 "$SRC" || true
-          ls -lh /tmp/probe.mp4* 2>/dev/null || true
+          set +e
+          ID='q3h9Ke6boiU'
+          for HOST in \
+            pipedapi.kavin.rocks \
+            pipedapi.tokhmi.xyz \
+            pipedapi.moomoo.me \
+            pipedapi.syncpundit.io \
+            api-piped.mha.fi \
+            piped-api.garudalinux.org \
+            pipedapi.qdi.fi \
+            piped-api.hostux.net \
+            pdapi.vern.cc \
+            pipedapi.pfcd.me \
+            pipedapi.frontendfriendly.xyz \
+            api.piped.yt \
+            pipedapi.astartes.nl \
+            pipedapi.osphost.fi \
+            pipedapi.simpleprivacy.fr \
+            pipedapi.drgns.space \
+            piapi.ggtyler.dev \
+            api.watch.pluto.lat
+          do
+            echo "=== $HOST ==="
+            rm -f /tmp/piped.json /tmp/range.bin /tmp/h
+            CODE=$(curl -L --connect-timeout 5 --max-time 25 -sS -w '%{http_code}' "https://$HOST/streams/$ID" -o /tmp/piped.json)
+            echo "HTTP=$CODE SIZE=$(wc -c < /tmp/piped.json 2>/dev/null || echo 0)"
+            if [ "$CODE" = "200" ]; then
+              python3 - "$HOST" <<'PY'
+import json,sys
+host=sys.argv[1]
+try: d=json.load(open('/tmp/piped.json'))
+except Exception as e:
+ print('JSON_ERROR',e); raise SystemExit
+print('TITLE',d.get('title'),'DURATION',d.get('duration'))
+streams=[]
+for x in d.get('videoStreams') or []:
+ u=x.get('url')
+ if u: streams.append((x.get('quality'),x.get('format'),x.get('videoOnly'),u))
+for x in d.get('audioStreams') or []:
+ u=x.get('url')
+ if u: streams.append((x.get('quality'),x.get('format'),'audio',u))
+for row in streams[:8]: print('STREAM',*row)
+if streams: open('/tmp/first_url','w').write(streams[0][3])
+PY
+              if [ -s /tmp/first_url ]; then
+                URL=$(cat /tmp/first_url)
+                RC=$(curl -L --connect-timeout 5 --max-time 25 -sS -r 0-1048575 -w '%{http_code}' "$URL" -o /tmp/range.bin)
+                echo "RANGE_HTTP=$RC RANGE_SIZE=$(wc -c < /tmp/range.bin 2>/dev/null || echo 0)"
+                if [ -s /tmp/range.bin ]; then
+                  echo "WORKING_HOST=$HOST"
+                  exit 0
+                fi
+              fi
+            fi
+          done
+          exit 1
