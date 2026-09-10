@@ -39,21 +39,14 @@ jobs:
         run: |
           set -uo pipefail
           rm -rf rubyclips/facebook_output rubyclips/facebook_work
-
           echo "Trying configured Facebook source first."
           python rubyclips/facebook_pipeline.py || true
-          if [ -f rubyclips/facebook_output/manifest.json ]; then
-            exit 0
-          fi
-
-          echo "Facebook primary route exposed no new source; trying expanded Facebook discovery."
+          if [ -f rubyclips/facebook_output/manifest.json ]; then exit 0; fi
+          echo "Trying expanded Facebook discovery."
           rm -rf rubyclips/facebook_output rubyclips/facebook_work
           python rubyclips/facebook_discovery_fallback.py || true
-          if [ -f rubyclips/facebook_output/manifest.json ]; then
-            exit 0
-          fi
-
-          echo "Facebook public discovery is unavailable; using the same creator's configured fallback feed."
+          if [ -f rubyclips/facebook_output/manifest.json ]; then exit 0; fi
+          echo "Using same-creator fallback feed."
           rm -rf rubyclips/facebook_output rubyclips/facebook_work
           python rubyclips/creator_fallback_pipeline.py
           test -s rubyclips/facebook_output/manifest.json
@@ -128,24 +121,13 @@ jobs:
           URL='https://rubys-realm.vercel.app/api/rubyclips-post?health=1'
           for i in $(seq 1 60); do
             CODE="$(curl -sS -o /tmp/rubyclips-probe.json -w '%{http_code}' "$URL" || true)"
-            if [ "$CODE" = '200' ]; then
-              if python - <<'PY'
-          import json
-          try:
-              d=json.load(open('/tmp/rubyclips-probe.json'))
-          except Exception:
-              raise SystemExit(1)
-          raise SystemExit(0 if d.get('version') == 'existing-video-parts-v6-creator-fallback' else 1)
-          PY
-              then
-                cat /tmp/rubyclips-probe.json
-                exit 0
-              fi
+            if [ "$CODE" = '200' ] && grep -q 'existing-video-parts-v6-creator-fallback' /tmp/rubyclips-probe.json; then
+              cat /tmp/rubyclips-probe.json
+              exit 0
             fi
             sleep 5
           done
           cat /tmp/rubyclips-probe.json || true
-          echo "Current RubyClips publisher version did not become available."
           exit 1
 
       - name: Send next RubyClips part through Buffer once
@@ -156,10 +138,7 @@ jobs:
           URL="https://rubys-realm.vercel.app/api/rubyclips-post?tag=${TAG}"
           CODE="$(curl -sS --max-time 90 -o /tmp/rubyclips-post-response.json -w '%{http_code}' "$URL" || true)"
           cat /tmp/rubyclips-post-response.json || true
-          if [ "$CODE" != '200' ]; then
-            echo "RubyClips publisher was not accepted; state will not advance."
-            exit 1
-          fi
+          if [ "$CODE" != '200' ]; then exit 1; fi
           python - <<'PY'
           import json
           d=json.load(open('/tmp/rubyclips-post-response.json'))
@@ -177,22 +156,16 @@ jobs:
           import json
           from datetime import datetime, timezone
           from pathlib import Path
-
           state_path=Path('rubyclips/facebook_state.json')
-          manifest_path=Path('rubyclips/facebook_output/manifest.json')
-          publish_path=Path('rubyclips/facebook_output/publish.json')
-          if not publish_path.exists(): raise SystemExit('Refusing to advance without Buffer acceptance.')
-          accepted=json.loads(publish_path.read_text())
+          m=json.loads(Path('rubyclips/facebook_output/manifest.json').read_text())
+          accepted=json.loads(Path('rubyclips/facebook_output/publish.json').read_text())
           if not accepted.get('ok') or not accepted.get('postId'):
-              raise SystemExit('Refusing to advance without a valid Buffer post id.')
-
+              raise SystemExit('Refusing to advance without Buffer acceptance.')
           state=json.loads(state_path.read_text()) if state_path.exists() else {}
-          m=json.loads(manifest_path.read_text())
           vid=str(m['sourceVideoId'])
           idx=int(m.get('segmentIndex',1))
           total=int(m.get('segmentTotal',1))
           platform=str(m.get('platform') or '')
-
           if platform == 'rubyclips-creator-feed-v1':
               progress_key='creatorFallbackSegmentProgress'
               posted_key='creatorFallbackPostedVideoIds'
@@ -201,25 +174,21 @@ jobs:
               posted_key='postedVideoIds'
           else:
               raise SystemExit(f'Unsupported state platform: {platform}')
-
           progress=state.setdefault(progress_key,{})
           if idx < total:
               progress[vid]=idx+1
           else:
               progress.pop(vid,None)
               posted=[str(x) for x in state.get(posted_key,[])]
-              if vid not in posted:
-                  posted.append(vid)
+              if vid not in posted: posted.append(vid)
               state[posted_key]=posted
-
           state['lastPostedAt']=datetime.now(timezone.utc).isoformat()
           state['lastBufferPostId']=str(accepted['postId'])
           state['lastSourcePlatform']=platform
           state['lastSourceVideoId']=vid
           state['lastSourcePart']=idx
           state['lastSourcePartTotal']=total
-          if m.get('resolvedPageUrl'):
-              state['lastResolvedPageUrl']=m.get('resolvedPageUrl')
+          if m.get('resolvedPageUrl'): state['lastResolvedPageUrl']=m.get('resolvedPageUrl')
           state_path.write_text(json.dumps(state,indent=2)+'\n')
           PY
           git config user.name "rubyclips-publisher-bot"
