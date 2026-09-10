@@ -1,0 +1,28 @@
+name: RubyClips source recovery probe
+
+on:
+  push:
+    paths:
+      - 'rubyclips/source_probe.trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe alternate public source routes
+        run: |
+          set +e
+          ID='q3h9Ke6boiU'
+          echo '=== OEMBED ==='
+          curl -A 'Mozilla/5.0' -L --max-time 20 -sS "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${ID}&format=json" | head -c 4000
+          echo
+          echo '=== ZOLOTUBE STATUS ==='
+          curl -A 'Mozilla/5.0' -L --max-time 30 -sS -D /tmp/zheaders "https://zolotube.com/watch?v=${ID}" -o /tmp/z.html
+          head -30 /tmp/zheaders
+          echo '=== ZOLOTUBE URLS ==='
+          grep -Eo 'https?[^"'"'"' <>]+' /tmp/z.html | sed 's/&amp;/\&/g' | grep -Ei 'mp4|download|googlevideo|videoplayback' | head -50
+          echo '=== ZOLOTUBE HTML MARKERS ==='
+          grep -Ei '720|360|mp4|download|video' /tmp/z.html | head -80
