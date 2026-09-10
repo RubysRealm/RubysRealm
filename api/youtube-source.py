@@ -15,6 +15,7 @@ COBALT_APIS = [
     'https://capi.3kh0.net/',
 ]
 INVIDIOUS_APIS = [
+    'https://tube.rklab.co.in',
     'https://invidious.nerdvpn.de',
     'https://yt.chocolatemoo53.com',
     'https://invidious.tiekoetter.com',
