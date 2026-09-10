@@ -33,6 +33,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-dejavu-core
           pip install -r rubyclips/facebook_requirements.txt
+          python -m pip install -U "yt-dlp[default,curl-cffi]" bgutil-ytdlp-pot-provider
+          rm -rf "$HOME/bgutil-ytdlp-pot-provider"
+          git clone --depth 1 --branch 2.0.0 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git "$HOME/bgutil-ytdlp-pot-provider"
+          cd "$HOME/bgutil-ytdlp-pot-provider/server"
+          npm ci
+          npx tsc
+          cd "$GITHUB_WORKSPACE"
           python -m playwright install chromium --with-deps
 
       - name: Resolve and render next unposted source
