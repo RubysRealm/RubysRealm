@@ -1,5 +1,8 @@
 import crypto from 'node:crypto';
-import sodium from 'libsodium-wrappers';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const sodium = require('libsodium-wrappers');
 
 const OWNER = 'RubysRealm';
 const REPO = 'RubysRealm';
@@ -30,7 +33,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Verify the token can see the target repository.
     const repoCheck = await github(`/repos/${OWNER}/${REPO}`, token, { method: 'GET' });
     if (!repoCheck.ok) {
       return res.status(repoCheck.status).json({
@@ -40,7 +42,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // Verify workflow-dispatch access before changing anything.
     const workflowCheck = await github(`/repos/${OWNER}/${REPO}/actions/workflows/social-bot.yml`, token, { method: 'GET' });
     if (!workflowCheck.ok) {
       return res.status(workflowCheck.status).json({
@@ -50,7 +51,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // GitHub requires Actions secrets to be encrypted with the repository public key.
     const keyResponse = await github(`/repos/${OWNER}/${REPO}/actions/secrets/public-key`, token, { method: 'GET' });
     if (!keyResponse.ok) {
       return res.status(keyResponse.status).json({
