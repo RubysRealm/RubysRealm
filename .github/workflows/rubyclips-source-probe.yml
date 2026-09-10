@@ -12,18 +12,19 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe Cobalt source transport
+      - name: Probe live YouTube transports
         shell: bash
         run: |
           set +e
           SRC='https://www.youtube.com/watch?v=q3h9Ke6boiU'
           BODY='{"url":"'"$SRC"'","videoQuality":"720","downloadMode":"auto","youtubeVideoCodec":"h264","youtubeVideoContainer":"mp4","alwaysProxy":true}'
-          for HOST in cobalt-api.meowing.de cobalt-backend.canine.tools capi.3kh0.net kityune.imput.net blossom.imput.net nachos.imput.net sunny.imput.net
+          for HOST in api-cobalt.eversiege.network dog.kittycat.boo fox.kittycat.boo nuko-c.meowing.de bergung-api.hoffnungfuerdiezukunft.net cobaltapi.cjs.nz lime.clxxped.lol
           do
             echo "=== HOST=$HOST ==="
-            curl -A 'RubyClips/1.0 (+https://github.com/RubysRealm/RubysRealm)' -L --max-time 45 -sS -D /tmp/h -H 'Accept: application/json' -H 'Content-Type: application/json' -X POST "https://$HOST/" --data "$BODY" -o /tmp/r
+            rm -f /tmp/r /tmp/h
+            curl -A 'RubyClips/1.0 (+https://github.com/RubysRealm/RubysRealm)' -L --max-time 60 -sS -D /tmp/h -H 'Accept: application/json' -H 'Content-Type: application/json' -X POST "https://$HOST/" --data "$BODY" -o /tmp/r
             echo "CURL=$? SIZE=$(wc -c < /tmp/r 2>/dev/null || echo 0)"
-            head -20 /tmp/h 2>/dev/null
+            head -5 /tmp/h 2>/dev/null
             cat /tmp/r 2>/dev/null
             echo
           done
