@@ -8,6 +8,7 @@ import shutil
 from pathlib import Path
 
 from yt_dlp import YoutubeDL
+from yt_dlp.utils import DownloadError
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -17,13 +18,12 @@ OUT = HERE / 'facebook_output'
 CHANNEL_URL = 'https://www.youtube.com/@bushcraftinthewildforest/videos'
 CHANNEL_HANDLE = '@bushcraftinthewildforest'
 MAX_SECONDS = 585.0
+BGUTIL_SERVER_HOME = str(Path.home() / 'bgutil-ytdlp-pot-provider' / 'server')
 
 SPEC = importlib.util.spec_from_file_location('rubyclips_facebook_pipeline', HERE / 'facebook_pipeline.py')
 base = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(base)
 
-# This is the story already completed on @rubaradaclips and must never be
-# selected again if the same footage appears through the creator-feed fallback.
 COMPLETED_TITLE_FRAGMENTS = [
     'building a warm and cozy forest house with a clay stove',
 ]
@@ -47,6 +47,13 @@ def display_title(value):
     return '\n'.join(lines[:2]) if lines else 'Bushcraft Story'
 
 
+def youtube_args(client):
+    args = {'youtube': {'player_client': [client]}}
+    if client == 'mweb':
+        args['youtubepot-bgutilscript'] = {'server_home': [BGUTIL_SERVER_HOME]}
+    return args
+
+
 def list_channel_entries():
     opts = {
         'quiet': True,
@@ -56,6 +63,7 @@ def list_channel_entries():
         'playlistend': 80,
         'socket_timeout': 45,
         'retries': 3,
+        'extractor_args': youtube_args('mweb'),
     }
     with YoutubeDL(opts) as ydl:
         info = ydl.extract_info(CHANNEL_URL, download=False)
@@ -67,55 +75,47 @@ def list_channel_entries():
             continue
         if not title:
             continue
-        entries.append({'id': vid, 'title': title, 'url': f'https://www.youtube.com/watch?v={vid}'})
+        entries.append({
+            'id': vid,
+            'title': title,
+            'url': f'https://www.youtube.com/watch?v={vid}',
+            'timestamp': int(e.get('timestamp') or e.get('release_timestamp') or 0),
+            'upload_date': str(e.get('upload_date') or ''),
+        })
     if not entries:
         raise RuntimeError('Configured YouTube channel returned no usable videos.')
     return entries
 
 
-def full_metadata(entry):
-    opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'skip_download': True,
-        'noplaylist': True,
-        'socket_timeout': 45,
-        'retries': 3,
-    }
-    with YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(entry['url'], download=False)
-    if not info:
-        raise RuntimeError('No creator-feed metadata returned.')
-    return {
-        'id': str(info.get('id') or entry['id']),
-        'url': str(info.get('webpage_url') or entry['url']),
-        'title': str(info.get('title') or entry['title']).strip(),
-        'description': str(info.get('description') or '').strip(),
-        'timestamp': int(info.get('timestamp') or info.get('release_timestamp') or 0),
-        'upload_date': str(info.get('upload_date') or ''),
-        'duration': float(info.get('duration') or 0),
-    }
-
-
-def download(meta):
+def download(entry):
     template = str(WORK / 'source.%(ext)s')
-    opts = {
-        'format': 'bv*+ba/b',
-        'merge_output_format': 'mp4',
-        'outtmpl': template,
-        'noplaylist': True,
-        'quiet': False,
-        'no_warnings': True,
-        'socket_timeout': 60,
-        'retries': 4,
-        'fragment_retries': 4,
-    }
-    with YoutubeDL(opts) as ydl:
-        ydl.download([meta['url']])
-    files = [f for f in WORK.glob('source.*') if f.is_file()]
-    if not files:
-        raise RuntimeError('Creator-feed download produced no file.')
-    return max(files, key=lambda f: f.stat().st_size)
+    last_error = None
+    for client in ('mweb', 'android_vr', 'web_embedded'):
+        for f in WORK.glob('source.*'):
+            if f.is_file():
+                f.unlink()
+        opts = {
+            'format': 'bv*+ba/b',
+            'merge_output_format': 'mp4',
+            'outtmpl': template,
+            'noplaylist': True,
+            'quiet': False,
+            'no_warnings': True,
+            'socket_timeout': 60,
+            'retries': 4,
+            'fragment_retries': 4,
+            'extractor_args': youtube_args(client),
+        }
+        try:
+            with YoutubeDL(opts) as ydl:
+                ydl.download([entry['url']])
+        except DownloadError as exc:
+            last_error = exc
+            continue
+        files = [f for f in WORK.glob('source.*') if f.is_file()]
+        if files:
+            return max(files, key=lambda f: f.stat().st_size), client
+    raise RuntimeError(f'Creator-feed download failed for all supported clients: {last_error}')
 
 
 def caption(title, index, total):
@@ -125,8 +125,6 @@ def caption(title, index, total):
 
 
 def choose_entry(entries, posted, progress):
-    # If a multipart creator-feed story has started, finish it before selecting
-    # another source. Otherwise preserve the project's oldest-to-newest policy.
     for source_id in progress:
         for e in entries:
             if e['id'] == source_id and source_id not in posted:
@@ -156,29 +154,28 @@ async def main():
     OUT.mkdir(parents=True, exist_ok=True)
 
     entries = list_channel_entries()
-    chosen_entry = choose_entry(entries, posted, progress)
-    meta = full_metadata(chosen_entry)
+    chosen = choose_entry(entries, posted, progress)
 
-    src = download(meta)
+    src, client = download(chosen)
     actual_duration = base.probe_duration(src)
     if actual_duration <= 0:
         raise RuntimeError('Creator-feed source duration is invalid.')
 
     total = max(1, int(math.ceil(actual_duration / MAX_SECONDS)))
-    index = max(1, progress.get(meta['id'], 1))
+    index = max(1, progress.get(chosen['id'], 1))
     if index > total:
         index = 1
 
     start = (index - 1) * MAX_SECONDS
     remaining = max(0.1, actual_duration - start)
     length = min(MAX_SECONDS, remaining)
-    title = display_title(meta['title'])
+    title = display_title(chosen['title'])
     part = base.part_label(index, total)
 
     if total == 1:
-        final = OUT / f'creator-{meta["id"]}.mp4'
+        final = OUT / f'creator-{chosen["id"]}.mp4'
     else:
-        final = OUT / f'creator-{meta["id"]}-segment-{index:02d}-of-{total:02d}.mp4'
+        final = OUT / f'creator-{chosen["id"]}-segment-{index:02d}-of-{total:02d}.mp4'
 
     base.burn_layout(src, final, title, part, start=start, length=length)
     produced_duration = base.probe_duration(final)
@@ -192,16 +189,16 @@ async def main():
         'sourceProvider': 'youtube',
         'sourceChannel': CHANNEL_HANDLE,
         'sourceChannelUrl': CHANNEL_URL,
-        'sourceVideoId': meta['id'],
-        'sourceUrl': meta['url'],
-        'sourceTimestamp': meta.get('timestamp') or None,
-        'sourceUploadDate': meta.get('upload_date') or None,
+        'sourceVideoId': chosen['id'],
+        'sourceUrl': chosen['url'],
+        'sourceTimestamp': chosen.get('timestamp') or None,
+        'sourceUploadDate': chosen.get('upload_date') or None,
         'sourceDurationSeconds': round(actual_duration, 3),
         'segmentIndex': index,
         'segmentTotal': total,
         'segmentStartSeconds': round(start, 3),
         'segmentDurationSeconds': round(produced_duration, 3),
-        'originalTitle': meta['title'],
+        'originalTitle': chosen['title'],
         'displayTitle': title.replace('\n', ' '),
         'partLabel': part,
         'caption': caption(title, index, total),
@@ -211,6 +208,7 @@ async def main():
         'titleBurnedIn': True,
         'partLabelBurnedIn': True,
         'overlayLayoutVersion': 'title-metadata-filtered-v3',
+        'sourceClient': client,
         'fallbackReason': 'configured-user-youtube-channel'
     }
     (OUT / 'manifest.json').write_text(json.dumps(manifest, indent=2))
