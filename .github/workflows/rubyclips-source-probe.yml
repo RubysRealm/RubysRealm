@@ -12,21 +12,19 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe resilient source routes
+      - name: Probe Cobalt source transport
         shell: bash
         run: |
           set +e
-          ID=q3h9Ke6boiU
-          for HOST in inv.nadeko.net invidious.nerdvpn.de yt.chocolatemoo53.com
+          SRC='https://www.youtube.com/watch?v=q3h9Ke6boiU'
+          BODY='{"url":"'"$SRC"'","videoQuality":"720","downloadMode":"auto","youtubeVideoCodec":"h264","youtubeVideoContainer":"mp4","alwaysProxy":true}'
+          for HOST in cobalt-api.meowing.de cobalt-backend.canine.tools capi.3kh0.net kityune.imput.net blossom.imput.net nachos.imput.net sunny.imput.net
           do
-            echo "HOST=$HOST"
-            curl -A "Mozilla/5.0" -L --max-time 25 -sS "https://$HOST/api/v1/videos/$ID" -o "/tmp/out.json"
-            echo "STATUS=$? SIZE=$(wc -c < /tmp/out.json 2>/dev/null || echo 0)"
-            head -c 20000 /tmp/out.json 2>/dev/null
+            echo "=== HOST=$HOST ==="
+            curl -A 'RubyClips/1.0 (+https://github.com/RubysRealm/RubysRealm)' -L --max-time 45 -sS -D /tmp/h -H 'Accept: application/json' -H 'Content-Type: application/json' -X POST "https://$HOST/" --data "$BODY" -o /tmp/r
+            echo "CURL=$? SIZE=$(wc -c < /tmp/r 2>/dev/null || echo 0)"
+            head -20 /tmp/h 2>/dev/null
+            cat /tmp/r 2>/dev/null
             echo
           done
-          echo SALDA
-          curl -A "Mozilla/5.0" -L --max-time 25 -sS "https://salda.ws/video.php?id=$ID" -o /tmp/salda.html
-          echo "SALDA_SIZE=$(wc -c < /tmp/salda.html 2>/dev/null || echo 0)"
-          grep -Eio 'https?[^" <>]+' /tmp/salda.html | grep -Ei 'mp4|m3u8|videoplayback|googlevideo' | head -80
-          grep -Ei 'mp4|m3u8|source|player' /tmp/salda.html | head -80
+          exit 0
