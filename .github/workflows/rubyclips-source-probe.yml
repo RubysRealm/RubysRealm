@@ -10,22 +10,20 @@ permissions:
 
 jobs:
   probe:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
-      - name: Probe live YouTube transports
+      - name: Install yt-dlp
+        run: python3 -m pip install -U yt-dlp
+      - name: Probe YouTube source
         shell: bash
         run: |
-          set +e
+          set -euo pipefail
           SRC='https://www.youtube.com/watch?v=q3h9Ke6boiU'
-          BODY='{"url":"'"$SRC"'","videoQuality":"720","downloadMode":"auto","youtubeVideoCodec":"h264","youtubeVideoContainer":"mp4","alwaysProxy":true}'
-          for HOST in api-cobalt.eversiege.network dog.kittycat.boo fox.kittycat.boo nuko-c.meowing.de bergung-api.hoffnungfuerdiezukunft.net cobaltapi.cjs.nz lime.clxxped.lol
-          do
-            echo "=== HOST=$HOST ==="
-            rm -f /tmp/r /tmp/h
-            curl -A 'RubyClips/1.0 (+https://github.com/RubysRealm/RubysRealm)' -L --max-time 60 -sS -D /tmp/h -H 'Accept: application/json' -H 'Content-Type: application/json' -X POST "https://$HOST/" --data "$BODY" -o /tmp/r
-            echo "CURL=$? SIZE=$(wc -c < /tmp/r 2>/dev/null || echo 0)"
-            head -5 /tmp/h 2>/dev/null
-            cat /tmp/r 2>/dev/null
-            echo
-          done
-          exit 0
+          yt-dlp --no-playlist --dump-single-json "$SRC" > /tmp/meta.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/meta.json'))
+          print('SOURCE_OK', d.get('id'), d.get('title'), d.get('duration'))
+          PY
+          yt-dlp --no-playlist -f 'b[ext=mp4]/b' --max-filesize 20M -o /tmp/probe.mp4 "$SRC" || true
+          ls -lh /tmp/probe.mp4* 2>/dev/null || true
