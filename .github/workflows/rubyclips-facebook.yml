@@ -39,6 +39,11 @@ jobs:
         run: |
           set -euo pipefail
           python rubyclips/facebook_pipeline.py
+          if [ -f rubyclips/facebook_output/complete.json ]; then
+            echo "Primary Facebook route exposed no additional videos; trying broader page routes."
+            rm -f rubyclips/facebook_output/complete.json
+            python rubyclips/facebook_discovery_fallback.py
+          fi
 
       - name: Stop cleanly when Facebook backlog is complete
         id: backlog
