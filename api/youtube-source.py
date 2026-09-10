@@ -1,9 +1,11 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from yt_dlp import YoutubeDL
+import html
 import json
+import re
+import urllib.parse
 import urllib.request
-import urllib.error
 
 app = FastAPI()
 
@@ -11,6 +13,44 @@ COBALT_APIS = [
     'https://cobalt-api.meowing.de/',
     'https://capi.3kh0.net/',
 ]
+
+UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36'
+
+
+def fetch_text(url, timeout=35):
+    req = urllib.request.Request(url, headers={'User-Agent': UA, 'Accept': 'text/html,application/json;q=0.9,*/*;q=0.8'})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode('utf-8', 'replace')
+
+
+def youtube_oembed(video_id):
+    target = urllib.parse.quote(f'https://www.youtube.com/watch?v={video_id}', safe='')
+    raw = fetch_text(f'https://www.youtube.com/oembed?url={target}&format=json', timeout=20)
+    return json.loads(raw)
+
+
+def clipzui_discover(video_id):
+    meta = youtube_oembed(video_id)
+    title = str(meta.get('title') or '').strip()
+    if not title:
+        raise RuntimeError('oEmbed title unavailable')
+    search_url = 'https://www.clipzui.cc/?q=' + urllib.parse.quote_plus(title)
+    page = fetch_text(search_url, timeout=35)
+    decoded = html.unescape(page)
+    links = []
+    for href in re.findall(r'href=["\']([^"\']+)["\']', decoded, flags=re.I):
+        full = urllib.parse.urljoin(search_url, href)
+        if full not in links:
+            links.append(full)
+    media = []
+    for u in re.findall(r'https?://[^\s"\'<>]+', decoded, flags=re.I):
+        low = u.lower()
+        if any(x in low for x in ('.mp4', 'videoplayback', 'googlevideo', 'download')) and u not in media:
+            media.append(u)
+    marker = title.lower()[:48]
+    pos = decoded.lower().find(marker)
+    snippet = decoded[max(0, pos - 2500):pos + 6000] if pos >= 0 else decoded[:8000]
+    return {'title': title, 'searchUrl': search_url, 'links': links[:120], 'media': media[:40], 'snippet': snippet}
 
 
 def cobalt_resolve(url):
@@ -46,9 +86,15 @@ def cobalt_resolve(url):
 
 
 @app.get('/api/youtube-source')
-def youtube_source(v: str = Query(..., min_length=6, max_length=20)):
+def youtube_source(v: str = Query(..., min_length=6, max_length=20), debug: bool = False):
     url = f'https://www.youtube.com/watch?v={v}'
     errors = []
+
+    if debug:
+        try:
+            return JSONResponse({'ok': True, 'clipzui': clipzui_discover(v)})
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f'clipzui debug: {exc}')
 
     try:
         direct, api, filename = cobalt_resolve(url)
