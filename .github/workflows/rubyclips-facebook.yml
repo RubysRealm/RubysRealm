@@ -29,15 +29,11 @@ jobs:
           python-version: '3.12'
 
       - name: Install source tools
-        env:
-          IMMEDIATE_TRIGGER: ${{ github.event_name == 'push' && '1' || '0' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-dejavu-core
           pip install -r rubyclips/facebook_requirements.txt
-          if [ "$IMMEDIATE_TRIGGER" != '1' ]; then
-            python -m playwright install chromium --with-deps
-          fi
+          python -m playwright install chromium --with-deps
 
       - name: Resolve and render next unposted source
         env:
@@ -46,20 +42,20 @@ jobs:
           set -euo pipefail
           rm -rf rubyclips/facebook_output rubyclips/facebook_work
           if [ "$IMMEDIATE_TRIGGER" = '1' ]; then
-            echo "Immediate trigger: using same-creator fallback directly."
-            python rubyclips/creator_fallback_pipeline.py
-            test -s rubyclips/facebook_output/manifest.json
-            exit 0
+            echo "Immediate trigger: trying configured Facebook source first."
+          else
+            echo "Scheduled/manual run: trying configured Facebook source first."
           fi
 
-          echo "Scheduled run: trying configured Facebook source first."
           python rubyclips/facebook_pipeline.py || true
           if [ -f rubyclips/facebook_output/manifest.json ]; then exit 0; fi
+
           echo "Trying expanded Facebook discovery."
           rm -rf rubyclips/facebook_output rubyclips/facebook_work
           python rubyclips/facebook_discovery_fallback.py || true
           if [ -f rubyclips/facebook_output/manifest.json ]; then exit 0; fi
-          echo "Using same-creator fallback feed."
+
+          echo "Facebook sources unavailable; trying same-creator fallback feed."
           rm -rf rubyclips/facebook_output rubyclips/facebook_work
           python rubyclips/creator_fallback_pipeline.py
           test -s rubyclips/facebook_output/manifest.json
