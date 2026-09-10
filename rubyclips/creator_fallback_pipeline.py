@@ -5,6 +5,8 @@ import json
 import math
 import re
 import shutil
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 from yt_dlp import YoutubeDL
@@ -19,6 +21,8 @@ CHANNEL_URL = 'https://www.youtube.com/@bushcraftinthewildforest/videos'
 CHANNEL_HANDLE = '@bushcraftinthewildforest'
 MAX_SECONDS = 585.0
 BGUTIL_SERVER_HOME = str(Path.home() / 'bgutil-ytdlp-pot-provider' / 'server')
+SOURCE_RESOLVER = 'https://rubys-realm.vercel.app/api/youtube-source'
+UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36'
 
 SPEC = importlib.util.spec_from_file_location('rubyclips_facebook_pipeline', HERE / 'facebook_pipeline.py')
 base = importlib.util.module_from_spec(SPEC)
@@ -87,7 +91,52 @@ def list_channel_entries():
     return entries
 
 
+def relay_download(entry):
+    resolver_url = SOURCE_RESOLVER + '?' + urllib.parse.urlencode({'v': entry['id']})
+    req = urllib.request.Request(resolver_url, headers={'User-Agent': UA, 'Accept': 'application/json'})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        resolved = json.loads(resp.read().decode('utf-8', 'replace'))
+    if not resolved.get('ok'):
+        raise RuntimeError('Source resolver did not return a usable result.')
+
+    media_url = str(resolved.get('directUrl') or '').strip()
+    if not media_url:
+        raise RuntimeError('Source resolver returned no muxed media URL.')
+
+    source = str(resolved.get('source') or 'relay')
+    if source.startswith('invidious:'):
+        api = source.split(':', 1)[1].rstrip('/')
+        parsed = urllib.parse.urlparse(media_url)
+        params = urllib.parse.parse_qs(parsed.query)
+        itag = str((params.get('itag') or ['18'])[0])
+        media_url = api + '/latest_version?' + urllib.parse.urlencode({
+            'id': entry['id'],
+            'itag': itag,
+            'local': 'true',
+        })
+
+    dest = WORK / 'source.mp4'
+    req = urllib.request.Request(media_url, headers={'User-Agent': UA, 'Accept': '*/*'})
+    with urllib.request.urlopen(req, timeout=90) as resp, dest.open('wb') as out:
+        while True:
+            chunk = resp.read(1024 * 1024)
+            if not chunk:
+                break
+            out.write(chunk)
+    if not dest.exists() or dest.stat().st_size < 100000:
+        raise RuntimeError('Relay source download was unexpectedly small.')
+    return dest, source
+
+
 def download(entry):
+    for f in WORK.glob('source.*'):
+        if f.is_file():
+            f.unlink()
+    try:
+        return relay_download(entry)
+    except Exception as relay_error:
+        print(f'Relay source failed, falling back to direct clients: {relay_error}')
+
     template = str(WORK / 'source.%(ext)s')
     last_error = None
     for client in ('mweb', 'android_vr', 'web_embedded'):
@@ -115,7 +164,7 @@ def download(entry):
         files = [f for f in WORK.glob('source.*') if f.is_file()]
         if files:
             return max(files, key=lambda f: f.stat().st_size), client
-    raise RuntimeError(f'Creator-feed download failed for all supported clients: {last_error}')
+    raise RuntimeError(f'Creator-feed download failed for relay and all supported clients: {last_error}')
 
 
 def caption(title, index, total):
