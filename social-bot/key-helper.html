@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<meta name="theme-color" content="#0b0d10"/>
+<title>Social Bot Key Helper</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;color-scheme:dark;--bg:#0b0d10;--card:#15181d;--line:#292e36;--muted:#929aa7;--ok:#36d17c}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#fff}main{max-width:620px;margin:auto;padding:calc(24px + env(safe-area-inset-top)) 14px calc(40px + env(safe-area-inset-bottom))}.card{background:var(--card);border:1px solid var(--line);border-radius:17px;padding:16px}h1{font-size:28px;margin:0 0 8px}.small{font-size:13px;color:var(--muted);line-height:1.45}input,button{font:inherit;border-radius:11px;border:1px solid var(--line);min-height:50px}input{background:#0f1216;color:#fff;padding:0 12px;width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}button{background:#fff;color:#08090a;font-weight:750;padding:0 15px;width:100%;margin-top:10px}.secondary{background:#20242b;color:#fff}.ok{color:var(--ok);font-weight:700;margin-top:10px}.steps{margin-top:18px}.steps div{margin:9px 0}
+</style>
+</head>
+<body><main><section class="card">
+<h1>Social Bot Key</h1>
+<p class="small">Generate one 32-byte Social Bot key, copy it, then use the exact same key in both places. This helper does not send the key anywhere; generation and copying happen in your browser.</p>
+<input id="key" type="text" readonly autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Tap GENERATE KEY"/>
+<button id="generate">GENERATE KEY</button>
+<button id="copy" class="secondary">COPY KEY</button>
+<div id="status" class="small"></div>
+<div class="steps small">
+<div><b>1.</b> Tap GENERATE KEY.</div>
+<div><b>2.</b> Tap COPY KEY.</div>
+<div><b>3.</b> Return to Social Bot → One-time Phone Setup → paste it into <b>Social Bot key</b> → SAVE ON THIS PHONE.</div>
+<div><b>4.</b> In GitHub Actions Secrets, create/update <b>SOCIALBOT_KEY</b> with the exact same value.</div>
+</div>
+</section></main>
+<script>
+const key=document.getElementById('key'),status=document.getElementById('status');
+function b64u(bytes){let s='';bytes.forEach(b=>s+=String.fromCharCode(b));return btoa(s).replaceAll('+','-').replaceAll('/','_').replaceAll('=','')}
+document.getElementById('generate').onclick=()=>{key.value=b64u(crypto.getRandomValues(new Uint8Array(32)));status.textContent='Key generated on this phone.'};
+document.getElementById('copy').onclick=async()=>{if(!key.value){status.textContent='Generate a key first.';return}try{await navigator.clipboard.writeText(key.value);status.textContent='✓ Key copied';}catch(e){key.focus();key.select();key.setSelectionRange(0,key.value.length);try{document.execCommand('copy');status.textContent='✓ Key copied';}catch{status.textContent='Select the visible key and tap Copy.'}}};
+</script></body></html>
