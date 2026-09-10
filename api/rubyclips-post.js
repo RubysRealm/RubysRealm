@@ -6,7 +6,7 @@ const RUBYCLIPS_CHANNEL_ID = '6a9f6ff1cd8b9c702c2897e1';
 const RUBYCLIPS_CHANNEL = 'rubaradaclips';
 const FACEBOOK_PLATFORM = 'rubyclips-facebook-repost-v1';
 const CREATOR_PLATFORM = 'rubyclips-creator-feed-v1';
-const CREATOR_CHANNEL = '@PolissyaBushcraft';
+const CREATOR_CHANNEL = '@bushcraftinthewildforest';
 const MAX_AUTO_SECONDS = 599;
 const PUBLISHER_VERSION = 'existing-video-parts-v6-creator-fallback';
 
