@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: rubyclips-facebook-pipeline
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   upload-next-oldest:
@@ -36,10 +36,19 @@ jobs:
           python -m playwright install chromium --with-deps
 
       - name: Resolve and render next unposted source
+        env:
+          IMMEDIATE_TRIGGER: ${{ github.event_name == 'push' && '1' || '0' }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
           rm -rf rubyclips/facebook_output rubyclips/facebook_work
-          echo "Trying configured Facebook source first."
+          if [ "$IMMEDIATE_TRIGGER" = '1' ]; then
+            echo "Immediate trigger: using same-creator fallback directly."
+            python rubyclips/creator_fallback_pipeline.py
+            test -s rubyclips/facebook_output/manifest.json
+            exit 0
+          fi
+
+          echo "Scheduled run: trying configured Facebook source first."
           python rubyclips/facebook_pipeline.py || true
           if [ -f rubyclips/facebook_output/manifest.json ]; then exit 0; fi
           echo "Trying expanded Facebook discovery."
