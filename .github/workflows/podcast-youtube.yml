@@ -1,0 +1,136 @@
+name: Ruby's Realm podcast repurpose to YouTube Shorts
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 4,10,16,22 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rubys-realm-podcast-youtube
+  cancel-in-progress: false
+
+jobs:
+  publish-next-youtube-short:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout Ruby's Realm
+        uses: actions/checkout@v4
+
+      - name: Confirm YouTube is connected in Buffer
+        run: |
+          set -euo pipefail
+          URL='https://rubys-realm.vercel.app/api/youtube-auto-post'
+          RESPONSE="$(curl -sS --max-time 30 "$URL" || true)"
+          printf '%s\n' "$RESPONSE"
+          printf '%s' "$RESPONSE" > /tmp/youtube-connection.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/youtube-connection.json'))
+          assert d.get('ok') and d.get('connected'), d
+          print('YouTube connected:', d.get('channel', {}).get('displayName') or d.get('channel', {}).get('name'))
+          PY
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install video tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          python -m pip install --upgrade pip yt-dlp
+
+      - name: Prepare next YouTube-safe vertical part
+        env:
+          PODCAST_VIDEO_SOURCE: https://www.dailymotion.com/user/MasterPOVYT/videos
+          YOUTUBE_PART_TARGET_SECONDS: '165'
+          YOUTUBE_PART_MIN_SECONDS: '105'
+          YOUTUBE_PART_MAX_SECONDS: '178'
+        run: python podcast_repurpose/youtube_repurpose.py
+
+      - name: Publish prepared part as deterministic release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          MANIFEST='podcast_repurpose/output/manifest.json'
+          STORY_ID="$(python -c 'import json,re; s=str(json.load(open("podcast_repurpose/output/manifest.json"))["source"]["id"]); print(re.sub(r"[^A-Za-z0-9_-]+","-",s))')"
+          PART_NUMBER="$(python -c 'import json; print(json.load(open("podcast_repurpose/output/manifest.json"))["part"])')"
+          TAG="youtube-part-${STORY_ID}-${PART_NUMBER}"
+          VIDEO="$(find podcast_repurpose/output -maxdepth 1 -name '*.mp4' -print -quit)"
+          test -n "$VIDEO"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; reusing it for duplicate-safe retry."
+          else
+            gh release create "$TAG" "$VIDEO" "$MANIFEST#manifest.json" \
+              --title "Ruby's Realm YouTube Short ${GITHUB_RUN_NUMBER}" \
+              --notes "Vertical YouTube-safe story part generated independently from the TikTok queue."
+          fi
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+
+      - name: Send part to YouTube through existing Buffer API connection
+        run: |
+          set -euo pipefail
+          URL="https://rubys-realm.vercel.app/api/youtube-auto-post?tag=${RELEASE_TAG}"
+          RESPONSE="$(curl -sS --max-time 90 "$URL" || true)"
+          printf '%s\n' "$RESPONSE"
+          printf '%s' "$RESPONSE" > /tmp/youtube-post.json
+          POST_ID="$(python -c 'import json; d=json.load(open("/tmp/youtube-post.json")); assert d.get("ok"), d; print(d.get("postId") or "")')"
+          test -n "$POST_ID"
+          echo "YOUTUBE_POST_ID=$POST_ID" >> "$GITHUB_ENV"
+
+      - name: Advance only after Buffer accepts the YouTube Short
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          state_path=Path('podcast_repurpose/youtube_state.json')
+          state=json.loads(state_path.read_text()) if state_path.exists() else {'current':None,'completed':[]}
+          manifest=json.loads(Path('podcast_repurpose/output/manifest.json').read_text())
+          src=manifest['source']
+          part=int(manifest['part'])
+          total=int(manifest['totalParts'])
+
+          if part >= total:
+              done=list(state.get('completed') or [])
+              if src['id'] not in done:
+                  done.append(src['id'])
+              state['completed']=done[-500:]
+              state['current']=None
+          else:
+              state['current']={
+                  'id':src['id'],
+                  'url':src['url'],
+                  'title':src['title'],
+                  'next_part':part+1,
+                  'total_parts':total
+              }
+
+          state_path.write_text(json.dumps(state,indent=2)+'\n')
+          PY
+          git config user.name 'rubys-realm-youtube-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add podcast_repurpose/youtube_state.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'Advance YouTube Shorts queue after Buffer acceptance [skip ci]'
+            git pull --rebase origin main
+            git push
+          fi
+
+      - name: Keep a short-term copy of the prepared YouTube part
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: podcast-youtube-${{ github.run_number }}
+          path: |
+            podcast_repurpose/output/*.mp4
+            podcast_repurpose/output/*.json
+          if-no-files-found: warn
+          retention-days: 2
