@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Check Facebook authorization
         id: auth
@@ -46,16 +48,21 @@ jobs:
         if: steps.auth.outputs.ready == 'true' || github.event_name == 'push'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          sudo apt-get install -y ffmpeg
 
-      - name: Discover and render next rights-clear part
+      - name: Select viral source and render clean video
         if: steps.auth.outputs.ready == 'true' || github.event_name == 'push'
         env:
           FB_PART_TARGET_SECONDS: '165'
           FB_PART_MAX_SECONDS: '180'
           FB_MIN_SOURCE_SECONDS: '12'
           FB_MAX_SOURCE_SECONDS: '1200'
-        run: python viral_facebook/discover_and_render.py
+          FB_MIN_VIRAL_DOWNLOADS: '10000'
+          FB_TREND_MIN_DOWNLOADS: '1000'
+          FB_MIN_SOURCE_SHORT_SIDE: '360'
+          FB_MIN_SOURCE_LONG_SIDE: '640'
+          FB_MIN_SOURCE_BYTES_PER_SECOND: '45000'
+        run: python viral_facebook/facebook_pipeline.py
 
       - name: Resolve Facebook Page identity
         if: steps.auth.outputs.ready == 'true'
@@ -88,36 +95,29 @@ jobs:
           set -euo pipefail
           VIDEO="$(find viral_facebook/output -maxdepth 1 -name '*.mp4' -print -quit)"
           test -n "$VIDEO"
-          python - <<'PY' > /tmp/facebook-caption.txt
+          python - <<'PY' > /tmp/facebook-description.txt
           import json
           m=json.load(open('viral_facebook/output/manifest.json'))
-          title=str(m['title']).strip()
-          part=int(m['part'])
-          total=int(m['totalParts'])
-          credit=str(m.get('credit') or '').strip()
-          lines=[f'{title} | Part {part}/{total}' if total > 1 else title]
-          if credit:
-              lines += ['', credit]
-          lines += ['', '#video #trending']
-          print('\n'.join(lines))
+          print(str(m.get('postDescription') or m.get('title') or ''))
           PY
-          TITLE="$(python -c 'import json; print(str(json.load(open("viral_facebook/output/manifest.json"))["title"])[:255])')"
-          CAPTION="$(cat /tmp/facebook-caption.txt)"
-          curl -sS --fail-with-body -X POST \
+          DESCRIPTION="$(cat /tmp/facebook-description.txt)"
+          HTTP_CODE="$(curl -sS -o /tmp/facebook-publish.json -w '%{http_code}' -X POST \
             "https://graph-video.facebook.com/v26.0/${FACEBOOK_PAGE_ID}/videos" \
             --form "source=@${VIDEO};type=video/mp4" \
-            --form-string "title=${TITLE}" \
-            --form-string "description=${CAPTION}" \
+            --form-string "description=${DESCRIPTION}" \
             --form-string "published=true" \
-            --form-string "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}" \
-            > /tmp/facebook-publish.json
+            --form-string "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}")"
+          echo "Facebook upload HTTP status: ${HTTP_CODE}"
           cat /tmp/facebook-publish.json
+          export HTTP_CODE
           python - <<'PY'
-          import json
+          import json, os
           d=json.load(open('/tmp/facebook-publish.json'))
+          code=int(os.environ.get('HTTP_CODE') or 0)
           video_id=str(d.get('id') or '').strip()
-          if not video_id:
-              raise SystemExit(f'Facebook did not return a video id: {d}')
+          if code < 200 or code >= 300 or not video_id:
+              err=d.get('error') or d
+              raise SystemExit(f'Facebook upload failed (HTTP {code}): {err}')
           print('Facebook accepted video:', video_id)
           PY
 
