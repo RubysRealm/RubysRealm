@@ -1,6 +1,7 @@
 (() => {
   const TOKEN_KEY = 'socialbot_gh_token';
   const KEY_KEY = 'socialbot_key';
+  const SETUP_KEY = 'socialbot_setup_v2';
   const RAW_STATUS = 'https://raw.githubusercontent.com/RubysRealm/RubysRealm/social-bot-state/social-bot/status.json';
   const nativeFetch = window.fetch.bind(window);
 
@@ -13,6 +14,9 @@
   function ensureControlKey() {
     let key = localStorage.getItem(KEY_KEY) || '';
     if (!key) {
+      // If Safari ever loses only the key, force a one-time reauthorization instead
+      // of pretending the old backend authorization is still usable.
+      if (localStorage.getItem(SETUP_KEY) === 'done') localStorage.removeItem(SETUP_KEY);
       key = b64u(crypto.getRandomValues(new Uint8Array(32)));
       localStorage.setItem(KEY_KEY, key);
     }
@@ -110,6 +114,18 @@
     };
   }
 
+  function friendlyError(code) {
+    const messages = {
+      PUBLIC_SOCIAL_PLATFORM_BLOCKED: 'That URL is a blocked public social platform. Use the private/owned test domain this tool is configured for.',
+      CHROME_NOT_FOUND_ON_WORKER: 'The remote browser is unavailable on the worker.',
+      GMAIL_VERIFICATION_NOT_CONFIGURED: 'Email verification is not configured yet. Complete Email Verification Setup below.',
+      VERIFICATION_EMAIL_NOT_CONFIGURED: 'Email verification is not configured yet. Complete Email Verification Setup below.',
+      CONNECT_SITE_FIRST: 'Connect the private test site before starting this task.',
+      STATE_DECRYPT_FAILED: 'The encrypted worker state does not match the saved key. Re-run one-time authorization.'
+    };
+    return messages[code] || `Worker error: ${code}`;
+  }
+
   async function refreshHealth() {
     try {
       const r = await nativeFetch(RAW_STATUS + '?phonefix=' + Date.now(), { cache: 'no-store' });
@@ -125,7 +141,7 @@
         const pill = document.getElementById('connectPill');
         if (scan) {
           scan.className = 'small badtext';
-          scan.textContent = `Worker error: ${s.lastMessage}`;
+          scan.textContent = friendlyError(s.lastMessage);
         }
         if (pill) {
           pill.className = 'pill bad';
@@ -145,6 +161,7 @@
 
   // The page elements already exist before the original inline script runs.
   wireTokenPersistence();
+  ensureControlKey();
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
   else init();
 })();
