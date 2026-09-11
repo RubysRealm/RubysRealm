@@ -105,7 +105,7 @@ jobs:
           DESCRIPTION="$(cat /tmp/facebook-description.txt)"
 
           START_CODE="$(curl -sS -o /tmp/facebook-start.json -w '%{http_code}' -X POST \
-            "https://graph.facebook.com/v26.0/${FACEBOOK_PAGE_ID}/video_reels" \
+            "https://graph.facebook.com/v26.0/me/video_reels" \
             --form-string "upload_phase=start" \
             --form-string "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}")"
           echo "Facebook Reel start HTTP status: ${START_CODE}"
@@ -142,7 +142,7 @@ jobs:
           PY
 
           FINISH_CODE="$(curl -sS -o /tmp/facebook-finish.json -w '%{http_code}' -X POST \
-            "https://graph.facebook.com/v26.0/${FACEBOOK_PAGE_ID}/video_reels" \
+            "https://graph.facebook.com/v26.0/me/video_reels" \
             --form-string "upload_phase=finish" \
             --form-string "video_id=${VIDEO_ID}" \
             --form-string "video_state=PUBLISHED" \
