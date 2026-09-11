@@ -1,0 +1,139 @@
+name: Autonomous rights-clear Facebook videos
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '20 0,6,12,18 * * *'
+  push:
+    paths:
+      - 'viral_facebook/manual.trigger'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: viral-facebook-autonomous
+  cancel-in-progress: false
+
+jobs:
+  publish-next-facebook-part:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check Facebook authorization
+        id: auth
+        env:
+          FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
+        run: |
+          if [ -n "${FACEBOOK_PAGE_ACCESS_TOKEN:-}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "Facebook authorization is present."
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Facebook authorization is not configured."
+          fi
+
+      - name: Set up Python
+        if: steps.auth.outputs.ready == 'true' || github.event_name == 'push'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install video tools
+        if: steps.auth.outputs.ready == 'true' || github.event_name == 'push'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Select viral source and render clean video
+        if: steps.auth.outputs.ready == 'true' || github.event_name == 'push'
+        env:
+          FB_PART_TARGET_SECONDS: '75'
+          FB_PART_MAX_SECONDS: '90'
+          FB_MIN_SOURCE_SECONDS: '12'
+          FB_MAX_SOURCE_SECONDS: '1200'
+          FB_MIN_VIRAL_DOWNLOADS: '10000'
+          FB_TREND_MIN_DOWNLOADS: '1000'
+          FB_MIN_SOURCE_SHORT_SIDE: '360'
+          FB_MIN_SOURCE_LONG_SIDE: '640'
+          FB_MIN_SOURCE_BYTES_PER_SECOND: '45000'
+        run: python viral_facebook/facebook_pipeline.py
+
+      - name: Publish Reel to managed Facebook Page
+        if: steps.auth.outputs.ready == 'true'
+        env:
+          FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
+          FACEBOOK_TARGET_PAGE: "Ruby’s Realm"
+        run: python viral_facebook/facebook_publish.py
+
+      - name: Advance Facebook queue only after acceptance
+        if: steps.auth.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+          state_path=Path('viral_facebook/state.json')
+          state=json.loads(state_path.read_text()) if state_path.exists() else {'current':None,'completed':[],'rights_history':[]}
+          state.setdefault('completed',[])
+          state.setdefault('rights_history',[])
+          manifest=json.loads(Path('viral_facebook/output/manifest.json').read_text())
+          published=json.load(open('/tmp/facebook-publish.json'))
+          video_id=str(published.get('id') or '').strip()
+          if not video_id:
+              raise SystemExit('Refusing to advance without Facebook acceptance.')
+          key=str(manifest['sourceKey'])
+          part=int(manifest['part'])
+          total=int(manifest['totalParts'])
+          current=state.get('current') or {}
+          candidate=current.get('candidate') or {}
+          if str(candidate.get('key') or '') != key:
+              raise SystemExit('Facebook source lock mismatch; refusing to advance.')
+          if not any(str(x.get('sourceKey') or '') == key for x in state['rights_history'] if isinstance(x,dict)):
+              state['rights_history'].append({'sourceKey':key,'title':manifest.get('title'),'evidence':manifest.get('rightsEvidence')})
+              state['rights_history']=state['rights_history'][-250:]
+          if part >= total:
+              done=[str(x) for x in state.get('completed') or []]
+              if key not in done:
+                  done.append(key)
+              state['completed']=done[-1000:]
+              state['current']=None
+          else:
+              current['next_part']=part+1
+              current['total_parts']=total
+              state['current']=current
+          state['lastPost']={
+              'sourceKey':key,
+              'part':part,
+              'totalParts':total,
+              'facebookVideoId':video_id,
+              'facebookPageId':published.get('pageId'),
+              'postedAt':datetime.now(timezone.utc).isoformat()
+          }
+          state_path.write_text(json.dumps(state,indent=2)+'\n')
+          PY
+          git config user.name "viral-facebook-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git pull --rebase --autostash origin main
+          git add viral_facebook/state.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Advance autonomous Facebook queue after accepted upload [skip ci]"
+            git push
+          fi
+
+      - name: Save source and rights diagnostics
+        if: always() && (steps.auth.outputs.ready == 'true' || github.event_name == 'push')
+        uses: actions/upload-artifact@v4
+        with:
+          name: viral-facebook-${{ github.run_number }}
+          path: |
+            viral_facebook/output/manifest.json
+            viral_facebook/output/rights-evidence.json
+          if-no-files-found: warn
+          retention-days: 30
