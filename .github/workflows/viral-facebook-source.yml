@@ -1,0 +1,47 @@
+name: Continuous Facebook viral source discovery
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: viral-facebook-source-discovery
+  cancel-in-progress: true
+
+jobs:
+  refresh-source-queue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Refresh viral/semi-viral queue
+        env:
+          FB_MIN_VIRAL_DOWNLOADS: '10000'
+          FB_TREND_MIN_DOWNLOADS: '1000'
+          FB_DISCOVERY_QUEUE_SIZE: '40'
+        run: python viral_facebook/source_queue.py
+
+      - name: Save refreshed queue
+        run: |
+          set -euo pipefail
+          git config user.name "viral-facebook-source-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git pull --rebase --autostash origin main
+          git add viral_facebook/discovery_queue.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Refresh viral Facebook source queue [skip ci]"
+            git push
+          fi
