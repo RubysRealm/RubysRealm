@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import datetime as dt
 import json
-import math
 import os
 import shutil
 import subprocess
@@ -46,6 +45,8 @@ def load_queue():
 
 
 def candidate_is_viral(candidate):
+    if candidate.get("niche") not in ("ai", "funny"):
+        return False
     try:
         downloads = int(candidate.get("downloads") or 0)
     except Exception:
@@ -76,12 +77,16 @@ def select_source(state):
     current = state.get("current")
     if current and current.get("candidate"):
         candidate = current["candidate"]
-        source = base.download(candidate)
-        info = base.probe(source)
-        ok, reason = source_quality_ok(source, info)
-        if not ok:
-            raise RuntimeError(f"Locked Facebook source no longer passes quality: {reason}")
-        return candidate, source, info, int(current.get("next_part") or 1), True
+        if candidate.get("niche") not in ("ai", "funny"):
+            state["current"] = None
+            base.save_state(state)
+        else:
+            source = base.download(candidate)
+            info = base.probe(source)
+            ok, reason = source_quality_ok(source, info)
+            if not ok:
+                raise RuntimeError(f"Locked Facebook source no longer passes quality: {reason}")
+            return candidate, source, info, int(current.get("next_part") or 1), True
 
     completed = {str(x) for x in state.get("completed") or []}
     _, queue = load_queue()
@@ -100,6 +105,9 @@ def select_source(state):
             candidate.setdefault("trend_term", queued.get("trend_term"))
             candidate.setdefault("viral_signal", queued.get("viral_signal"))
             candidate.setdefault("score", queued.get("score"))
+            candidate.setdefault("niche", queued.get("niche"))
+            if candidate.get("niche") not in ("ai", "funny"):
+                continue
             if candidate.get("license_kind") not in ("public-domain", "cc-by"):
                 continue
             source = base.download(candidate)
@@ -112,7 +120,7 @@ def select_source(state):
         except Exception as e:
             errors.append(f"{queued.get('key')}: {e}")
 
-    raise RuntimeError("No queued viral/semi-viral source passed rights and quality checks. " + "; ".join(errors[-6:]))
+    raise RuntimeError("No queued viral AI/funny source passed rights and quality checks. " + "; ".join(errors[-6:]))
 
 
 def render_clean(source, part_index, segments):
@@ -120,7 +128,6 @@ def render_clean(source, part_index, segments):
     duration = max(1.0, end - start)
     out = OUT / f"facebook-part-{part_index:02d}-of-{len(segments):02d}.mp4"
 
-    # Clean full-screen presentation: no generated title card or captions on the video.
     vf = (
         "[0:v]split=2[bg0][fg0];"
         "[bg0]scale=1080:1920:force_original_aspect_ratio=increase,"
@@ -144,25 +151,18 @@ def render_clean(source, part_index, segments):
 
 
 def post_description(candidate, part, total):
-    title = base.safe_text(candidate.get("title") or candidate.get("title_hint"), "Trending video")
-    source_desc = base.safe_text(candidate.get("description"))
-    lines = []
-
-    if source_desc:
-        if len(source_desc) > 520:
-            source_desc = source_desc[:517].rsplit(" ", 1)[0] + "..."
-        lines.append(source_desc)
+    niche = candidate.get("niche")
+    if niche == "ai":
+        lines = ["AI is getting out of hand 😂"]
+        tags = "#ai #aivideo #funny #viral"
     else:
-        lines.append(title)
+        lines = ["This got me 😂"]
+        tags = "#funny #comedy #viral #lol"
 
     if total > 1:
         lines += ["", f"Part {part} of {total}"]
 
-    credit = base.credit_line(candidate)
-    if credit:
-        lines += ["", credit]
-
-    lines += ["", "#viralvideo #trending #video"]
+    lines += ["", tags]
     return "\n".join(lines).strip()
 
 
@@ -194,6 +194,7 @@ def main():
         "licenseUrl": candidate.get("license_url"),
         "rights": candidate.get("rights"),
         "viralSignal": candidate.get("viral_signal"),
+        "contentNiche": candidate.get("niche"),
         "discoveredTrend": candidate.get("trend_term") or None,
         "score": candidate.get("score"),
         "downloads": downloads,
@@ -205,7 +206,7 @@ def main():
 
     title = base.safe_text(candidate.get("title") or candidate.get("title_hint"), "Trending video")
     manifest = {
-        "pipeline": "rubysrealm-autonomous-viral-rights-clear-facebook-v2",
+        "pipeline": "rubysrealm-autonomous-viral-ai-funny-facebook-v3",
         "sourceKey": candidate["key"],
         "title": title,
         "part": part_index,
@@ -217,11 +218,12 @@ def main():
         "height": out_info["height"],
         "file": video.name,
         "postDescription": post_description(candidate, part_index, len(segments)),
-        "credit": base.credit_line(candidate),
         "rightsEvidence": evidence,
         "qualityPassed": True,
         "viralThresholdPassed": True,
+        "contentFocusPassed": True,
         "cleanVideoNoOverlayText": True,
+        "sourceCreditShownInDescription": False,
     }
     (OUT / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (OUT / "rights-evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
