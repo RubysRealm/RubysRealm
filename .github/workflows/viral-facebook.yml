@@ -19,7 +19,6 @@ jobs:
   publish-next-facebook-part:
     runs-on: ubuntu-latest
     timeout-minutes: 90
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -38,19 +37,19 @@ jobs:
           fi
 
       - name: Set up Python
-        if: steps.auth.outputs.ready == 'true'
+        if: steps.auth.outputs.ready == 'true' || github.event_name == 'push'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: Install video tools
-        if: steps.auth.outputs.ready == 'true'
+        if: steps.auth.outputs.ready == 'true' || github.event_name == 'push'
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-dejavu-core
 
       - name: Discover and render next rights-clear part
-        if: steps.auth.outputs.ready == 'true'
+        if: steps.auth.outputs.ready == 'true' || github.event_name == 'push'
         env:
           FB_PART_TARGET_SECONDS: '165'
           FB_PART_MAX_SECONDS: '180'
@@ -130,7 +129,6 @@ jobs:
           import json
           from datetime import datetime, timezone
           from pathlib import Path
-
           state_path=Path('viral_facebook/state.json')
           state=json.loads(state_path.read_text()) if state_path.exists() else {'current':None,'completed':[],'rights_history':[]}
           state.setdefault('completed',[])
@@ -140,7 +138,6 @@ jobs:
           video_id=str(published.get('id') or '').strip()
           if not video_id:
               raise SystemExit('Refusing to advance without Facebook acceptance.')
-
           key=str(manifest['sourceKey'])
           part=int(manifest['part'])
           total=int(manifest['totalParts'])
@@ -148,15 +145,9 @@ jobs:
           candidate=current.get('candidate') or {}
           if str(candidate.get('key') or '') != key:
               raise SystemExit('Facebook source lock mismatch; refusing to advance.')
-
           if not any(str(x.get('sourceKey') or '') == key for x in state['rights_history'] if isinstance(x,dict)):
-              state['rights_history'].append({
-                  'sourceKey': key,
-                  'title': manifest.get('title'),
-                  'evidence': manifest.get('rightsEvidence'),
-              })
+              state['rights_history'].append({'sourceKey':key,'title':manifest.get('title'),'evidence':manifest.get('rightsEvidence')})
               state['rights_history']=state['rights_history'][-250:]
-
           if part >= total:
               done=[str(x) for x in state.get('completed') or []]
               if key not in done:
@@ -167,17 +158,9 @@ jobs:
               current['next_part']=part+1
               current['total_parts']=total
               state['current']=current
-
-          state['lastPost']={
-              'sourceKey':key,
-              'part':part,
-              'totalParts':total,
-              'facebookVideoId':video_id,
-              'postedAt':datetime.now(timezone.utc).isoformat(),
-          }
+          state['lastPost']={'sourceKey':key,'part':part,'totalParts':total,'facebookVideoId':video_id,'postedAt':datetime.now(timezone.utc).isoformat()}
           state_path.write_text(json.dumps(state,indent=2)+'\n')
           PY
-
           git config user.name "viral-facebook-bot"
           git config user.email "actions@users.noreply.github.com"
           git pull --rebase --autostash origin main
@@ -188,7 +171,7 @@ jobs:
           fi
 
       - name: Save source and rights diagnostics
-        if: always() && steps.auth.outputs.ready == 'true'
+        if: always() && (steps.auth.outputs.ready == 'true' || github.event_name == 'push')
         uses: actions/upload-artifact@v4
         with:
           name: viral-facebook-${{ github.run_number }}
