@@ -13,75 +13,43 @@ jobs:
   diagnose:
     runs-on: ubuntu-latest
     steps:
-      - name: Inspect Page publishing capabilities
+      - name: Inspect token identity and managed Pages
         env:
           FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
         run: |
           set -u
 
+          echo 'TOKEN_IDENTITY:'
           curl -sS -G \
             --data-urlencode 'fields=id,name' \
             --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}" \
-            'https://graph.facebook.com/v26.0/me' > /tmp/me.json
-          echo 'IDENTITY:'; cat /tmp/me.json; echo
+            'https://graph.facebook.com/v26.0/me' || true
+          echo
 
-          PAGE_ID="$(python - <<'PY'
-          import json
-          d=json.load(open('/tmp/me.json'))
-          print(d.get('id') or '')
-          PY
-          )"
-          test -n "$PAGE_ID" || exit 1
-
-          echo 'PERMISSIONS:'
+          echo 'TOKEN_PERMISSIONS:'
           curl -sS -G \
             --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}" \
             'https://graph.facebook.com/v26.0/me/permissions' || true
           echo
 
-          for FIELD in category fan_count is_published link username; do
-            echo "PAGE_FIELD_${FIELD}:"
-            curl -sS -G \
-              --data-urlencode "fields=${FIELD}" \
-              --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}" \
-              "https://graph.facebook.com/v26.0/${PAGE_ID}" || true
-            echo
-          done
-
-          echo 'FEED_READ_TEST:'
           curl -sS -G \
-            --data-urlencode 'limit=1' \
+            --data-urlencode 'fields=id,name,tasks' \
             --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}" \
-            "https://graph.facebook.com/v26.0/${PAGE_ID}/feed" || true
-          echo
+            'https://graph.facebook.com/v26.0/me/accounts' > /tmp/accounts.json || true
 
-          echo 'CREATE_CONTENT_TEST_UNPUBLISHED_FEED:'
-          FEED_CODE="$(curl -sS -o /tmp/feed-create.json -w '%{http_code}' -X POST \
-            "https://graph.facebook.com/v26.0/${PAGE_ID}/feed" \
-            --data-urlencode 'message=Ruby Realm API capability test' \
-            --data-urlencode 'published=false' \
-            --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}")"
-          echo "Feed create HTTP status: ${FEED_CODE}"
-          cat /tmp/feed-create.json; echo
-
-          POST_ID="$(python - <<'PY'
+          echo 'MANAGED_PAGES:'
+          python - <<'PY'
           import json
-          try: d=json.load(open('/tmp/feed-create.json'))
-          except Exception: d={}
-          print(d.get('id') or '')
+          try:
+              d=json.load(open('/tmp/accounts.json'))
+          except Exception as e:
+              print({'parse_error': str(e)})
+              raise SystemExit
+          if d.get('error'):
+              print(json.dumps({'error': d['error']}, indent=2))
+          else:
+              rows=[]
+              for x in d.get('data') or []:
+                  rows.append({'id':x.get('id'),'name':x.get('name'),'tasks':x.get('tasks')})
+              print(json.dumps({'data':rows},indent=2))
           PY
-          )"
-          if [ -n "$POST_ID" ]; then
-            echo 'CLEANUP_TEST_POST:'
-            curl -sS -X DELETE \
-              --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}" \
-              "https://graph.facebook.com/v26.0/${POST_ID}" || true
-            echo
-          fi
-
-          echo 'REELS_START_TEST:'
-          curl -sS -X POST \
-            "https://graph.facebook.com/v26.0/${PAGE_ID}/video_reels" \
-            --data-urlencode 'upload_phase=start' \
-            --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}" || true
-          echo
