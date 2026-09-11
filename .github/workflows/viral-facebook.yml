@@ -53,8 +53,8 @@ jobs:
       - name: Select viral source and render clean video
         if: steps.auth.outputs.ready == 'true' || github.event_name == 'push'
         env:
-          FB_PART_TARGET_SECONDS: '165'
-          FB_PART_MAX_SECONDS: '180'
+          FB_PART_TARGET_SECONDS: '75'
+          FB_PART_MAX_SECONDS: '90'
           FB_MIN_SOURCE_SECONDS: '12'
           FB_MAX_SOURCE_SECONDS: '1200'
           FB_MIN_VIRAL_DOWNLOADS: '10000'
@@ -87,7 +87,7 @@ jobs:
           print('Facebook Page authorized:', page_name or page_id)
           PY
 
-      - name: Publish video directly to Facebook
+      - name: Publish Reel directly to Facebook
         if: steps.auth.outputs.ready == 'true'
         env:
           FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
@@ -95,30 +95,72 @@ jobs:
           set -euo pipefail
           VIDEO="$(find viral_facebook/output -maxdepth 1 -name '*.mp4' -print -quit)"
           test -n "$VIDEO"
+          FILE_SIZE="$(stat -c%s "$VIDEO")"
+
           python - <<'PY' > /tmp/facebook-description.txt
           import json
           m=json.load(open('viral_facebook/output/manifest.json'))
           print(str(m.get('postDescription') or m.get('title') or ''))
           PY
           DESCRIPTION="$(cat /tmp/facebook-description.txt)"
-          HTTP_CODE="$(curl -sS -o /tmp/facebook-publish.json -w '%{http_code}' -X POST \
-            "https://graph-video.facebook.com/v26.0/${FACEBOOK_PAGE_ID}/videos" \
-            --form "source=@${VIDEO};type=video/mp4" \
-            --form-string "description=${DESCRIPTION}" \
-            --form-string "published=true" \
+
+          START_CODE="$(curl -sS -o /tmp/facebook-start.json -w '%{http_code}' -X POST \
+            "https://graph.facebook.com/v26.0/${FACEBOOK_PAGE_ID}/video_reels" \
+            --form-string "upload_phase=start" \
             --form-string "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}")"
-          echo "Facebook upload HTTP status: ${HTTP_CODE}"
-          cat /tmp/facebook-publish.json
-          export HTTP_CODE
+          echo "Facebook Reel start HTTP status: ${START_CODE}"
+          cat /tmp/facebook-start.json
+          export START_CODE
+          python - <<'PY' > /tmp/facebook-reel-session.env
+          import json, os
+          d=json.load(open('/tmp/facebook-start.json'))
+          code=int(os.environ.get('START_CODE') or 0)
+          video_id=str(d.get('video_id') or '').strip()
+          upload_url=str(d.get('upload_url') or '').strip()
+          if code < 200 or code >= 300 or not video_id or not upload_url:
+              raise SystemExit(f'Facebook Reel start failed (HTTP {code}): {d.get("error") or d}')
+          print(f'VIDEO_ID={video_id}')
+          print(f'UPLOAD_URL={upload_url}')
+          PY
+          source /tmp/facebook-reel-session.env
+
+          UPLOAD_CODE="$(curl -sS -o /tmp/facebook-upload.json -w '%{http_code}' -X POST \
+            "${UPLOAD_URL}" \
+            -H "Authorization: OAuth ${FACEBOOK_PAGE_ACCESS_TOKEN}" \
+            -H "offset: 0" \
+            -H "file_size: ${FILE_SIZE}" \
+            --data-binary "@${VIDEO}")"
+          echo "Facebook Reel upload HTTP status: ${UPLOAD_CODE}"
+          cat /tmp/facebook-upload.json
+          export UPLOAD_CODE
           python - <<'PY'
           import json, os
-          d=json.load(open('/tmp/facebook-publish.json'))
-          code=int(os.environ.get('HTTP_CODE') or 0)
-          video_id=str(d.get('id') or '').strip()
-          if code < 200 or code >= 300 or not video_id:
-              err=d.get('error') or d
-              raise SystemExit(f'Facebook upload failed (HTTP {code}): {err}')
-          print('Facebook accepted video:', video_id)
+          d=json.load(open('/tmp/facebook-upload.json'))
+          code=int(os.environ.get('UPLOAD_CODE') or 0)
+          if code < 200 or code >= 300 or d.get('success') is not True:
+              raise SystemExit(f'Facebook Reel binary upload failed (HTTP {code}): {d.get("error") or d}')
+          PY
+
+          FINISH_CODE="$(curl -sS -o /tmp/facebook-finish.json -w '%{http_code}' -X POST \
+            "https://graph.facebook.com/v26.0/${FACEBOOK_PAGE_ID}/video_reels" \
+            --form-string "upload_phase=finish" \
+            --form-string "video_id=${VIDEO_ID}" \
+            --form-string "video_state=PUBLISHED" \
+            --form-string "description=${DESCRIPTION}" \
+            --form-string "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}")"
+          echo "Facebook Reel finish HTTP status: ${FINISH_CODE}"
+          cat /tmp/facebook-finish.json
+          export FINISH_CODE VIDEO_ID
+          python - <<'PY'
+          import json, os
+          d=json.load(open('/tmp/facebook-finish.json'))
+          code=int(os.environ.get('FINISH_CODE') or 0)
+          video_id=str(os.environ.get('VIDEO_ID') or '').strip()
+          if code < 200 or code >= 300 or d.get('success') is not True or not video_id:
+              raise SystemExit(f'Facebook Reel publish failed (HTTP {code}): {d.get("error") or d}')
+          with open('/tmp/facebook-publish.json','w') as f:
+              json.dump({'id': video_id, 'success': True, 'finish': d}, f)
+          print('Facebook accepted Reel:', video_id)
           PY
 
       - name: Advance Facebook queue only after acceptance
