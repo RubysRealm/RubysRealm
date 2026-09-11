@@ -1,1 +1,1 @@
-refresh-brainrot-ai-now
+refresh-brainrot-ai-fast-now
