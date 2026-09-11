@@ -19,13 +19,11 @@ jobs:
         run: |
           set -u
 
-          echo 'IDENTITY:'
           curl -sS -G \
             --data-urlencode 'fields=id,name' \
             --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}" \
             'https://graph.facebook.com/v26.0/me' > /tmp/me.json
-          cat /tmp/me.json
-          echo
+          echo 'IDENTITY:'; cat /tmp/me.json; echo
 
           PAGE_ID="$(python - <<'PY'
           import json
@@ -33,10 +31,7 @@ jobs:
           print(d.get('id') or '')
           PY
           )"
-          if [ -z "$PAGE_ID" ]; then
-            echo 'No Page ID resolved; stopping diagnostics.'
-            exit 1
-          fi
+          test -n "$PAGE_ID" || exit 1
 
           echo 'PERMISSIONS:'
           curl -sS -G \
@@ -44,52 +39,49 @@ jobs:
             'https://graph.facebook.com/v26.0/me/permissions' || true
           echo
 
-          echo 'PAGE_METADATA:'
-          curl -sS -G \
-            --data-urlencode 'metadata=1' \
-            --data-urlencode 'fields=id,name' \
-            --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}" \
-            "https://graph.facebook.com/v26.0/${PAGE_ID}" || true
-          echo
-
-          echo 'CREATE_CONTENT_TEST_UNPUBLISHED_PHOTO:'
-          python - <<'PY'
-          import base64
-          # 1x1 transparent PNG
-          data='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
-          open('/tmp/capability-test.png','wb').write(base64.b64decode(data))
-          PY
-
-          PHOTO_CODE="$(curl -sS -o /tmp/photo.json -w '%{http_code}' -X POST \
-            "https://graph.facebook.com/v26.0/${PAGE_ID}/photos" \
-            --form "source=@/tmp/capability-test.png;type=image/png" \
-            --form-string 'published=false' \
-            --form-string 'caption=Ruby Realm API capability test' \
-            --form-string "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}")"
-          echo "Photo create HTTP status: ${PHOTO_CODE}"
-          cat /tmp/photo.json
-          echo
-
-          PHOTO_ID="$(python - <<'PY'
-          import json
-          try:
-              d=json.load(open('/tmp/photo.json'))
-          except Exception:
-              d={}
-          print(d.get('id') or '')
-          PY
-          )"
-          if [ -n "$PHOTO_ID" ]; then
-            echo 'CLEANUP_TEST_PHOTO:'
-            curl -sS -X DELETE \
+          for FIELD in category fan_count is_published link username; do
+            echo "PAGE_FIELD_${FIELD}:"
+            curl -sS -G \
+              --data-urlencode "fields=${FIELD}" \
               --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}" \
-              "https://graph.facebook.com/v26.0/${PHOTO_ID}" || true
+              "https://graph.facebook.com/v26.0/${PAGE_ID}" || true
             echo
-          fi
+          done
 
-          echo 'REELS_EDGE_READ_TEST:'
+          echo 'FEED_READ_TEST:'
           curl -sS -G \
             --data-urlencode 'limit=1' \
             --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}" \
-            "https://graph.facebook.com/v26.0/${PAGE_ID}/video_reels" || true
+            "https://graph.facebook.com/v26.0/${PAGE_ID}/feed" || true
+          echo
+
+          echo 'CREATE_CONTENT_TEST_UNPUBLISHED_FEED:'
+          FEED_CODE="$(curl -sS -o /tmp/feed-create.json -w '%{http_code}' -X POST \
+            "https://graph.facebook.com/v26.0/${PAGE_ID}/feed" \
+            --data-urlencode 'message=Ruby Realm API capability test' \
+            --data-urlencode 'published=false' \
+            --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}")"
+          echo "Feed create HTTP status: ${FEED_CODE}"
+          cat /tmp/feed-create.json; echo
+
+          POST_ID="$(python - <<'PY'
+          import json
+          try: d=json.load(open('/tmp/feed-create.json'))
+          except Exception: d={}
+          print(d.get('id') or '')
+          PY
+          )"
+          if [ -n "$POST_ID" ]; then
+            echo 'CLEANUP_TEST_POST:'
+            curl -sS -X DELETE \
+              --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}" \
+              "https://graph.facebook.com/v26.0/${POST_ID}" || true
+            echo
+          fi
+
+          echo 'REELS_START_TEST:'
+          curl -sS -X POST \
+            "https://graph.facebook.com/v26.0/${PAGE_ID}/video_reels" \
+            --data-urlencode 'upload_phase=start' \
+            --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}" || true
           echo
