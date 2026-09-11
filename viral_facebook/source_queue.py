@@ -15,9 +15,17 @@ MIN_DOWNLOADS = int(os.getenv("FB_MIN_VIRAL_DOWNLOADS", "10000"))
 TREND_MIN_DOWNLOADS = int(os.getenv("FB_TREND_MIN_DOWNLOADS", "1000"))
 QUEUE_SIZE = int(os.getenv("FB_DISCOVERY_QUEUE_SIZE", "40"))
 
-NICHES = [
-    "funny", "animals", "wildlife", "fails", "amazing",
-    "caught on camera", "dashcam", "satisfying", "sports", "unexpected",
+# Hard content focus. Do not fall back to random generic viral uploads.
+AI_TERMS = [
+    "ai video", "ai generated", "artificial intelligence", "generative ai",
+    "text to video", "ai animation", "ai animals", "ai comedy", "ai meme",
+    "sora ai", "veo ai", "runway ai",
+]
+
+FUNNY_TERMS = [
+    "funny", "comedy", "hilarious", "funny animals", "funny pets",
+    "funny fail", "fails", "prank", "meme", "unexpected funny",
+    "funny moments", "comedy video",
 ]
 
 
@@ -42,6 +50,10 @@ def candidate_from_doc(doc, *, trend_term="", niche=""):
     if kind not in ("public-domain", "cc-by"):
         return None
 
+    # Only AI or funny/comedy candidates are allowed into the queue.
+    if niche not in ("ai", "funny"):
+        return None
+
     try:
         downloads = int(doc.get("downloads") or 0)
     except Exception:
@@ -57,8 +69,8 @@ def candidate_from_doc(doc, *, trend_term="", niche=""):
     age_days = base.parse_iso_age_days(doc.get("publicdate") or doc.get("date"))
     popularity = min(900.0, math.log10(downloads + 1) * 135.0)
     recency = max(0.0, 140.0 - min(140.0, age_days / 5.0))
-    trend_bonus = 280.0 if trend_match else 0.0
-    niche_bonus = 90.0 if niche else 0.0
+    trend_bonus = 220.0 if trend_match else 0.0
+    niche_bonus = 170.0 if niche == "ai" else 140.0
     score = round(popularity + recency + trend_bonus + niche_bonus, 2)
 
     if downloads >= 250000:
@@ -86,8 +98,6 @@ def build_queue():
     completed = {str(x) for x in state.get("completed") or []}
     current = state.get("current") or {}
     current_key = str((current.get("candidate") or {}).get("key") or "")
-
-    trends = base.trend_terms()
     merged = {}
 
     def add_docs(docs, *, trend_term="", niche=""):
@@ -101,39 +111,48 @@ def build_queue():
             if old is None or float(c["score"]) > float(old.get("score") or 0):
                 merged[c["key"]] = c
 
-    for term in trends[:8]:
-        clean = term.replace('"', " ").strip()
-        if not clean:
-            continue
-        queries = [
-            f'mediatype:movies AND licenseurl:* AND title:("{clean}")',
-            f'mediatype:movies AND licenseurl:* AND subject:("{clean}")',
-        ]
-        for q in queries:
-            try:
-                add_docs(base.archive_search(q, rows=25), trend_term=clean)
-            except Exception:
-                pass
+    # Search only the two content lanes the Page should publish.
+    for niche, terms in (("ai", AI_TERMS), ("funny", FUNNY_TERMS)):
+        for term in terms:
+            clean = term.replace('"', " ").strip()
+            if not clean:
+                continue
+            queries = [
+                f'mediatype:movies AND licenseurl:* AND title:("{clean}")',
+                f'mediatype:movies AND licenseurl:* AND subject:("{clean}")',
+                f'mediatype:movies AND licenseurl:* AND description:("{clean}")',
+            ]
+            for q in queries:
+                try:
+                    add_docs(base.archive_search(q, rows=30), niche=niche)
+                except Exception:
+                    pass
 
-    for niche in NICHES:
-        clean = niche.replace('"', " ")
-        q = f'mediatype:movies AND licenseurl:* AND (title:("{clean}") OR subject:("{clean}"))'
-        try:
-            add_docs(base.archive_search(q, rows=20), niche=niche)
-        except Exception:
-            pass
-
+    # A trend only gets a bonus if it already matches the AI/funny focus.
     try:
-        add_docs(base.archive_search("mediatype:movies AND licenseurl:*", rows=80))
+        trends = base.trend_terms()
     except Exception:
-        pass
+        trends = []
+    focus_terms = [("ai", x) for x in AI_TERMS] + [("funny", x) for x in FUNNY_TERMS]
+    for trend in trends[:12]:
+        t = str(trend or "").lower().strip()
+        for niche, term in focus_terms:
+            if term in t or t in term:
+                clean = str(trend).replace('"', " ").strip()
+                if clean:
+                    try:
+                        q = f'mediatype:movies AND licenseurl:* AND (title:("{clean}") OR subject:("{clean}"))'
+                        add_docs(base.archive_search(q, rows=25), trend_term=clean, niche=niche)
+                    except Exception:
+                        pass
+                break
 
     candidates = sorted(merged.values(), key=lambda x: float(x.get("score") or 0), reverse=True)[:QUEUE_SIZE]
     payload = {
         "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
         "minimumDownloads": MIN_DOWNLOADS,
         "trendMinimumDownloads": TREND_MIN_DOWNLOADS,
-        "trends": trends[:8],
+        "contentFocus": ["viral-ai", "viral-funny"],
         "candidates": candidates,
     }
     QUEUE_PATH.write_text(json.dumps(payload, indent=2) + "\n")
@@ -143,7 +162,7 @@ def build_queue():
         "generatedAt": payload["generatedAt"],
     }, indent=2))
     if not candidates:
-        raise RuntimeError("No rights-clear viral/semi-viral candidates met the popularity threshold.")
+        raise RuntimeError("No rights-clear viral AI/funny candidates met the popularity threshold.")
 
 
 if __name__ == "__main__":
