@@ -15,18 +15,55 @@ MIN_DOWNLOADS = int(os.getenv("FB_MIN_VIRAL_DOWNLOADS", "10000"))
 TREND_MIN_DOWNLOADS = int(os.getenv("FB_TREND_MIN_DOWNLOADS", "1000"))
 QUEUE_SIZE = int(os.getenv("FB_DISCOVERY_QUEUE_SIZE", "40"))
 
-# Hard content focus. Do not fall back to random generic viral uploads.
-AI_TERMS = [
-    "ai video", "ai generated", "artificial intelligence", "generative ai",
-    "text to video", "ai animation", "ai animals", "ai comedy", "ai meme",
-    "sora ai", "veo ai", "runway ai",
+# Source, do not generate. Keep this lane tightly focused on the current
+# surreal/brainrot AI style the Page wants: birds, fruit-head people,
+# strange AI characters and short absurd AI stories.
+BRAINROT_TERMS = [
+    "brainrot", "brain rot", "italian brainrot", "ai brainrot",
+    "ai bird", "ai birds", "ai animal", "ai animals",
+    "ai fruit", "fruit head", "fruit people", "fruit person",
+    "ai character", "ai characters", "ai story", "ai stories",
+    "ai meme", "ai memes", "surreal ai", "weird ai",
+    "funny ai", "ai comedy", "ai generated funny", "ai animation",
 ]
 
-FUNNY_TERMS = [
-    "funny", "comedy", "hilarious", "funny animals", "funny pets",
-    "funny fail", "fails", "prank", "meme", "unexpected funny",
-    "funny moments", "comedy video",
+BRAINROT_MARKERS = [
+    "brainrot", "brain rot", "italian brainrot", "ai brainrot",
+    "ai bird", "ai birds", "ai animal", "ai animals",
+    "ai fruit", "fruit head", "fruit people", "fruit person",
+    "ai character", "ai characters", "ai story", "ai stories",
+    "ai meme", "ai memes", "surreal ai", "weird ai",
+    "funny ai", "ai comedy", "ai generated", "ai-generated", "ai animation",
 ]
+
+# Reject obvious advertisements, branded/company content, long-form media,
+# interviews and other material that is not the desired short AI-brainrot lane.
+REJECT_MARKERS = [
+    "advertisement", "commercial", "sponsored", "sponsor", "promo",
+    "promotion", "brand", "company", "product", "logo", "campaign",
+    "trailer", "interview", "podcast", "news", "episode", "full movie",
+    "movie", "film", "dvd", "television", "tv show", "music video",
+    "official video", "gameplay", "review", "unboxing", "tutorial",
+    "capcut", "template", "fetish", "bondage", "adult",
+]
+
+
+def _text(value):
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple, set)):
+        return " ".join(_text(x) for x in value)
+    if isinstance(value, dict):
+        return " ".join(f"{k} {_text(v)}" for k, v in value.items())
+    return str(value)
+
+
+def doc_blob(doc):
+    parts = [
+        doc.get("identifier"), doc.get("title"), doc.get("subject"),
+        doc.get("description"), doc.get("creator"), doc.get("collection"),
+    ]
+    return " ".join(_text(x) for x in parts).lower()
 
 
 def load_state():
@@ -41,7 +78,7 @@ def load_state():
     return state
 
 
-def candidate_from_doc(doc, *, trend_term="", niche=""):
+def candidate_from_doc(doc, *, trend_term="", search_term=""):
     identifier = str(doc.get("identifier") or "").strip()
     if not identifier:
         return None
@@ -50,8 +87,10 @@ def candidate_from_doc(doc, *, trend_term="", niche=""):
     if kind not in ("public-domain", "cc-by"):
         return None
 
-    # Only AI or funny/comedy candidates are allowed into the queue.
-    if niche not in ("ai", "funny"):
+    blob = doc_blob(doc)
+    if not any(marker in blob for marker in BRAINROT_MARKERS):
+        return None
+    if any(marker in blob for marker in REJECT_MARKERS):
         return None
 
     try:
@@ -67,11 +106,17 @@ def candidate_from_doc(doc, *, trend_term="", niche=""):
         return None
 
     age_days = base.parse_iso_age_days(doc.get("publicdate") or doc.get("date"))
+    # Brainrot/AI trend content should be recent rather than old films that happen
+    # to mention AI-related words in metadata.
+    if age_days > 900:
+        return None
+
     popularity = min(900.0, math.log10(downloads + 1) * 135.0)
-    recency = max(0.0, 140.0 - min(140.0, age_days / 5.0))
+    recency = max(0.0, 220.0 - min(220.0, age_days / 2.5))
     trend_bonus = 220.0 if trend_match else 0.0
-    niche_bonus = 170.0 if niche == "ai" else 140.0
-    score = round(popularity + recency + trend_bonus + niche_bonus, 2)
+    style_bonus = 220.0
+    specificity_bonus = 70.0 if any(x in blob for x in ("bird", "fruit", "brainrot", "brain rot")) else 0.0
+    score = round(popularity + recency + trend_bonus + style_bonus + specificity_bonus, 2)
 
     if downloads >= 250000:
         signal = "high-downloads"
@@ -87,7 +132,9 @@ def candidate_from_doc(doc, *, trend_term="", niche=""):
         "title_hint": base.safe_text(doc.get("title"), identifier),
         "downloads": downloads,
         "trend_term": trend_term,
-        "niche": niche,
+        "search_term": search_term,
+        "niche": "ai",
+        "style": "brainrot-ai",
         "viral_signal": signal,
         "score": score,
     }
@@ -100,9 +147,9 @@ def build_queue():
     current_key = str((current.get("candidate") or {}).get("key") or "")
     merged = {}
 
-    def add_docs(docs, *, trend_term="", niche=""):
+    def add_docs(docs, *, trend_term="", search_term=""):
         for doc in docs:
-            c = candidate_from_doc(doc, trend_term=trend_term, niche=niche)
+            c = candidate_from_doc(doc, trend_term=trend_term, search_term=search_term)
             if not c:
                 continue
             if c["key"] in completed or c["key"] == current_key:
@@ -111,48 +158,44 @@ def build_queue():
             if old is None or float(c["score"]) > float(old.get("score") or 0):
                 merged[c["key"]] = c
 
-    # Search only the two content lanes the Page should publish.
-    for niche, terms in (("ai", AI_TERMS), ("funny", FUNNY_TERMS)):
-        for term in terms:
-            clean = term.replace('"', " ").strip()
-            if not clean:
-                continue
-            queries = [
-                f'mediatype:movies AND licenseurl:* AND title:("{clean}")',
-                f'mediatype:movies AND licenseurl:* AND subject:("{clean}")',
-                f'mediatype:movies AND licenseurl:* AND description:("{clean}")',
-            ]
-            for q in queries:
-                try:
-                    add_docs(base.archive_search(q, rows=30), niche=niche)
-                except Exception:
-                    pass
+    for term in BRAINROT_TERMS:
+        clean = term.replace('"', " ").strip()
+        if not clean:
+            continue
+        queries = [
+            f'mediatype:movies AND licenseurl:* AND title:("{clean}")',
+            f'mediatype:movies AND licenseurl:* AND subject:("{clean}")',
+            f'mediatype:movies AND licenseurl:* AND description:("{clean}")',
+        ]
+        for q in queries:
+            try:
+                add_docs(base.archive_search(q, rows=40), search_term=clean)
+            except Exception:
+                pass
 
-    # A trend only gets a bonus if it already matches the AI/funny focus.
     try:
         trends = base.trend_terms()
     except Exception:
         trends = []
-    focus_terms = [("ai", x) for x in AI_TERMS] + [("funny", x) for x in FUNNY_TERMS]
     for trend in trends[:12]:
         t = str(trend or "").lower().strip()
-        for niche, term in focus_terms:
-            if term in t or t in term:
-                clean = str(trend).replace('"', " ").strip()
-                if clean:
-                    try:
-                        q = f'mediatype:movies AND licenseurl:* AND (title:("{clean}") OR subject:("{clean}"))'
-                        add_docs(base.archive_search(q, rows=25), trend_term=clean, niche=niche)
-                    except Exception:
-                        pass
-                break
+        if not t:
+            continue
+        if any(marker in t for marker in ("ai", "brainrot", "bird", "fruit")):
+            clean = str(trend).replace('"', " ").strip()
+            try:
+                q = f'mediatype:movies AND licenseurl:* AND (title:("{clean}") OR subject:("{clean}") OR description:("{clean}"))'
+                add_docs(base.archive_search(q, rows=30), trend_term=clean, search_term=clean)
+            except Exception:
+                pass
 
     candidates = sorted(merged.values(), key=lambda x: float(x.get("score") or 0), reverse=True)[:QUEUE_SIZE]
     payload = {
         "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
         "minimumDownloads": MIN_DOWNLOADS,
         "trendMinimumDownloads": TREND_MIN_DOWNLOADS,
-        "contentFocus": ["viral-ai", "viral-funny"],
+        "contentFocus": ["viral-ai-brainrot", "ai-birds", "fruit-head-people", "surreal-ai-stories"],
+        "rejectAdsBrands": True,
         "candidates": candidates,
     }
     QUEUE_PATH.write_text(json.dumps(payload, indent=2) + "\n")
@@ -162,7 +205,7 @@ def build_queue():
         "generatedAt": payload["generatedAt"],
     }, indent=2))
     if not candidates:
-        raise RuntimeError("No rights-clear viral AI/funny candidates met the popularity threshold.")
+        raise RuntimeError("No rights-clear viral AI-brainrot candidates met the popularity/style filters.")
 
 
 if __name__ == "__main__":
