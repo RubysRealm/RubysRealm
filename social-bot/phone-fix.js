@@ -2,6 +2,7 @@
   const TOKEN_KEY = 'socialbot_gh_token';
   const KEY_KEY = 'socialbot_key';
   const SETUP_KEY = 'socialbot_setup_v2';
+  const GMAIL_SAVED_KEY = 'socialbot_gmail_saved_at';
   const RAW_STATUS = 'https://raw.githubusercontent.com/RubysRealm/RubysRealm/social-bot-state/social-bot/status.json';
   const nativeFetch = window.fetch.bind(window);
 
@@ -14,8 +15,6 @@
   function ensureControlKey() {
     let key = localStorage.getItem(KEY_KEY) || '';
     if (!key) {
-      // If Safari ever loses only the key, force a one-time reauthorization instead
-      // of pretending the old backend authorization is still usable.
       if (localStorage.getItem(SETUP_KEY) === 'done') localStorage.removeItem(SETUP_KEY);
       key = b64u(crypto.getRandomValues(new Uint8Array(32)));
       localStorage.setItem(KEY_KEY, key);
@@ -23,8 +22,6 @@
     return key;
   }
 
-  // Make setup retries idempotent. The same phone key is re-installed instead of
-  // silently rotating encryption whenever the user retries authorization.
   window.fetch = async (input, init = {}) => {
     const url = typeof input === 'string' ? input : (input?.url || '');
     if (url.includes('/api/social-bot-setup') && String(init.method || 'GET').toUpperCase() === 'POST') {
@@ -100,6 +97,7 @@
         });
         const data = await r.json().catch(() => ({}));
         if (!r.ok || !data.ok) throw new Error(data.message || `Setup failed (${r.status}).`);
+        localStorage.setItem(GMAIL_SAVED_KEY, String(Date.now()));
         document.getElementById('gmailAppPasswordInput').value = '';
         msg.className = 'small oktext';
         msg.textContent = '✓ Email verification setup saved.';
@@ -132,10 +130,17 @@
       if (!r.ok) return;
       const s = await r.json();
       const card = document.getElementById('gmailSetupCard');
-      if (card && s.worker?.emailConfigured) card.style.display = 'none';
-      if (card && !s.worker?.emailConfigured) card.style.display = '';
+      if (card) {
+        if (s.worker?.emailConfigured) {
+          localStorage.removeItem(GMAIL_SAVED_KEY);
+          card.style.display = 'none';
+        } else {
+          const savedAt = Number(localStorage.getItem(GMAIL_SAVED_KEY) || 0);
+          const waitingForHeartbeat = savedAt && Date.now() - savedAt < 20 * 60 * 1000;
+          card.style.display = waitingForHeartbeat ? 'none' : '';
+        }
+      }
 
-      // Surface worker failures on the phone page instead of silently returning CONNECT.
       if (s.lastRequestStatus === 'failed' && s.lastMessage) {
         const scan = document.getElementById('scanText');
         const pill = document.getElementById('connectPill');
@@ -159,7 +164,6 @@
     setInterval(refreshHealth, 20000);
   }
 
-  // The page elements already exist before the original inline script runs.
   wireTokenPersistence();
   ensureControlKey();
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
