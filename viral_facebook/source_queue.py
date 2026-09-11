@@ -15,16 +15,11 @@ MIN_DOWNLOADS = int(os.getenv("FB_MIN_VIRAL_DOWNLOADS", "10000"))
 TREND_MIN_DOWNLOADS = int(os.getenv("FB_TREND_MIN_DOWNLOADS", "1000"))
 QUEUE_SIZE = int(os.getenv("FB_DISCOVERY_QUEUE_SIZE", "40"))
 
-# Source, do not generate. Keep this lane tightly focused on the current
-# surreal/brainrot AI style the Page wants: birds, fruit-head people,
-# strange AI characters and short absurd AI stories.
+# Source only. Do not generate. Tight focus on current AI-brainrot style.
 BRAINROT_TERMS = [
-    "brainrot", "brain rot", "italian brainrot", "ai brainrot",
-    "ai bird", "ai birds", "ai animal", "ai animals",
-    "ai fruit", "fruit head", "fruit people", "fruit person",
-    "ai character", "ai characters", "ai story", "ai stories",
-    "ai meme", "ai memes", "surreal ai", "weird ai",
-    "funny ai", "ai comedy", "ai generated funny", "ai animation",
+    "brainrot", "italian brainrot", "ai brainrot", "ai bird",
+    "ai animal", "ai fruit", "fruit people", "ai meme",
+    "surreal ai", "funny ai",
 ]
 
 BRAINROT_MARKERS = [
@@ -36,8 +31,6 @@ BRAINROT_MARKERS = [
     "funny ai", "ai comedy", "ai generated", "ai-generated", "ai animation",
 ]
 
-# Reject obvious advertisements, branded/company content, long-form media,
-# interviews and other material that is not the desired short AI-brainrot lane.
 REJECT_MARKERS = [
     "advertisement", "commercial", "sponsored", "sponsor", "promo",
     "promotion", "brand", "company", "product", "logo", "campaign",
@@ -59,11 +52,9 @@ def _text(value):
 
 
 def doc_blob(doc):
-    parts = [
-        doc.get("identifier"), doc.get("title"), doc.get("subject"),
-        doc.get("description"), doc.get("creator"), doc.get("collection"),
-    ]
-    return " ".join(_text(x) for x in parts).lower()
+    return " ".join(_text(doc.get(k)) for k in (
+        "identifier", "title", "subject", "description", "creator", "collection"
+    )).lower()
 
 
 def load_state():
@@ -106,17 +97,14 @@ def candidate_from_doc(doc, *, trend_term="", search_term=""):
         return None
 
     age_days = base.parse_iso_age_days(doc.get("publicdate") or doc.get("date"))
-    # Brainrot/AI trend content should be recent rather than old films that happen
-    # to mention AI-related words in metadata.
     if age_days > 900:
         return None
 
     popularity = min(900.0, math.log10(downloads + 1) * 135.0)
     recency = max(0.0, 220.0 - min(220.0, age_days / 2.5))
     trend_bonus = 220.0 if trend_match else 0.0
-    style_bonus = 220.0
     specificity_bonus = 70.0 if any(x in blob for x in ("bird", "fruit", "brainrot", "brain rot")) else 0.0
-    score = round(popularity + recency + trend_bonus + style_bonus + specificity_bonus, 2)
+    score = round(popularity + recency + 220.0 + trend_bonus + specificity_bonus, 2)
 
     if downloads >= 250000:
         signal = "high-downloads"
@@ -150,38 +138,28 @@ def build_queue():
     def add_docs(docs, *, trend_term="", search_term=""):
         for doc in docs:
             c = candidate_from_doc(doc, trend_term=trend_term, search_term=search_term)
-            if not c:
-                continue
-            if c["key"] in completed or c["key"] == current_key:
+            if not c or c["key"] in completed or c["key"] == current_key:
                 continue
             old = merged.get(c["key"])
             if old is None or float(c["score"]) > float(old.get("score") or 0):
                 merged[c["key"]] = c
 
+    # One combined Archive query per target instead of three separate searches.
     for term in BRAINROT_TERMS:
         clean = term.replace('"', " ").strip()
-        if not clean:
-            continue
-        queries = [
-            f'mediatype:movies AND licenseurl:* AND title:("{clean}")',
-            f'mediatype:movies AND licenseurl:* AND subject:("{clean}")',
-            f'mediatype:movies AND licenseurl:* AND description:("{clean}")',
-        ]
-        for q in queries:
-            try:
-                add_docs(base.archive_search(q, rows=40), search_term=clean)
-            except Exception:
-                pass
+        try:
+            q = f'mediatype:movies AND licenseurl:* AND (title:("{clean}") OR subject:("{clean}") OR description:("{clean}"))'
+            add_docs(base.archive_search(q, rows=50), search_term=clean)
+        except Exception:
+            pass
 
     try:
         trends = base.trend_terms()
     except Exception:
         trends = []
-    for trend in trends[:12]:
+    for trend in trends[:10]:
         t = str(trend or "").lower().strip()
-        if not t:
-            continue
-        if any(marker in t for marker in ("ai", "brainrot", "bird", "fruit")):
+        if t and any(marker in t for marker in ("ai", "brainrot", "bird", "fruit")):
             clean = str(trend).replace('"', " ").strip()
             try:
                 q = f'mediatype:movies AND licenseurl:* AND (title:("{clean}") OR subject:("{clean}") OR description:("{clean}"))'
@@ -199,11 +177,7 @@ def build_queue():
         "candidates": candidates,
     }
     QUEUE_PATH.write_text(json.dumps(payload, indent=2) + "\n")
-    print(json.dumps({
-        "queued": len(candidates),
-        "top": candidates[:5],
-        "generatedAt": payload["generatedAt"],
-    }, indent=2))
+    print(json.dumps({"queued": len(candidates), "top": candidates[:5], "generatedAt": payload["generatedAt"]}, indent=2))
     if not candidates:
         raise RuntimeError("No rights-clear viral AI-brainrot candidates met the popularity/style filters.")
 
