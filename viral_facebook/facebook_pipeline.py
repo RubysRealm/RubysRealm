@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
 import discover_and_render as base
@@ -44,17 +45,53 @@ def load_queue():
     return payload, candidates
 
 
-def candidate_is_viral(candidate):
+def candidate_is_allowed(candidate):
     if candidate.get("niche") not in ("ai", "funny"):
         return False
+    if candidate.get("license_kind") not in ("public-domain", "cc-by"):
+        return False
+    if candidate.get("provider") == "wikimedia-commons":
+        return str(candidate.get("style") or "").startswith("brainrot-ai")
+
     try:
         downloads = int(candidate.get("downloads") or 0)
     except Exception:
         downloads = 0
     trend = bool(candidate.get("trend_term"))
-    if downloads >= source_queue.MIN_DOWNLOADS:
-        return True
-    return trend and downloads >= source_queue.TREND_MIN_DOWNLOADS
+    min_downloads = int(os.getenv("FB_MIN_VIRAL_DOWNLOADS", "10000"))
+    trend_min = int(os.getenv("FB_TREND_MIN_DOWNLOADS", "1000"))
+    return downloads >= min_downloads or (trend and downloads >= trend_min)
+
+
+def download_candidate(candidate):
+    if candidate.get("provider") != "wikimedia-commons":
+        return base.download(candidate)
+
+    url = str(candidate.get("download_url") or "").strip()
+    if not url:
+        raise RuntimeError("Wikimedia source is missing a download URL.")
+    suffix = Path(str(candidate.get("provider_id") or "source.webm")).suffix or ".webm"
+    out = WORK / f"source{suffix}"
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "RubysRealmFacebookSource/1.0 (sourced public-domain media)"},
+    )
+    with urllib.request.urlopen(req, timeout=120) as resp, out.open("wb") as fh:
+        shutil.copyfileobj(resp, fh)
+    if not out.exists() or out.stat().st_size < 10000:
+        raise RuntimeError("Wikimedia source download was empty or invalid.")
+    return out
+
+
+def resolve_candidate(queued):
+    if queued.get("provider") == "wikimedia-commons":
+        return dict(queued)
+    candidate = base.resolve_candidate(queued)
+    if not candidate:
+        return None
+    for field in ("downloads", "trend_term", "viral_signal", "score", "niche", "style"):
+        candidate.setdefault(field, queued.get(field))
+    return candidate
 
 
 def source_quality_ok(path, info):
@@ -77,11 +114,11 @@ def select_source(state):
     current = state.get("current")
     if current and current.get("candidate"):
         candidate = current["candidate"]
-        if candidate.get("niche") not in ("ai", "funny"):
+        if not candidate_is_allowed(candidate):
             state["current"] = None
             base.save_state(state)
         else:
-            source = base.download(candidate)
+            source = download_candidate(candidate)
             info = base.probe(source)
             ok, reason = source_quality_ok(source, info)
             if not ok:
@@ -96,21 +133,10 @@ def select_source(state):
         if str(queued.get("key") or "") in completed:
             continue
         try:
-            if not candidate_is_viral(queued):
+            candidate = resolve_candidate(queued)
+            if not candidate or not candidate_is_allowed(candidate):
                 continue
-            candidate = base.resolve_candidate(queued)
-            if not candidate:
-                continue
-            candidate.setdefault("downloads", queued.get("downloads"))
-            candidate.setdefault("trend_term", queued.get("trend_term"))
-            candidate.setdefault("viral_signal", queued.get("viral_signal"))
-            candidate.setdefault("score", queued.get("score"))
-            candidate.setdefault("niche", queued.get("niche"))
-            if candidate.get("niche") not in ("ai", "funny"):
-                continue
-            if candidate.get("license_kind") not in ("public-domain", "cc-by"):
-                continue
-            source = base.download(candidate)
+            source = download_candidate(candidate)
             info = base.probe(source)
             ok, reason = source_quality_ok(source, info)
             if not ok:
@@ -120,7 +146,7 @@ def select_source(state):
         except Exception as e:
             errors.append(f"{queued.get('key')}: {e}")
 
-    raise RuntimeError("No queued viral AI/funny source passed rights and quality checks. " + "; ".join(errors[-6:]))
+    raise RuntimeError("No sourced AI brainrot-style candidate passed rights and quality checks. " + "; ".join(errors[-6:]))
 
 
 def render_clean(source, part_index, segments):
@@ -151,17 +177,19 @@ def render_clean(source, part_index, segments):
 
 
 def post_description(candidate, part, total):
-    niche = candidate.get("niche")
-    if niche == "ai":
+    style = str(candidate.get("style") or "")
+    if "bird" in style:
+        lines = ["AI birds are getting out of hand 😂"]
+        tags = "#ai #aivideo #bird #brainrot #viral"
+    elif candidate.get("niche") == "ai":
         lines = ["AI is getting out of hand 😂"]
-        tags = "#ai #aivideo #funny #viral"
+        tags = "#ai #aivideo #brainrot #funny #viral"
     else:
         lines = ["This got me 😂"]
         tags = "#funny #comedy #viral #lol"
 
     if total > 1:
         lines += ["", f"Part {part} of {total}"]
-
     lines += ["", tags]
     return "\n".join(lines).strip()
 
@@ -195,6 +223,7 @@ def main():
         "rights": candidate.get("rights"),
         "viralSignal": candidate.get("viral_signal"),
         "contentNiche": candidate.get("niche"),
+        "style": candidate.get("style"),
         "discoveredTrend": candidate.get("trend_term") or None,
         "score": candidate.get("score"),
         "downloads": downloads,
@@ -204,9 +233,10 @@ def main():
         "capturedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
 
-    title = base.safe_text(candidate.get("title") or candidate.get("title_hint"), "Trending video")
+    title = base.safe_text(candidate.get("title") or candidate.get("title_hint"), "AI video")
     manifest = {
-        "pipeline": "rubysrealm-autonomous-viral-ai-funny-facebook-v3",
+        "pipeline": "rubysrealm-sourced-ai-brainrot-facebook-v4",
+        "sourceMode": "sourced-only",
         "sourceKey": candidate["key"],
         "title": title,
         "part": part_index,
@@ -220,7 +250,6 @@ def main():
         "postDescription": post_description(candidate, part_index, len(segments)),
         "rightsEvidence": evidence,
         "qualityPassed": True,
-        "viralThresholdPassed": True,
         "contentFocusPassed": True,
         "cleanVideoNoOverlayText": True,
         "sourceCreditShownInDescription": False,
