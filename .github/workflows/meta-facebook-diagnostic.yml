@@ -13,19 +13,83 @@ jobs:
   diagnose:
     runs-on: ubuntu-latest
     steps:
-      - name: Inspect granted permissions and Page tasks
+      - name: Inspect Page publishing capabilities
         env:
           FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
         run: |
-          set -euo pipefail
-          echo 'ME:'
+          set -u
+
+          echo 'IDENTITY:'
           curl -sS -G \
-            --data-urlencode 'fields=id,name,tasks' \
+            --data-urlencode 'fields=id,name' \
             --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}" \
-            'https://graph.facebook.com/v26.0/me' || true
+            'https://graph.facebook.com/v26.0/me' > /tmp/me.json
+          cat /tmp/me.json
           echo
+
+          PAGE_ID="$(python - <<'PY'
+          import json
+          d=json.load(open('/tmp/me.json'))
+          print(d.get('id') or '')
+          PY
+          )"
+          if [ -z "$PAGE_ID" ]; then
+            echo 'No Page ID resolved; stopping diagnostics.'
+            exit 1
+          fi
+
           echo 'PERMISSIONS:'
           curl -sS -G \
             --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}" \
             'https://graph.facebook.com/v26.0/me/permissions' || true
+          echo
+
+          echo 'PAGE_METADATA:'
+          curl -sS -G \
+            --data-urlencode 'metadata=1' \
+            --data-urlencode 'fields=id,name' \
+            --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}" \
+            "https://graph.facebook.com/v26.0/${PAGE_ID}" || true
+          echo
+
+          echo 'CREATE_CONTENT_TEST_UNPUBLISHED_PHOTO:'
+          python - <<'PY'
+          import base64
+          # 1x1 transparent PNG
+          data='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+          open('/tmp/capability-test.png','wb').write(base64.b64decode(data))
+          PY
+
+          PHOTO_CODE="$(curl -sS -o /tmp/photo.json -w '%{http_code}' -X POST \
+            "https://graph.facebook.com/v26.0/${PAGE_ID}/photos" \
+            --form "source=@/tmp/capability-test.png;type=image/png" \
+            --form-string 'published=false' \
+            --form-string 'caption=Ruby Realm API capability test' \
+            --form-string "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}")"
+          echo "Photo create HTTP status: ${PHOTO_CODE}"
+          cat /tmp/photo.json
+          echo
+
+          PHOTO_ID="$(python - <<'PY'
+          import json
+          try:
+              d=json.load(open('/tmp/photo.json'))
+          except Exception:
+              d={}
+          print(d.get('id') or '')
+          PY
+          )"
+          if [ -n "$PHOTO_ID" ]; then
+            echo 'CLEANUP_TEST_PHOTO:'
+            curl -sS -X DELETE \
+              --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}" \
+              "https://graph.facebook.com/v26.0/${PHOTO_ID}" || true
+            echo
+          fi
+
+          echo 'REELS_EDGE_READ_TEST:'
+          curl -sS -G \
+            --data-urlencode 'limit=1' \
+            --data-urlencode "access_token=${FACEBOOK_PAGE_ACCESS_TOKEN}" \
+            "https://graph.facebook.com/v26.0/${PAGE_ID}/video_reels" || true
           echo
