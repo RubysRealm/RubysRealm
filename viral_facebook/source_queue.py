@@ -10,41 +10,27 @@ STATE_PATH = DIR / "state.json"
 QUEUE_SIZE = int(os.getenv("FB_DISCOVERY_QUEUE_SIZE", "40"))
 
 # Sourced media only. Generic AI animal footage is intentionally excluded.
-# These gaming clips are hosted on Wikimedia Commons with explicit reuse licenses.
+# ShinRegis is a STYLE REFERENCE ONLY for the Halo/comedic voiceover direction;
+# source media below must carry explicit reuse rights.
 COMMONS_SOURCES = [
     {
         "provider": "wikimedia-commons",
-        "provider_id": "Fallout_4_gameplay_clip.webm",
-        "key": "commons:Fallout_4_gameplay_clip.webm",
-        "title_hint": "Fallout 4 gaming clip",
+        "provider_id": "Halo_4_Xbox_MENA.webm",
+        "key": "commons:Halo_4_Xbox_MENA.webm",
+        "title_hint": "Halo 4 gameplay",
         "niche": "gaming",
-        "style": "viral-gaming",
-        "viral_signal": "gaming-short-form",
-        "score": 5000,
-        "source_url": "https://commons.wikimedia.org/wiki/File:Fallout_4_gameplay_clip.webm",
-        "download_url": "https://commons.wikimedia.org/wiki/Special:Redirect/file/Fallout_4_gameplay_clip.webm",
+        "style": "halo-machinima-voiceover-reference",
+        "viral_signal": "halo-comedy-reel-reference",
+        "score": 10000,
+        "source_url": "https://commons.wikimedia.org/wiki/File%3A%D8%A5%D8%B9%D9%84%D8%A7%D9%86_%D8%A7%D8%B7%D9%84%D8%A7%D9%82_%D9%87%D9%8A%D9%84%D9%88_4_%D9%84%D8%A3%D8%AC%D9%87%D8%B2%D8%A9_%D8%A7%D9%84%D8%AD%D8%A7%D8%B3%D8%A8_%D8%A7%D9%84%D8%B4%D8%AE%D8%B5%D9%8A_-_The_Master_Chief_%D9%85%D8%AC%D9%85%D9%88%D8%B9%D8%A9.webm",
+        "download_url": "https://commons.wikimedia.org/wiki/Special:Redirect/file/%D8%A5%D8%B9%D9%84%D8%A7%D9%86_%D8%A7%D8%B7%D9%84%D8%A7%D9%82_%D9%87%D9%8A%D9%84%D9%88_4_%D9%84%D8%A3%D8%AC%D9%87%D8%B2%D8%A9_%D8%A7%D9%84%D8%AD%D8%A7%D8%B3%D8%A8_%D8%A7%D9%84%D8%B4%D8%AE%D8%B5%D9%8A_-_The_Master_Chief_%D9%85%D8%AC%D9%85%D9%88%D8%B9%D8%A9.webm",
         "license_kind": "cc-by-3.0",
         "license_url": "https://creativecommons.org/licenses/by/3.0/",
-        "rights": "CC BY 3.0; source attribution Xbox México",
-        "creator": "Xbox México",
-        "duration_hint": 17.3,
-    },
-    {
-        "provider": "wikimedia-commons",
-        "provider_id": "PAC-MAN_256_-_Let's_Play_(gameplay).webm",
-        "key": "commons:PAC-MAN_256_gameplay.webm",
-        "title_hint": "PAC-MAN 256 gameplay",
-        "niche": "gaming",
-        "style": "viral-gaming",
-        "viral_signal": "gaming-short-form",
-        "score": 4800,
-        "source_url": "https://commons.wikimedia.org/wiki/File:PAC-MAN_256_-_Let%27s_Play_(gameplay).webm",
-        "download_url": "https://commons.wikimedia.org/wiki/Special:Redirect/file/PAC-MAN_256_-_Let%27s_Play_(gameplay).webm",
-        "license_kind": "cc-by-3.0",
-        "license_url": "https://creativecommons.org/licenses/by/3.0/",
-        "rights": "CC BY 3.0; source attribution BANDAI NAMCO Europe",
-        "creator": "BANDAI NAMCO Europe",
-        "duration_hint": 60.0,
+        "rights": "CC BY 3.0; official Xbox MENA source video on Wikimedia Commons; attribution required",
+        "creator": "Xbox MENA",
+        "duration_hint": 122.0,
+        "reference_creator": "ShinRegis",
+        "reference_url": "https://www.facebook.com/ShinRegis/reels",
     },
     {
         "provider": "wikimedia-commons",
@@ -52,7 +38,7 @@ COMMONS_SOURCES = [
         "key": "commons:OpenArena_0.8.8_gameplay.webm",
         "title_hint": "fast arena shooter gameplay",
         "niche": "gaming",
-        "style": "viral-gaming-shooter",
+        "style": "arena-shooter-fallback",
         "viral_signal": "fast-gameplay-short-form",
         "score": 4600,
         "source_url": "https://commons.wikimedia.org/wiki/File:OpenArena_0.8.8_gameplay.webm",
@@ -66,18 +52,47 @@ COMMONS_SOURCES = [
 ]
 
 def load_state():
-    if not STATE_PATH.exists(): return {"current": None, "completed": []}
-    try: state=json.loads(STATE_PATH.read_text())
-    except Exception: return {"current": None, "completed": []}
-    state.setdefault("current",None); state.setdefault("completed",[]); return state
+    if not STATE_PATH.exists():
+        return {"current": None, "completed": []}
+    try:
+        state = json.loads(STATE_PATH.read_text())
+    except Exception:
+        return {"current": None, "completed": []}
+    state.setdefault("current", None)
+    state.setdefault("completed", [])
+    return state
 
 def build_queue():
-    state=load_state(); completed={str(x) for x in state.get("completed") or []}
-    current=state.get("current") or {}; current_key=str((current.get("candidate") or {}).get("key") or "")
-    candidates=[dict(item) for item in COMMONS_SOURCES if item["key"] not in completed and item["key"] != current_key][:QUEUE_SIZE]
-    payload={"generatedAt":dt.datetime.now(dt.timezone.utc).isoformat(),"contentFocus":["viral-gaming","fast-gameplay","gaming-short-form"],"sourceMode":"sourced-only","rejectAdsBrands":True,"rejectGenericAIAnimals":True,"candidates":candidates}
-    QUEUE_PATH.write_text(json.dumps(payload,indent=2)+"\n")
-    print(json.dumps({"queued":len(candidates),"top":candidates[:3]},indent=2))
-    if not candidates: raise RuntimeError("No unused qualifying sourced gaming candidates are currently available.")
+    state = load_state()
+    completed = {str(x) for x in state.get("completed") or []}
+    current = state.get("current") or {}
+    current_key = str((current.get("candidate") or {}).get("key") or "")
+    candidates = [
+        dict(item)
+        for item in COMMONS_SOURCES
+        if item["key"] not in completed and item["key"] != current_key
+    ][:QUEUE_SIZE]
+    payload = {
+        "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "contentFocus": [
+            "halo-gameplay",
+            "halo-machinima",
+            "comedic-gaming-voiceover-style",
+            "short-form-reels",
+        ],
+        "referenceCreator": "ShinRegis",
+        "referenceUrl": "https://www.facebook.com/ShinRegis/reels",
+        "referenceUse": "style-only",
+        "sourceMode": "sourced-only",
+        "rejectAdsBrands": True,
+        "rejectGenericAIAnimals": True,
+        "rejectGenericUnrelatedGaming": True,
+        "candidates": candidates,
+    }
+    QUEUE_PATH.write_text(json.dumps(payload, indent=2) + "\n")
+    print(json.dumps({"queued": len(candidates), "top": candidates[:3]}, indent=2))
+    if not candidates:
+        raise RuntimeError("No unused qualifying Halo-style sourced gaming candidates are currently available.")
 
-if __name__ == "__main__": build_queue()
+if __name__ == "__main__":
+    build_queue()
