@@ -48,9 +48,9 @@ jobs:
         if: steps.auth.outputs.ready == 'true' || github.event_name == 'push'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
 
-      - name: Select viral source and render clean video
+      - name: Select Halo-style source and render clean video
         if: steps.auth.outputs.ready == 'true' || github.event_name == 'push'
         env:
           FB_PART_TARGET_SECONDS: '75'
@@ -63,6 +63,27 @@ jobs:
           FB_MIN_SOURCE_LONG_SIDE: '640'
           FB_MIN_SOURCE_BYTES_PER_SECOND: '45000'
         run: python viral_facebook/facebook_pipeline.py
+
+      - name: Stage latest Reel asset for native Facebook upload
+        if: steps.auth.outputs.ready == 'true' || github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          FILE="$(python - <<'PY'
+          import json
+          print(json.load(open('viral_facebook/output/manifest.json'))['file'])
+          PY
+          )"
+          cp "viral_facebook/output/$FILE" viral-facebook-halo-ready.mp4
+          TAG='viral-facebook-halo-ready'
+          NOTES='Prepared Ruby’s Realm Facebook Reel. Halo-style reference supplied by the user. Source footage: Xbox MENA via Wikimedia Commons, CC BY 3.0; source credit is burned into the video and repeated in the post description.'
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" viral-facebook-halo-ready.mp4 viral_facebook/output/manifest.json viral_facebook/output/rights-evidence.json --clobber
+          else
+            gh release create "$TAG" viral-facebook-halo-ready.mp4 viral_facebook/output/manifest.json viral_facebook/output/rights-evidence.json --title 'Ruby’s Realm Facebook Halo Reel - ready' --notes "$NOTES"
+          fi
+          echo 'Prepared asset: https://github.com/RubysRealm/RubysRealm/releases/download/viral-facebook-halo-ready/viral-facebook-halo-ready.mp4'
 
       - name: Publish Reel to managed Facebook Page
         if: steps.auth.outputs.ready == 'true'
@@ -135,5 +156,6 @@ jobs:
           path: |
             viral_facebook/output/manifest.json
             viral_facebook/output/rights-evidence.json
+            viral_facebook/output/*.mp4
           if-no-files-found: warn
           retention-days: 30
