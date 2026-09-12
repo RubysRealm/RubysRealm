@@ -41,9 +41,12 @@ def load_queue():
 
 
 def candidate_is_allowed(candidate):
-    if candidate.get("niche") not in ("ai", "funny"): return False
-    if candidate.get("license_kind") not in ("public-domain", "cc-by"): return False
-    if candidate.get("provider") == "wikimedia-commons": return str(candidate.get("style") or "").startswith("brainrot-ai")
+    if candidate.get("niche") not in ("ai", "funny", "gaming"): return False
+    license_kind = str(candidate.get("license_kind") or "").lower()
+    if license_kind not in ("public-domain", "cc-by", "cc-by-3.0", "cc-by-4.0", "gpl-3.0"): return False
+    if candidate.get("provider") == "wikimedia-commons":
+        style = str(candidate.get("style") or "")
+        return style.startswith("brainrot-ai") or style.startswith("viral-gaming")
     try: downloads = int(candidate.get("downloads") or 0)
     except Exception: downloads = 0
     trend = bool(candidate.get("trend_term"))
@@ -56,7 +59,7 @@ def download_candidate(candidate):
     if not url: raise RuntimeError("Wikimedia source is missing a download URL.")
     suffix = Path(str(candidate.get("provider_id") or "source.webm")).suffix or ".webm"
     out = WORK / f"source{suffix}"
-    req = urllib.request.Request(url, headers={"User-Agent":"RubysRealmFacebookSource/1.0 (sourced public-domain media)"})
+    req = urllib.request.Request(url, headers={"User-Agent":"RubysRealmFacebookSource/1.0 (sourced reusable media)"})
     with urllib.request.urlopen(req, timeout=120) as resp, out.open("wb") as fh: shutil.copyfileobj(resp, fh)
     if not out.exists() or out.stat().st_size < 10000: raise RuntimeError("Wikimedia source download was empty or invalid.")
     return out
@@ -71,7 +74,6 @@ def resolve_candidate(queued):
 
 
 def source_quality_ok(path, info):
-    # Source resolution is not a hard failure: render_clean always normalizes/upscales to 1080x1920.
     duration = float(info.get("duration") or 0)
     if duration <= 0: return False, "invalid duration"
     if path.stat().st_size < 10000: return False, "source file too small"
@@ -92,12 +94,14 @@ def select_source(state):
         if str(queued.get("key") or "") in completed: continue
         try:
             candidate=resolve_candidate(queued)
-            if not candidate or not candidate_is_allowed(candidate): continue
+            if not candidate or not candidate_is_allowed(candidate):
+                errors.append(f"{queued.get('key')}: rejected by source policy")
+                continue
             source=download_candidate(candidate); info=base.probe(source); ok,reason=source_quality_ok(source,info)
             if not ok: errors.append(f"{candidate.get('key')}: {reason}"); continue
             return candidate,source,info,1,False
         except Exception as e: errors.append(f"{queued.get('key')}: {e}")
-    raise RuntimeError("No sourced AI brainrot-style candidate passed rights and quality checks. "+"; ".join(errors[-6:]))
+    raise RuntimeError("No suitable reusable sourced candidate passed ingest checks. "+"; ".join(errors[-6:]))
 
 
 def render_clean(source, part_index, segments):
@@ -111,9 +115,12 @@ def render_clean(source, part_index, segments):
 
 def post_description(candidate,part,total):
     style=str(candidate.get("style") or "")
+    creator=base.safe_text(candidate.get("creator"), "")
     if "bird" in style: lines=["AI birds are getting out of hand 😂"]; tags="#ai #aivideo #bird #brainrot #viral"
     elif candidate.get("niche")=="ai": lines=["AI is getting out of hand 😂"]; tags="#ai #aivideo #brainrot #funny #viral"
+    elif candidate.get("niche")=="gaming": lines=["This gameplay is chaos 😂"]; tags="#gaming #gameplay #funny #viral #meme"
     else: lines=["This got me 😂"]; tags="#funny #comedy #viral #lol"
+    if creator: lines += ["", f"Source: {creator}"]
     if total>1: lines += ["",f"Part {part} of {total}"]
     lines += ["",tags]
     return "\n".join(lines).strip()
@@ -127,8 +134,8 @@ def main():
     try: downloads=int(candidate.get("downloads") or 0)
     except Exception: downloads=0
     evidence={"provider":candidate.get("provider"),"providerId":candidate.get("provider_id"),"sourceUrl":candidate.get("source_url"),"downloadUrl":candidate.get("download_url"),"creator":candidate.get("creator"),"licenseKind":candidate.get("license_kind"),"licenseUrl":candidate.get("license_url"),"rights":candidate.get("rights"),"viralSignal":candidate.get("viral_signal"),"contentNiche":candidate.get("niche"),"style":candidate.get("style"),"discoveredTrend":candidate.get("trend_term") or None,"score":candidate.get("score"),"downloads":downloads,"sourceWidth":source_info.get("width"),"sourceHeight":source_info.get("height"),"sourceDuration":round(float(source_info.get("duration") or 0),3),"capturedAt":dt.datetime.now(dt.timezone.utc).isoformat()}
-    title=base.safe_text(candidate.get("title") or candidate.get("title_hint"),"AI video")
-    manifest={"pipeline":"rubysrealm-sourced-ai-brainrot-facebook-v4","sourceMode":"sourced-only","sourceKey":candidate["key"],"title":title,"part":part_index,"totalParts":len(segments),"segmentStart":round(start,3),"segmentEnd":round(end,3),"durationSeconds":round(out_info["duration"],3),"width":out_info["width"],"height":out_info["height"],"file":video.name,"postDescription":post_description(candidate,part_index,len(segments)),"rightsEvidence":evidence,"qualityPassed":True,"contentFocusPassed":True,"cleanVideoNoOverlayText":True,"sourceCreditShownInDescription":False}
+    title=base.safe_text(candidate.get("title") or candidate.get("title_hint"),"Sourced video")
+    manifest={"pipeline":"rubysrealm-sourced-ai-brainrot-facebook-v4","sourceMode":"sourced-only","sourceKey":candidate["key"],"title":title,"part":part_index,"totalParts":len(segments),"segmentStart":round(start,3),"segmentEnd":round(end,3),"durationSeconds":round(out_info["duration"],3),"width":out_info["width"],"height":out_info["height"],"file":video.name,"postDescription":post_description(candidate,part_index,len(segments)),"rightsEvidence":evidence,"qualityPassed":True,"contentFocusPassed":True,"cleanVideoNoOverlayText":True,"sourceCreditShownInDescription":bool(candidate.get("creator"))}
     (OUT/"manifest.json").write_text(json.dumps(manifest,indent=2)+"\n"); (OUT/"rights-evidence.json").write_text(json.dumps(evidence,indent=2)+"\n")
     if not continuing: state["current"]={"candidate":candidate,"next_part":1,"total_parts":len(segments)}; base.save_state(state)
     print(json.dumps(manifest,indent=2))
