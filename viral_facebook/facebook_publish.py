@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -47,16 +48,40 @@ def fail(stage, code, payload):
 
 
 def select_page():
+    # First support a user/system token that can enumerate managed Pages.
     fields = urllib.parse.quote("id,name,access_token,tasks", safe=",")
     code, data = request_json(f"{GRAPH}/me/accounts?fields={fields}", token=BOOTSTRAP_TOKEN)
-    if code < 200 or code >= 300:
-        fail("Managed Page lookup", code, data)
-    rows = data.get("data") or []
-    eligible = [p for p in rows if p.get("access_token") and "CREATE_CONTENT" in (p.get("tasks") or [])]
-    if not eligible:
-        raise RuntimeError("No managed Facebook Page with CREATE_CONTENT access was returned by Meta.")
-    exact = next((p for p in eligible if norm(p.get("name")) == norm(TARGET_PAGE)), None)
-    return exact or eligible[0]
+    if 200 <= code < 300:
+        rows = data.get("data") or []
+        eligible = [p for p in rows if p.get("access_token") and "CREATE_CONTENT" in (p.get("tasks") or [])]
+        exact = next((p for p in eligible if norm(p.get("name")) == norm(TARGET_PAGE)), None)
+        if exact:
+            return exact
+        if eligible:
+            names = ", ".join(str(p.get("name") or p.get("id")) for p in eligible)
+            raise RuntimeError(f"Target Facebook Page {TARGET_PAGE!r} was not returned. Managed Pages: {names}")
+
+    # The configured secret may already be a Page access token. In that case
+    # /me/accounts can be blocked even though direct Page publishing is valid.
+    direct_fields = urllib.parse.quote("id,name,tasks", safe=",")
+    dcode, direct = request_json(f"{GRAPH}/me?fields={direct_fields}", token=BOOTSTRAP_TOKEN)
+    if dcode < 200 or dcode >= 300 or not isinstance(direct, dict) or not direct.get("id"):
+        fail("Direct Page token lookup", dcode, direct)
+    page_name = str(direct.get("name") or "").strip()
+    if TARGET_PAGE and page_name and norm(page_name) != norm(TARGET_PAGE):
+        raise RuntimeError(f"Configured Facebook token resolves to {page_name!r}, not {TARGET_PAGE!r}.")
+    direct["access_token"] = BOOTSTRAP_TOKEN
+    return direct
+
+
+def lookup_permalink(video_id, page_token):
+    fields = urllib.parse.quote("id,permalink_url", safe=",")
+    for _ in range(6):
+        code, data = request_json(f"{GRAPH}/{video_id}?fields={fields}", token=page_token)
+        if 200 <= code < 300 and isinstance(data, dict) and data.get("id"):
+            return str(data.get("permalink_url") or "").strip(), data
+        time.sleep(2)
+    return "", None
 
 
 def main():
@@ -119,15 +144,22 @@ def main():
     if code < 200 or code >= 300 or finished.get("success") is not True:
         fail("Facebook Reel publish", code, finished)
 
+    permalink, graph_video = lookup_permalink(video_id, page_token)
+    if not permalink:
+        permalink = f"https://www.facebook.com/reel/{video_id}"
+
     result = {
         "id": video_id,
         "success": True,
         "pageId": page_id,
         "pageName": page_name,
+        "permalink": permalink,
+        "graphVideo": graph_video,
         "finish": finished,
     }
     PUBLISH_RESULT.write_text(json.dumps(result))
     print(f"Facebook accepted Reel: {video_id}")
+    print(f"Facebook Reel permalink: {permalink}")
 
 
 if __name__ == "__main__":
