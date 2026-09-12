@@ -11,6 +11,7 @@ from pathlib import Path
 GRAPH = "https://graph.facebook.com/v26.0"
 BOOTSTRAP_TOKEN = os.environ.get("FACEBOOK_PAGE_ACCESS_TOKEN", "").strip()
 TARGET_PAGE = os.environ.get("FACEBOOK_TARGET_PAGE", "Ruby’s Realm").strip()
+TARGET_PAGE_ID = os.environ.get("FACEBOOK_TARGET_PAGE_ID", "").strip()
 OUTPUT_DIR = Path("viral_facebook/output")
 MANIFEST = OUTPUT_DIR / "manifest.json"
 PUBLISH_RESULT = Path("/tmp/facebook-publish.json")
@@ -48,7 +49,16 @@ def fail(stage, code, payload):
 
 
 def select_page():
-    # First support a user/system token that can enumerate managed Pages.
+    # If the exact Page ID is already known from a previously successful managed-
+    # Page lookup, avoid /me and /me/accounts entirely. Some Meta account/app
+    # blocks affect identity lookup before a Page-scoped publish call is tried.
+    if TARGET_PAGE_ID:
+        return {
+            "id": TARGET_PAGE_ID,
+            "name": TARGET_PAGE or TARGET_PAGE_ID,
+            "access_token": BOOTSTRAP_TOKEN,
+        }
+
     fields = urllib.parse.quote("id,name,access_token,tasks", safe=",")
     code, data = request_json(f"{GRAPH}/me/accounts?fields={fields}", token=BOOTSTRAP_TOKEN)
     if 200 <= code < 300:
@@ -61,8 +71,6 @@ def select_page():
             names = ", ".join(str(p.get("name") or p.get("id")) for p in eligible)
             raise RuntimeError(f"Target Facebook Page {TARGET_PAGE!r} was not returned. Managed Pages: {names}")
 
-    # The configured secret may already be a Page access token. In that case
-    # /me/accounts can be blocked even though direct Page publishing is valid.
     direct_fields = urllib.parse.quote("id,name,tasks", safe=",")
     dcode, direct = request_json(f"{GRAPH}/me?fields={direct_fields}", token=BOOTSTRAP_TOKEN)
     if dcode < 200 or dcode >= 300 or not isinstance(direct, dict) or not direct.get("id"):
