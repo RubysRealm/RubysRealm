@@ -2,7 +2,8 @@ export const config = { runtime: 'edge' };
 
 const ALLOWED_PREFIXES = [
   '/RubysRealm/RubysRealm/releases/download/podcast-part-',
-  '/RubysRealm/RubysRealm/releases/download/rubyclips-fb-'
+  '/RubysRealm/RubysRealm/releases/download/rubyclips-fb-',
+  '/RubysRealm/RubysRealm/releases/download/viral-facebook-halo-ready/'
 ];
 
 function validSource(value) {
