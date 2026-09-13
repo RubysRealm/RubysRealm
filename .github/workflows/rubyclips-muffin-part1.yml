@@ -1,0 +1,77 @@
+name: RubyClips MuffinDrama Part 1
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'rubyclips/muffin_part1.trigger'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rubyclips-muffin-part1
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          npm init -y >/dev/null 2>&1
+          npm install --silent @tobyg74/tiktok-api-dl
+      - name: Resolve episodes
+        run: node rubyclips/muffin_part1_resolve.js
+      - name: Build Part 1
+        run: python rubyclips/muffin_part1_build.py
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG='rubyclips-tt-7682993954661553173-p1'
+          VIDEO='rubyclips/muffin_output/muffindrama-part1.mp4'
+          MANIFEST='rubyclips/muffin_output/manifest.json'
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$VIDEO" "$MANIFEST" --clobber
+          else
+            gh release create "$TAG" "$VIDEO" "$MANIFEST" --title 'RubyClips MuffinDrama Part 1' --notes 'Part 1 built from the oldest MuffinDrama story in episode order.'
+          fi
+      - name: Wait for publisher
+        run: |
+          URL='https://rubys-realm.vercel.app/api/rubyclips-post?health=1'
+          for i in $(seq 1 90); do
+            CODE="$(curl -sS -o /tmp/health.json -w '%{http_code}' "$URL" || true)"
+            if [ "$CODE" = '200' ] && grep -q 'existing-video-parts-v7-tiktok-story' /tmp/health.json; then exit 0; fi
+            sleep 5
+          done
+          cat /tmp/health.json || true
+          exit 1
+      - name: Send to Buffer
+        run: |
+          URL='https://rubys-realm.vercel.app/api/rubyclips-post?tag=rubyclips-tt-7682993954661553173-p1'
+          CODE="$(curl -sS --max-time 120 -o /tmp/post.json -w '%{http_code}' "$URL" || true)"
+          cat /tmp/post.json
+          test "$CODE" = '200'
+          python -c "import json; d=json.load(open('/tmp/post.json')); assert d.get('ok') and d.get('postId') and str(d.get('channelName','')).lstrip('@').lower()=='rubaradaclips'"
+          cp /tmp/post.json rubyclips/muffin_output/publish.json
+      - name: Save diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubyclips-muffin-part1-${{ github.run_number }}
+          path: |
+            rubyclips/muffin_output/manifest.json
+            rubyclips/muffin_output/part1-info.json
+            rubyclips/muffin_output/publish.json
+            rubyclips/muffin_work/episodes.json
+            rubyclips/muffin_work/selected.json
+          if-no-files-found: warn
+          retention-days: 2
