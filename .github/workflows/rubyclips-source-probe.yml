@@ -11,76 +11,61 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Recover Episode 1 media URL
+      - name: Start local Cobalt
         run: |
           set -euo pipefail
-          python -m pip install -q requests cloudscraper
-          python - <<'PY'
-          import html, os, re, time, urllib.parse
-          import cloudscraper
-
+          docker pull ghcr.io/imputnet/cobalt:11
+          docker run -d --name cobalt -p 9000:9000 -e API_URL=http://127.0.0.1:9000/ ghcr.io/imputnet/cobalt:11
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:9000/ > cobalt-info.json; then break; fi
+            sleep 1
+          done
+          cat cobalt-info.json
+      - name: Download confirmed Episode 1
+        run: |
+          set -euo pipefail
           VIDEO='https://www.tiktok.com/@muffindrama_us/video/7682997000391904526'
-          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-          cs=cloudscraper.create_scraper(browser={'browser':'chrome','platform':'windows','mobile':False})
-          cs.headers.update({'User-Agent':UA,'Referer':'https://snaptik.app/en','Accept-Language':'en-US,en;q=0.9','X-Requested-With':'XMLHttpRequest'})
-          home=cs.get('https://snaptik.app/en',timeout=30)
-          print('HOME',home.status_code,len(home.text))
-          base={'url':VIDEO,'lang':'en'}
-          responses=[]
-          for i in range(5):
-              params=dict(base)
-              if i: params['_v']=str(int(time.time()*1000)+i)
-              r=cs.get('https://snaptik.app/abc2.php',params=params,timeout=60,allow_redirects=True)
-              text=html.unescape(r.text).replace('\\/','/').replace('\\u0026','&')
-              responses.append(text)
-              print('TRY',i,'STATUS',r.status_code,'LEN',len(text),'URL',r.url)
-              print('HEAD',re.sub(r'\s+',' ',text[:3000]))
-              if 'Updating' not in text and 'location.replace' not in text:
-                  break
-              time.sleep(1.2)
-          text='\n'.join(responses)
-          open('snaptik-response.txt','w',encoding='utf-8').write(text)
-          urls=[]
-          for p in [r'https?://[^"\'<>\s]+',r'/file\.php\?[^"\'<>\s]+',r'data-backup=["\']([^"\']+)',r'data-token=["\']([^"\']+)']:
-              for x in re.findall(p,text,re.I):
-                  if isinstance(x,tuple): x=x[0]
-                  x=html.unescape(x).replace('\\/','/').replace('\\u0026','&')
-                  if x not in urls: urls.append(x)
-          print('CANDIDATES')
-          for u in urls: print(u)
-          media=[u for u in urls if any(k in u.lower() for k in ['.mp4','file.php','snapxcdn','akamaized','tiktokcdn','bytecdn','muscdn'])]
-          if not media:
-              raise SystemExit('No media URL recovered')
-          u=urllib.parse.urljoin('https://snaptik.app',media[0])
-          print('CHOSEN',u)
-          d=cs.get(u,timeout=120,stream=True,allow_redirects=True)
-          print('DOWNLOAD',d.status_code,d.headers.get('content-type'),d.url)
-          d.raise_for_status()
-          with open('episode1.mp4','wb') as f:
-              for chunk in d.iter_content(1024*1024):
-                  if chunk: f.write(chunk)
+          curl -fsS -X POST http://127.0.0.1:9000/ \
+            -H 'Accept: application/json' \
+            -H 'Content-Type: application/json' \
+            --data "{\"url\":\"$VIDEO\",\"downloadMode\":\"auto\",\"videoQuality\":\"1080\",\"allowH265\":false,\"alwaysProxy\":true}" \
+            -o cobalt-response.json
+          cat cobalt-response.json
+          python - <<'PY'
+          import json, os, sys, urllib.parse, urllib.request
+          with open('cobalt-response.json','r',encoding='utf-8') as f: d=json.load(f)
+          print('STATUS',d.get('status'))
+          if d.get('status')=='error': raise SystemExit(json.dumps(d))
+          url=d.get('url')
+          if not url and d.get('status')=='picker':
+              for x in d.get('picker') or []:
+                  if x.get('type')=='video' and x.get('url'):
+                      url=x['url']; break
+          if not url: raise SystemExit('Cobalt returned no downloadable video URL')
+          url=urllib.parse.urljoin('http://127.0.0.1:9000/',url)
+          print('MEDIA_URL',url)
+          req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0'})
+          with urllib.request.urlopen(req,timeout=180) as r, open('episode1.mp4','wb') as out:
+              while True:
+                  b=r.read(1024*1024)
+                  if not b: break
+                  out.write(b)
           size=os.path.getsize('episode1.mp4')
-          print('BYTES',size)
-          if size < 100000: raise SystemExit('Downloaded file too small')
+          print('DOWNLOADED_BYTES',size)
+          if size<100000: raise SystemExit('Downloaded file is unexpectedly small')
           PY
+      - name: Verify video
+        run: |
+          ffprobe -v error -show_entries format=duration,size -of json episode1.mp4
       - name: Upload Episode 1
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: muffindrama-episode1
           path: episode1.mp4
           retention-days: 1
-      - name: Upload diagnostic response
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: snaptik-response
-          path: snaptik-response.txt
-          if-no-files-found: ignore
-          retention-days: 1
+      - name: Cobalt logs on failure
+        if: failure()
+        run: docker logs cobalt || true
