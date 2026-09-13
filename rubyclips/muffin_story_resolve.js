@@ -32,30 +32,85 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 function collectVideoIds(text) {
   const out = [];
   if (!text) return out;
+  const s = String(text);
   const patterns = [
     new RegExp(`@${AUTHOR}\\/video\\/(\\d{10,25})`, 'gi'),
-    /["'](?:aweme_id|awemeId|itemId|item_id|videoId|video_id)["']\s*[:=]\s*["']?(\d{10,25})/gi
+    /["'](?:aweme_id|awemeId|itemId|item_id|videoId|video_id|group_id|groupId)["']\s*[:=]\s*["']?(\d{10,25})/gi
   ];
   for (const re of patterns) {
-    for (const m of String(text).matchAll(re)) out.push(m[1]);
+    for (const m of s.matchAll(re)) out.push(m[1]);
   }
   return [...new Set(out)];
+}
+
+function rankIdsFromApiText(text, episode) {
+  const ids = collectVideoIds(text);
+  if (!ids.length) return [];
+  const s = String(text);
+  const episodeMarkers = [
+    `\"episode\":${episode}`,
+    `\"episode\":\"${episode}\"`,
+    `\"episode_number\":${episode}`,
+    `\"episodeNumber\":${episode}`,
+    `\"episode_index\":${episode}`,
+    `\"episodeIndex\":${episode}`,
+    `\"order\":${episode}`,
+    `\"index\":${episode}`
+  ];
+  const markerPositions = [];
+  for (const marker of episodeMarkers) {
+    let pos = s.indexOf(marker);
+    while (pos >= 0) {
+      markerPositions.push(pos);
+      pos = s.indexOf(marker, pos + marker.length);
+    }
+  }
+  if (!markerPositions.length) return ids;
+  return ids.map(id => {
+    const positions = [];
+    let pos = s.indexOf(id);
+    while (pos >= 0) {
+      positions.push(pos);
+      pos = s.indexOf(id, pos + id.length);
+    }
+    const distance = positions.length ? Math.min(...positions.flatMap(p => markerPositions.map(m => Math.abs(p - m)))) : Number.MAX_SAFE_INTEGER;
+    return { id, distance };
+  }).sort((a,b) => a.distance - b.distance).map(x => x.id);
 }
 
 async function identifyEpisodeVideo(browser, episode) {
   const page = await browser.newPage();
   await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36');
   await page.setViewport({ width: 1440, height: 1800 });
-  const seen = [];
-  const capture = url => {
-    for (const id of collectVideoIds(url)) if (!seen.includes(id)) seen.push(id);
+
+  const seenUrlIds = [];
+  const apiBodies = [];
+  const bodyReads = [];
+  const captureUrl = url => {
+    for (const id of collectVideoIds(url)) if (!seenUrlIds.includes(id)) seenUrlIds.push(id);
   };
-  page.on('request', req => capture(req.url()));
-  page.on('response', resp => capture(resp.url()));
+
+  page.on('request', req => captureUrl(req.url()));
+  page.on('response', resp => {
+    captureUrl(resp.url());
+    const task = (async () => {
+      try {
+        const headers = resp.headers();
+        const ct = String(headers['content-type'] || '').toLowerCase();
+        const url = resp.url();
+        if (!(ct.includes('json') || /api\//i.test(url))) return;
+        const text = await resp.text();
+        if (!text || text.length > 1500000) return;
+        if (/aweme|itemList|episode|video|shortdrama/i.test(text)) apiBodies.push(text);
+      } catch {}
+    })();
+    bodyReads.push(task);
+  });
 
   const target = `https://www.tiktok.com/shortdrama/episode/${seriesId}/${episode}`;
   await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 90000 });
-  await sleep(9000);
+  await sleep(12000);
+  await Promise.allSettled(bodyReads);
 
   const pageData = await page.evaluate(() => {
     const canonical = document.querySelector('link[rel="canonical"]')?.href || '';
@@ -68,22 +123,30 @@ async function identifyEpisodeVideo(browser, episode) {
   });
 
   const prioritized = [];
+  const pushIds = ids => {
+    for (const id of ids) if (id !== seriesId && !prioritized.includes(id)) prioritized.push(id);
+  };
+
+  // The short-drama player commonly exposes the real TikTok item identity in
+  // API JSON rather than in the final DOM, so API bodies get first priority.
+  for (const body of apiBodies) pushIds(rankIdsFromApiText(body, episode));
   for (const value of [pageData.location, pageData.canonical, pageData.og, ...pageData.anchors, ...pageData.resources, pageData.scripts, pageData.html]) {
-    for (const id of collectVideoIds(value)) if (!prioritized.includes(id)) prioritized.push(id);
+    pushIds(collectVideoIds(value));
   }
-  for (const id of seen) if (!prioritized.includes(id)) prioritized.push(id);
+  pushIds(seenUrlIds);
   await page.close();
 
-  const candidates = prioritized.filter(id => id !== seriesId);
-  if (!candidates.length) throw new Error(`Episode ${episode}: no TikTok video ID found.`);
+  if (!prioritized.length) throw new Error(`Episode ${episode}: no TikTok video ID found in page or API data.`);
+  console.log(`Episode ${episode}: testing ${prioritized.length} candidate TikTok ID(s).`);
 
-  for (const videoId of candidates.slice(0, 12)) {
+  for (const videoId of prioritized.slice(0, 20)) {
     const sourceUrl = `https://www.tiktok.com/@${AUTHOR}/video/${videoId}`;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const result = await Tiktok.Downloader(sourceUrl, { version: 'v2' });
         const media = result?.result?.video?.playAddr?.[0];
-        if (result?.status === 'success' && media) {
+        const nickname = String(result?.result?.author?.nickname || '').toLowerCase();
+        if (result?.status === 'success' && media && (!nickname || nickname.includes('muffin'))) {
           return { episode, sourceUrl, videoId, media, shortDramaUrl: target };
         }
       } catch (e) {
@@ -92,7 +155,7 @@ async function identifyEpisodeVideo(browser, episode) {
       await sleep(1000 * attempt);
     }
   }
-  throw new Error(`Episode ${episode}: no downloadable TikTok video resolved.`);
+  throw new Error(`Episode ${episode}: IDs were found, but none resolved to a MuffinDrama video.`);
 }
 
 (async () => {
