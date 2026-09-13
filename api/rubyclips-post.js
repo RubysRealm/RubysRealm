@@ -6,29 +6,54 @@ const RUBYCLIPS_CHANNEL_ID = '6a9f6ff1cd8b9c702c2897e1';
 const RUBYCLIPS_CHANNEL = 'rubaradaclips';
 const FACEBOOK_PLATFORM = 'rubyclips-facebook-repost-v1';
 const CREATOR_PLATFORM = 'rubyclips-creator-feed-v1';
+const TIKTOK_STORY_PLATFORM = 'rubyclips-tiktok-story-v1';
 const CREATOR_CHANNEL = '@bushcraftinthewildforest';
+const TIKTOK_STORY_CHANNEL = '@muffindrama_us';
 const MAX_AUTO_SECONDS = 599;
-const PUBLISHER_VERSION = 'existing-video-parts-v6-creator-fallback';
+const PUBLISHER_VERSION = 'existing-video-parts-v7-tiktok-story';
 
-function validateCommon(m) {
+function validateBase(m) {
   if (!m?.file || !String(m.file).endsWith('.mp4')) throw new Error('Blocked: missing MP4.');
   if (!String(m?.caption || '').trim()) throw new Error('Blocked: missing caption.');
   if (String(m?.targetChannel || '').replace(/^@/, '').toLowerCase() !== RUBYCLIPS_CHANNEL) throw new Error('Blocked: wrong TikTok target.');
+  const segmentSeconds = Number(m?.segmentDurationSeconds || 0);
+  if (!(segmentSeconds > 0 && segmentSeconds <= MAX_AUTO_SECONDS)) throw new Error('Blocked: part is outside automatic TikTok duration limits.');
+  return segmentSeconds;
+}
 
+function validateLegacyCommon(m) {
+  validateBase(m);
   const index = Number(m?.segmentIndex || 0);
   const total = Number(m?.segmentTotal || 0);
-  const segmentSeconds = Number(m?.segmentDurationSeconds || 0);
   const sourceSeconds = Number(m?.sourceDurationSeconds || 0);
   if (!Number.isInteger(index) || !Number.isInteger(total) || index < 1 || total < 1 || index > total) throw new Error('Blocked: invalid part numbering.');
-  if (!(segmentSeconds > 0 && segmentSeconds <= MAX_AUTO_SECONDS)) throw new Error('Blocked: part is outside automatic TikTok duration limits.');
   if (m?.titleBurnedIn !== true || m?.partLabelBurnedIn !== true) throw new Error('Blocked: title/part layout is missing.');
   if (total > 1 && (!(sourceSeconds > MAX_AUTO_SECONDS) || m?.technicalSplitOnly !== true)) throw new Error('Blocked: unverified multipart split.');
   if (total === 1 && m?.technicalSplitOnly === true) throw new Error('Blocked: unexpected split flag.');
   return { index, total };
 }
 
+function validateTikTokStory(m, tag) {
+  validateBase(m);
+  const index = Number(m?.segmentIndex || 0);
+  if (!Number.isInteger(index) || index < 1) throw new Error('Blocked: invalid story part number.');
+  if (String(m?.sourceProvider || '').toLowerCase() !== 'tiktok') throw new Error('Blocked: TikTok story provider mismatch.');
+  if (String(m?.sourceChannel || '').toLowerCase() !== TIKTOK_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: TikTok story channel mismatch.');
+  const seriesId = String(m?.sourceSeriesId || '').trim();
+  if (!/^\d{10,25}$/.test(seriesId)) throw new Error('Blocked: invalid TikTok series id.');
+  const ids = Array.isArray(m?.sourceVideoIds) ? m.sourceVideoIds.map(x => String(x).trim()) : [];
+  if (!ids.length || ids.some(id => !/^\d{10,25}$/.test(id))) throw new Error('Blocked: invalid TikTok episode ids.');
+  const urls = Array.isArray(m?.sourceUrls) ? m.sourceUrls.map(String) : [];
+  if (!urls.length || urls.some(url => !url.includes('tiktok.com/'))) throw new Error('Blocked: invalid TikTok episode URLs.');
+  const expected = `rubyclips-tt-${seriesId}-p${index}`;
+  if (tag !== expected) throw new Error('Blocked: release tag does not match TikTok story part.');
+  return { index, total: Number(m?.segmentTotal || 0) || null };
+}
+
 function validateManifest(m, tag) {
-  const { index, total } = validateCommon(m);
+  if (m?.platform === TIKTOK_STORY_PLATFORM) return validateTikTokStory(m, tag);
+
+  const { index, total } = validateLegacyCommon(m);
   const id = String(m?.sourceVideoId || '').trim();
 
   if (m?.platform === FACEBOOK_PLATFORM) {
@@ -37,7 +62,7 @@ function validateManifest(m, tag) {
     if (!m?.sourceUrl || !String(m.sourceUrl).includes('facebook.com')) throw new Error('Blocked: invalid Facebook source URL.');
     const expected = total > 1 ? `rubyclips-fb-${id}-s${index}` : `rubyclips-fb-${id}`;
     if (tag !== expected) throw new Error('Blocked: release tag does not match Facebook part.');
-    return;
+    return { index, total };
   }
 
   if (m?.platform === CREATOR_PLATFORM) {
@@ -48,7 +73,7 @@ function validateManifest(m, tag) {
     if (!(src.includes('youtube.com/') || src.includes('youtu.be/'))) throw new Error('Blocked: invalid creator source URL.');
     const expected = total > 1 ? `rubyclips-src-${id}-s${index}` : `rubyclips-src-${id}`;
     if (tag !== expected) throw new Error('Blocked: release tag does not match creator-feed part.');
-    return;
+    return { index, total };
   }
 
   throw new Error('Blocked: invalid RubyClips manifest platform.');
@@ -63,7 +88,7 @@ export default async function handler(req, res) {
 
   try {
     const tag = String(req.query?.tag || '').trim();
-    if (!/^rubyclips-(?:fb-\d+|src-[A-Za-z0-9_-]{6,20})(?:-s\d+)?$/.test(tag)) {
+    if (!/^rubyclips-(?:fb-\d+|src-[A-Za-z0-9_-]{6,20})(?:-s\d+)?$/.test(tag) && !/^rubyclips-tt-\d{10,25}-p\d+$/.test(tag)) {
       return res.status(400).json({ ok: false, error: 'A valid RubyClips release tag is required.' });
     }
 
@@ -71,7 +96,7 @@ export default async function handler(req, res) {
     const manifestResponse = await fetch(`${base}/manifest.json`, { redirect: 'follow', cache: 'no-store' });
     if (!manifestResponse.ok) throw new Error(`Manifest unavailable (${manifestResponse.status}).`);
     const manifest = await manifestResponse.json();
-    validateManifest(manifest, tag);
+    const numbering = validateManifest(manifest, tag);
 
     const videoUrl = `${base}/${encodeURIComponent(manifest.file)}`;
     const head = await fetch(videoUrl, { method: 'HEAD', redirect: 'follow', cache: 'no-store' });
@@ -98,9 +123,11 @@ export default async function handler(req, res) {
       channelId: RUBYCLIPS_CHANNEL_ID,
       channelName: RUBYCLIPS_CHANNEL,
       platform: manifest.platform,
-      sourceVideoId: String(manifest.sourceVideoId),
-      segmentIndex: Number(manifest.segmentIndex),
-      segmentTotal: Number(manifest.segmentTotal),
+      sourceVideoId: manifest.sourceVideoId ? String(manifest.sourceVideoId) : null,
+      sourceSeriesId: manifest.sourceSeriesId ? String(manifest.sourceSeriesId) : null,
+      sourceVideoIds: Array.isArray(manifest.sourceVideoIds) ? manifest.sourceVideoIds.map(String) : null,
+      segmentIndex: numbering.index,
+      segmentTotal: numbering.total,
       videoUrl,
       renderer: PUBLISHER_VERSION
     });
