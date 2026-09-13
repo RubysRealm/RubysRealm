@@ -11,58 +11,48 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Probe Episode 1 through SnapTik fallback
+      - name: Install recovery dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'git+https://github.com/krypton-byte/tiktok-downloader.git'
+      - name: Pull confirmed Episode 1 through SnapTik
         run: |
           set -euo pipefail
           python - <<'PY'
-          import html, json, re, sys, urllib.parse
-          import requests
+          from tiktok_downloader.snaptik import snaptik
+          from tiktok_downloader.utils import Type
 
           VIDEO='https://www.tiktok.com/@muffindrama_us/video/7682997000391904526'
-          BASE='https://snaptik.app'
-          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-          s=requests.Session()
-          s.headers.update({'User-Agent':UA,'Accept-Language':'en-US,en;q=0.9'})
+          media=snaptik(VIDEO)
+          print('MEDIA_COUNT', len(media))
+          for i,m in enumerate(media):
+              print('MEDIA',i,'TYPE',getattr(m,'type',None),'URL',getattr(m,'json',None),'RENDER',bool(getattr(m,'render',None)))
 
-          home=s.get(BASE+'/en3',timeout=30)
-          print('HOME',home.status_code,home.url,'LEN',len(home.text))
-          open('/tmp/snaptik-home.html','w',encoding='utf-8').write(home.text)
-          token=''
-          m=re.search(r'name=["\']token["\'][^>]*value=["\']([^"\']+)',home.text,re.I)
-          if not m:
-              m=re.search(r'value=["\']([^"\']+)["\'][^>]*name=["\']token["\']',home.text,re.I)
-          if m: token=html.unescape(m.group(1))
-          action='abc2.php'
-          ma=re.search(r'<form[^>]+action=["\']([^"\']*abc2\.php[^"\']*)',home.text,re.I)
-          if ma: action=html.unescape(ma.group(1))
-          endpoint=urllib.parse.urljoin(home.url,action)
-          print('TOKEN_FOUND',bool(token),'ACTION',endpoint)
-
-          params={'url':VIDEO}
-          if token: params['token']=token
-          r=s.get(endpoint,params=params,headers={'Referer':home.url,'X-Requested-With':'XMLHttpRequest'},timeout=60,allow_redirects=True)
-          print('RESULT',r.status_code,r.url,'LEN',len(r.text),'CTYPE',r.headers.get('content-type'))
-          open('/tmp/snaptik-result.html','w',encoding='utf-8').write(r.text)
-          text=html.unescape(r.text)
-          urls=[]
-          for pat in [r'https?://[^"\'<>\\ ]+?\.mp4(?:\?[^"\'<>\\ ]*)?', r'https?://[^"\'<>\\ ]+(?:akamaized|tiktokcdn|bytecdn|muscdn)[^"\'<>\\ ]+']:
-              for u in re.findall(pat,text,re.I):
-                  u=u.replace('\\u0026','&').replace('\\/','/')
-                  if u not in urls: urls.append(u)
-          hrefs=re.findall(r'href=["\']([^"\']+)["\']',text,re.I)
-          for h in hrefs:
-              h=html.unescape(h)
-              if any(x in h.lower() for x in ['download','video','mp4','tikcdn','akamaized']):
-                  u=urllib.parse.urljoin(r.url,h)
-                  if u not in urls: urls.append(u)
-          print('CANDIDATES',json.dumps(urls[:20],indent=2))
-          print('RESULT_HEAD',re.sub(r'\s+',' ',r.text[:5000]))
-          if not urls:
-              raise SystemExit('No downloadable media candidate found through SnapTik.')
+          videos=[m for m in media if getattr(m,'type',None)==Type.VIDEO]
+          if not videos:
+              raise SystemExit('SnapTik returned no video candidates')
+          chosen=videos[0]
+          if not getattr(chosen,'json','') and getattr(chosen,'render',None):
+              chosen=chosen.get_render()
+          if not chosen or not getattr(chosen,'json',''):
+              raise SystemExit('SnapTik video candidate has no downloadable URL')
+          print('CHOSEN_URL',chosen.json)
+          chosen.download('episode1.mp4',chunk_size=1024*1024)
+          import os
+          size=os.path.getsize('episode1.mp4')
+          print('DOWNLOADED_BYTES',size)
+          if size < 100000:
+              raise SystemExit('Downloaded file is unexpectedly small')
           PY
+      - name: Upload Episode 1 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: muffindrama-episode1
+          path: episode1.mp4
+          retention-days: 1
