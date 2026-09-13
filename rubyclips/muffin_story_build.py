@@ -7,8 +7,7 @@ WORK = BASE / 'muffin_work'
 OUT = BASE / 'muffin_output'
 STATE = BASE / 'muffin_state.json'
 FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
-MIN_SECONDS = 360.0
-TARGET_MAX_SECONDS = 585.0
+PACKING_TARGET_SECONDS = 598.0
 HARD_MAX_SECONDS = 599.0
 
 OUT.mkdir(parents=True, exist_ok=True)
@@ -23,6 +22,9 @@ ordered = sorted((e for e in eps if int(e['episode']) >= next_ep), key=lambda e:
 if not ordered or int(ordered[0]['episode']) != next_ep:
     raise SystemExit(f'Expected Episode {next_ep} first, resolver returned something else.')
 
+# Pack as many complete, consecutive source episodes as will fit under the
+# automatic TikTok publishing ceiling. This intentionally favors longer parts
+# (normally just under 10 minutes) over the old 6-minute minimum behavior.
 chosen = []
 total = 0.0
 for ep in ordered:
@@ -33,24 +35,20 @@ for ep in ordered:
         'ffprobe','-v','error','-show_entries','format=duration','-of','default=nw=1:nk=1',ep['file']
     ], text=True).strip())
     ep['duration'] = dur
-    if chosen and total >= MIN_SECONDS and total + dur > TARGET_MAX_SECONDS:
-        break
+    if dur > HARD_MAX_SECONDS:
+        raise SystemExit(f'Episode {ep["episode"]} is too long to pack whole: {dur:.3f}s')
     if chosen and total + dur > HARD_MAX_SECONDS:
         break
     chosen.append(ep)
     total += dur
-    if total >= MIN_SECONDS and total >= TARGET_MAX_SECONDS - 15:
+    if total >= PACKING_TARGET_SECONDS:
         break
 
-# The final story part is allowed to be shorter than six minutes.
 last_episode = int(state['currentSeriesEpisodeCount'])
-is_final_story_part = bool(chosen) and int(chosen[-1]['episode']) == last_episode
 if not chosen:
     raise SystemExit('No episodes selected.')
 if total > HARD_MAX_SECONDS:
     raise SystemExit(f'Part candidate too long: {total:.3f}s')
-if total < MIN_SECONDS and not is_final_story_part:
-    raise SystemExit(f'Need more episodes before building Part {part}; only {total:.3f}s available.')
 
 (WORK / 'selected.json').write_text(json.dumps(chosen, indent=2) + '\n')
 with (WORK / 'concat.txt').open('w') as f:
@@ -117,7 +115,8 @@ manifest = {
     'targetChannel': 'rubaradaclips',
     'titleBurnedIn': True,
     'partLabelBurnedIn': True,
-    'overlayLayoutVersion': 'story-title-top-v1'
+    'overlayLayoutVersion': 'story-title-top-v1',
+    'packingPolicy': 'max-whole-episodes-under-599s'
 }
 (OUT / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 (OUT / 'part-info.json').write_text(json.dumps({
