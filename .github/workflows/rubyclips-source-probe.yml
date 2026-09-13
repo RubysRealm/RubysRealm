@@ -11,7 +11,7 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,7 +21,7 @@ jobs:
         run: |
           set -euo pipefail
           npm init -y >/dev/null 2>&1
-          npm install --silent @tobyg74/tiktok-api-dl
+          npm install --silent @tobyg74/tiktok-api-dl ffprobe-static
           node <<'JS'
           const fs = require('fs');
           const Tiktok = require('@tobyg74/tiktok-api-dl');
@@ -42,12 +42,17 @@ jobs:
           curl -L --fail --retry 2 -A 'Mozilla/5.0' -e 'https://www.tiktok.com/' "$URL" -o episode1.mp4
           test $(stat -c%s episode1.mp4) -gt 100000
       - name: Verify video
-        run: ffprobe -v error -show_entries format=duration,size -of json episode1.mp4
+        run: |
+          set -euo pipefail
+          FFPROBE="$(node -e "process.stdout.write(require('ffprobe-static').path)")"
+          "$FFPROBE" -v error -show_entries format=duration,size -of json episode1.mp4 | tee episode1-info.json
       - name: Upload Episode 1
         uses: actions/upload-artifact@v4
         with:
           name: muffindrama-episode1
-          path: episode1.mp4
+          path: |
+            episode1.mp4
+            episode1-info.json
           retention-days: 1
       - name: Upload resolver diagnostics
         if: always()
