@@ -11,48 +11,62 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install recovery dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install 'git+https://github.com/krypton-byte/tiktok-downloader.git'
-      - name: Pull confirmed Episode 1 through SnapTik
+      - name: Inspect current SnapTik response
         run: |
           set -euo pipefail
+          python -m pip install -q requests cloudscraper beautifulsoup4
           python - <<'PY'
-          from tiktok_downloader.snaptik import snaptik
-          from tiktok_downloader.utils import Type
+          import html, json, re, urllib.parse
+          import requests, cloudscraper
 
           VIDEO='https://www.tiktok.com/@muffindrama_us/video/7682997000391904526'
-          media=snaptik(VIDEO)
-          print('MEDIA_COUNT', len(media))
-          for i,m in enumerate(media):
-              print('MEDIA',i,'TYPE',getattr(m,'type',None),'URL',getattr(m,'json',None),'RENDER',bool(getattr(m,'render',None)))
-
-          videos=[m for m in media if getattr(m,'type',None)==Type.VIDEO]
-          if not videos:
-              raise SystemExit('SnapTik returned no video candidates')
-          chosen=videos[0]
-          if not getattr(chosen,'json','') and getattr(chosen,'render',None):
-              chosen=chosen.get_render()
-          if not chosen or not getattr(chosen,'json',''):
-              raise SystemExit('SnapTik video candidate has no downloadable URL')
-          print('CHOSEN_URL',chosen.json)
-          chosen.download('episode1.mp4',chunk_size=1024*1024)
-          import os
-          size=os.path.getsize('episode1.mp4')
-          print('DOWNLOADED_BYTES',size)
-          if size < 100000:
-              raise SystemExit('Downloaded file is unexpectedly small')
+          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+          s=requests.Session(); s.headers.update({'User-Agent':UA,'Accept-Language':'en-US,en;q=0.9'})
+          home=s.get('https://snaptik.app/en',timeout=30)
+          print('HOME_STATUS',home.status_code,'LEN',len(home.text))
+          token=''
+          m=re.search(r'name=["\']token["\'][^>]*value=["\']([^"\']+)',home.text,re.I) or re.search(r'value=["\']([^"\']+)["\'][^>]*name=["\']token["\']',home.text,re.I)
+          if m: token=html.unescape(m.group(1))
+          print('TOKEN_FOUND',bool(token))
+          params={'url':VIDEO,'lang':'en'}
+          if token: params['token']=token
+          cs=cloudscraper.create_scraper(browser={'browser':'chrome','platform':'windows','mobile':False})
+          cs.headers.update({'User-Agent':UA,'Referer':'https://snaptik.app/en','Accept-Language':'en-US,en;q=0.9','X-Requested-With':'XMLHttpRequest'})
+          # carry cookies from first session where possible
+          for c in s.cookies: cs.cookies.set(c.name,c.value,domain=c.domain,path=c.path)
+          r=cs.get('https://snaptik.app/abc2.php',params=params,timeout=60,allow_redirects=True)
+          print('RESULT_STATUS',r.status_code,'URL',r.url,'CTYPE',r.headers.get('content-type'),'LEN',len(r.text))
+          open('snaptik-response.txt','w',encoding='utf-8').write(r.text)
+          text=html.unescape(r.text).replace('\\/','/').replace('\\u0026','&')
+          print('RESPONSE_HEAD_START')
+          print(re.sub(r'\s+',' ',text[:12000]))
+          print('RESPONSE_HEAD_END')
+          patterns=[
+            r'https?://[^"\'<>\s]+',
+            r'/file\.php\?[^"\'<>\s]+',
+            r'data-backup=["\']([^"\']+)',
+            r'data-token=["\']([^"\']+)'
+          ]
+          vals=[]
+          for p in patterns:
+            for x in re.findall(p,text,re.I):
+              if isinstance(x,tuple): x=x[0]
+              if x not in vals: vals.append(x)
+          print('CANDIDATES_START')
+          for x in vals[:100]: print(x)
+          print('CANDIDATES_END')
           PY
-      - name: Upload Episode 1 artifact
+      - name: Upload response artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: muffindrama-episode1
-          path: episode1.mp4
+          name: snaptik-response
+          path: snaptik-response.txt
+          if-no-files-found: ignore
           retention-days: 1
