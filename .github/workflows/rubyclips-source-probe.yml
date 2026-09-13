@@ -18,37 +18,26 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install TikTok source tools
-        run: python -m pip install -U yt-dlp
-      - name: List oldest MuffinDrama uploads
         run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install -U yt-dlp
+      - name: Probe confirmed MuffinDrama Episode 1
+        run: |
+          set -euo pipefail
+          URL='https://www.tiktok.com/@muffindrama_us/video/7682997000391904526'
           python - <<'PY'
           import json
           from yt_dlp import YoutubeDL
-
-          url='https://www.tiktok.com/@muffindrama_us'
-          opts={
-              'quiet': True,
-              'no_warnings': True,
-              'extract_flat': True,
-              'skip_download': True,
-              'playlistend': 500,
-              'socket_timeout': 45,
-              'retries': 3,
-          }
+          url='https://www.tiktok.com/@muffindrama_us/video/7682997000391904526'
+          opts={'quiet':True,'no_warnings':True,'skip_download':True,'socket_timeout':45,'retries':3}
           with YoutubeDL(opts) as ydl:
               info=ydl.extract_info(url, download=False)
-          entries=[]
-          for e in (info or {}).get('entries') or []:
-              if not e: continue
-              vid=str(e.get('id') or '').strip()
-              title=str(e.get('title') or e.get('description') or '').replace('\n',' ').strip()
-              ts=int(e.get('timestamp') or e.get('release_timestamp') or 0)
-              webpage=str(e.get('webpage_url') or e.get('url') or '')
-              entries.append({'id':vid,'title':title,'timestamp':ts,'url':webpage})
-          if not entries:
-              raise SystemExit('No TikTok entries returned')
-          entries.sort(key=lambda x: (x['timestamp'] or 10**18, x['id']))
-          print('TOTAL', len(entries))
-          print('OLDEST_40_JSON')
-          print(json.dumps(entries[:40], ensure_ascii=False, indent=2))
+          fields=['id','title','description','duration','timestamp','upload_date','uploader','uploader_id','webpage_url','playlist','playlist_id','playlist_title','channel','channel_id']
+          print('METADATA_JSON')
+          print(json.dumps({k:info.get(k) for k in fields},ensure_ascii=False,indent=2))
           PY
+          yt-dlp --no-warnings --retries 3 --socket-timeout 45 -f 'bv*+ba/b' --merge-output-format mp4 -o '/tmp/episode1.%(ext)s' "$URL"
+          FILE="$(ls /tmp/episode1.* | head -n1)"
+          test -s "$FILE"
+          ffprobe -v error -show_entries format=duration,size -of json "$FILE"
