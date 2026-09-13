@@ -20,7 +20,7 @@ jobs:
           npm install --silent @tobyg74/tiktok-api-dl
       - name: Probe playlist
         run: |
-          cat > /tmp/probe.cjs <<'JS'
+          cat > probe.cjs <<'JS'
           const Tiktok=require('@tobyg74/tiktok-api-dl');
           (async()=>{
             const id='7682993954661553173';
@@ -31,4 +31,4 @@ jobs:
             }
           })().catch(e=>{console.error(e);process.exit(1)});
           JS
-          timeout 180 node /tmp/probe.cjs
+          timeout 180 node probe.cjs
