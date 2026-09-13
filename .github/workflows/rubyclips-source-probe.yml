@@ -14,54 +14,111 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Start local Cobalt
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Capture Episode 1 from TikTok embed player
         run: |
           set -euo pipefail
-          docker pull ghcr.io/imputnet/cobalt:11 >/dev/null
-          docker run -d --name cobalt -p 9000:9000 -e API_URL=http://127.0.0.1:9000/ ghcr.io/imputnet/cobalt:11
-          for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:9000/ > cobalt-info.json; then break; fi
-            sleep 1
-          done
-          cat cobalt-info.json
-      - name: Probe confirmed Episode 1
-        run: |
-          set -euo pipefail
-          VIDEO='https://www.tiktok.com/@muffindrama_us/video/7682997000391904526'
-          CODE=$(curl -sS -o cobalt-response.json -w '%{http_code}' -X POST http://127.0.0.1:9000/ \
-            -H 'Accept: application/json' \
-            -H 'Content-Type: application/json' \
-            --data "{\"url\":\"$VIDEO\",\"downloadMode\":\"auto\",\"videoQuality\":\"1080\",\"allowH265\":false,\"alwaysProxy\":true}")
-          echo HTTP_CODE=$CODE
-          cat cobalt-response.json
+          google-chrome --version || chromium --version || true
+          python -m pip install -q selenium requests
           python - <<'PY'
-          import json, os, urllib.parse, urllib.request
-          d=json.load(open('cobalt-response.json',encoding='utf-8'))
-          if d.get('status')=='error': raise SystemExit('COBALT_ERROR '+json.dumps(d))
-          url=d.get('url')
-          if not url and d.get('status')=='picker':
-              url=next((x.get('url') for x in d.get('picker',[]) if x.get('type')=='video' and x.get('url')),None)
-          if not url: raise SystemExit('Cobalt returned no downloadable video URL: '+json.dumps(d))
-          url=urllib.parse.urljoin('http://127.0.0.1:9000/',url)
-          print('MEDIA_URL',url)
-          with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0'}),timeout=180) as r, open('episode1.mp4','wb') as out:
-              while True:
-                  b=r.read(1024*1024)
-                  if not b: break
-                  out.write(b)
-          size=os.path.getsize('episode1.mp4'); print('DOWNLOADED_BYTES',size)
-          if size<100000: raise SystemExit('Downloaded file is unexpectedly small')
+          import json, os, time, requests
+          from selenium import webdriver
+          from selenium.webdriver.chrome.options import Options
+          from selenium.webdriver.common.by import By
+
+          URL='https://www.tiktok.com/embed/v2/7682997000391904526'
+          opts=Options()
+          opts.add_argument('--headless=new')
+          opts.add_argument('--no-sandbox')
+          opts.add_argument('--disable-dev-shm-usage')
+          opts.add_argument('--disable-blink-features=AutomationControlled')
+          opts.add_argument('--autoplay-policy=no-user-gesture-required')
+          opts.add_argument('--window-size=1280,900')
+          opts.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
+          opts.set_capability('goog:loggingPrefs', {'performance':'ALL','browser':'ALL'})
+          driver=webdriver.Chrome(options=opts)
+          driver.execute_cdp_cmd('Network.enable', {})
+          try:
+              driver.get(URL)
+              time.sleep(4)
+              # Trigger playback if a button is available.
+              for sel in ['button[aria-label*="play" i]','button[data-e2e*="play" i]','video']:
+                  try:
+                      els=driver.find_elements(By.CSS_SELECTOR,sel)
+                      if els:
+                          els[0].click()
+                          break
+                  except Exception:
+                      pass
+              try:
+                  driver.execute_script("const v=document.querySelector('video'); if(v){v.muted=true; v.play().catch(()=>{});} ")
+              except Exception:
+                  pass
+              time.sleep(12)
+              print('TITLE',driver.title)
+              print('CURRENT_URL',driver.current_url)
+              try:
+                  print('VIDEO_STATE',driver.execute_script("const v=document.querySelector('video'); return v?{src:v.src,currentSrc:v.currentSrc,readyState:v.readyState,duration:v.duration}:null"))
+              except Exception as e:
+                  print('VIDEO_STATE_ERROR',repr(e))
+              candidates=[]
+              for entry in driver.get_log('performance'):
+                  try:
+                      msg=json.loads(entry['message'])['message']
+                      if msg['method'] not in ('Network.responseReceived','Network.requestWillBeSent'):
+                          continue
+                      p=msg['params']
+                      if msg['method']=='Network.responseReceived':
+                          r=p.get('response',{})
+                          u=r.get('url',''); mime=r.get('mimeType',''); status=r.get('status')
+                      else:
+                          r=p.get('request',{})
+                          u=r.get('url',''); mime=''; status=''
+                      low=u.lower()
+                      if u and ('video' in mime.lower() or any(x in low for x in ['.mp4','video/tos','bytecdn','tiktokcdn','muscdn','akamaized','tos-useast','tos-maliva','tos-alisg'])):
+                          row=(u,mime,status)
+                          if row not in candidates: candidates.append(row)
+                  except Exception:
+                      pass
+              print('MEDIA_CANDIDATES',len(candidates))
+              for i,(u,m,s) in enumerate(candidates[:80]): print('CAND',i,s,m,u)
+              if not candidates:
+                  open('embed-page.html','w',encoding='utf-8').write(driver.page_source)
+                  raise SystemExit('No media request captured from embed player')
+              # Prefer successful video responses, then likely CDN media URLs.
+              ranked=sorted(candidates,key=lambda x:(0 if 'video' in (x[1] or '').lower() else 1,0 if x[2] in (200,206) else 1,len(x[0])))
+              media_url=ranked[0][0]
+              print('CHOSEN',media_url)
+              sess=requests.Session()
+              for c in driver.get_cookies(): sess.cookies.set(c['name'],c['value'],domain=c.get('domain'))
+              headers={'User-Agent':opts.arguments[-1].split('=',1)[-1],'Referer':URL,'Range':'bytes=0-'}
+              rr=sess.get(media_url,headers=headers,timeout=180,stream=True,allow_redirects=True)
+              print('DOWNLOAD_STATUS',rr.status_code,rr.headers.get('content-type'),rr.url)
+              rr.raise_for_status()
+              with open('episode1.mp4','wb') as f:
+                  for chunk in rr.iter_content(1024*1024):
+                      if chunk: f.write(chunk)
+              size=os.path.getsize('episode1.mp4')
+              print('DOWNLOADED_BYTES',size)
+              if size<100000: raise SystemExit('Downloaded file unexpectedly small')
+          finally:
+              driver.quit()
           PY
       - name: Verify video
-        if: success()
         run: ffprobe -v error -show_entries format=duration,size -of json episode1.mp4
       - name: Upload Episode 1
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: muffindrama-episode1
           path: episode1.mp4
           retention-days: 1
-      - name: Cobalt logs on failure
+      - name: Upload embed diagnostic
         if: failure()
-        run: docker logs cobalt || true
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiktok-embed-diagnostic
+          path: embed-page.html
+          if-no-files-found: ignore
+          retention-days: 1
