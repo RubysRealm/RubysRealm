@@ -1,18 +1,19 @@
-name: RubyClips MuffinDrama Part 1
+name: RubyClips MuffinDrama hourly story
 
 on:
+  schedule:
+    - cron: '0 * * * *'
   workflow_dispatch:
   push:
     paths:
-      - 'rubyclips/muffin_part1.trigger'
-      - '.github/workflows/rubyclips-muffin-part1.yml'
+      - 'rubyclips/muffin_hourly.trigger'
 
 permissions:
   contents: write
 
 concurrency:
-  group: rubyclips-muffin-part1
-  cancel-in-progress: true
+  group: rubyclips-muffindrama-hourly
+  cancel-in-progress: false
 
 jobs:
   build-and-publish:
@@ -20,34 +21,66 @@ jobs:
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check story state
+        id: state
+        run: |
+          python - <<'PY'
+          import json, os
+          s=json.load(open('rubyclips/muffin_state.json'))
+          ready=int(s['nextEpisode']) <= int(s['currentSeriesEpisodeCount'])
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
+              f.write(f"ready={'true' if ready else 'false'}\n")
+              f.write(f"next_episode={s['nextEpisode']}\n")
+              f.write(f"next_part={s['nextPart']}\n")
+          print(f"Story={s['currentSeriesTitle']} next episode={s['nextEpisode']} next part={s['nextPart']} ready={ready}")
+          PY
+
       - uses: actions/setup-node@v4
+        if: steps.state.outputs.ready == 'true'
         with:
           node-version: '22'
+
       - name: Install tools
+        if: steps.state.outputs.ready == 'true'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
           npm init -y >/dev/null 2>&1
-          npm install --silent @tobyg74/tiktok-api-dl
-      - name: Resolve episodes
+          npm install --silent puppeteer-core @tobyg74/tiktok-api-dl
+
+      - name: Resolve upcoming episodes
+        if: steps.state.outputs.ready == 'true'
         run: |
-          cp rubyclips/muffin_part1_resolve.js rubyclips/muffin_part1_resolve.cjs
-          node rubyclips/muffin_part1_resolve.cjs
-      - name: Build Part 1
-        run: python rubyclips/muffin_part1_build.py
+          cp rubyclips/muffin_story_resolve.js rubyclips/muffin_story_resolve.cjs
+          node rubyclips/muffin_story_resolve.cjs
+
+      - name: Build longest safe part
+        if: steps.state.outputs.ready == 'true'
+        run: python rubyclips/muffin_story_build.py
+
       - name: Publish release
+        if: steps.state.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG='rubyclips-tt-7682993954661553173-p1'
-          VIDEO='rubyclips/muffin_output/muffindrama-part1.mp4'
+          SERIES_ID="$(python -c "import json; print(json.load(open('rubyclips/muffin_output/manifest.json'))['sourceSeriesId'])")"
+          PART="$(python -c "import json; print(json.load(open('rubyclips/muffin_output/manifest.json'))['segmentIndex'])")"
+          VIDEO_NAME="$(python -c "import json; print(json.load(open('rubyclips/muffin_output/manifest.json'))['file'])")"
+          TAG="rubyclips-tt-${SERIES_ID}-p${PART}"
+          VIDEO="rubyclips/muffin_output/${VIDEO_NAME}"
           MANIFEST='rubyclips/muffin_output/manifest.json'
+          echo "$TAG" > /tmp/rubyclips_tag
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$VIDEO" "$MANIFEST" --clobber
           else
-            gh release create "$TAG" "$VIDEO" "$MANIFEST" --title 'RubyClips MuffinDrama Part 1' --notes 'Part 1 built from the oldest MuffinDrama story in episode order.'
+            gh release create "$TAG" "$VIDEO" "$MANIFEST" --title "RubyClips MuffinDrama Part ${PART}" --notes "Consecutive MuffinDrama episodes packed in order under the 599-second TikTok ceiling."
           fi
+
       - name: Wait for publisher
+        if: steps.state.outputs.ready == 'true'
         run: |
           URL='https://rubys-realm.vercel.app/api/rubyclips-post?health=1'
           for i in $(seq 1 90); do
@@ -57,22 +90,57 @@ jobs:
           done
           cat /tmp/health.json || true
           exit 1
+
       - name: Send to Buffer
+        if: steps.state.outputs.ready == 'true'
         run: |
-          URL='https://rubys-realm.vercel.app/api/rubyclips-post?tag=rubyclips-tt-7682993954661553173-p1'
+          TAG="$(cat /tmp/rubyclips_tag)"
+          URL="https://rubys-realm.vercel.app/api/rubyclips-post?tag=${TAG}"
           CODE="$(curl -sS --max-time 120 -o /tmp/post.json -w '%{http_code}' "$URL" || true)"
           cat /tmp/post.json
           test "$CODE" = '200'
           python -c "import json; d=json.load(open('/tmp/post.json')); assert d.get('ok') and d.get('postId') and str(d.get('channelName','')).lstrip('@').lower()=='rubaradaclips'"
           cp /tmp/post.json rubyclips/muffin_output/publish.json
+
+      - name: Advance story state
+        if: steps.state.outputs.ready == 'true'
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('rubyclips/muffin_state.json')
+          s=json.loads(p.read_text())
+          info=json.load(open('rubyclips/muffin_output/part-info.json'))
+          part=int(info['part'])
+          episodes=[int(x) for x in info['episodes']]
+          s['lastPostedPart']=part
+          s['lastPostedEpisodes']=episodes
+          s['nextEpisode']=int(info['nextEpisode'])
+          s['nextPart']=part+1
+          s['lastPackingPolicy']='max-whole-episodes-under-599s'
+          if info.get('storyComplete'):
+              sid=str(s['currentSeriesId'])
+              done=[str(x) for x in s.get('completedSeriesIds',[])]
+              if sid not in done: done.append(sid)
+              s['completedSeriesIds']=done
+              s['currentSeriesComplete']=True
+          p.write_text(json.dumps(s,indent=2)+'\n')
+          PY
+          git config user.name 'rubyclips-publisher-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git pull --rebase --autostash
+          git add rubyclips/muffin_state.json
+          git diff --cached --quiet || git commit -m 'Advance MuffinDrama hourly story queue [skip ci]'
+          git push
+
       - name: Save diagnostics
-        if: always()
+        if: always() && steps.state.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: rubyclips-muffin-part1-${{ github.run_number }}
+          name: rubyclips-muffindrama-${{ github.run_number }}
           path: |
             rubyclips/muffin_output/manifest.json
-            rubyclips/muffin_output/part1-info.json
+            rubyclips/muffin_output/part-info.json
             rubyclips/muffin_output/publish.json
             rubyclips/muffin_work/episodes.json
             rubyclips/muffin_work/selected.json
