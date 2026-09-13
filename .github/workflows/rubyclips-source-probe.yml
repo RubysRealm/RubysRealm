@@ -17,52 +17,66 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Inspect current SnapTik response
+      - name: Recover Episode 1 media URL
         run: |
           set -euo pipefail
-          python -m pip install -q requests cloudscraper beautifulsoup4
+          python -m pip install -q requests cloudscraper
           python - <<'PY'
-          import html, json, re, urllib.parse
-          import requests, cloudscraper
+          import html, os, re, time, urllib.parse
+          import cloudscraper
 
           VIDEO='https://www.tiktok.com/@muffindrama_us/video/7682997000391904526'
           UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-          s=requests.Session(); s.headers.update({'User-Agent':UA,'Accept-Language':'en-US,en;q=0.9'})
-          home=s.get('https://snaptik.app/en',timeout=30)
-          print('HOME_STATUS',home.status_code,'LEN',len(home.text))
-          token=''
-          m=re.search(r'name=["\']token["\'][^>]*value=["\']([^"\']+)',home.text,re.I) or re.search(r'value=["\']([^"\']+)["\'][^>]*name=["\']token["\']',home.text,re.I)
-          if m: token=html.unescape(m.group(1))
-          print('TOKEN_FOUND',bool(token))
-          params={'url':VIDEO,'lang':'en'}
-          if token: params['token']=token
           cs=cloudscraper.create_scraper(browser={'browser':'chrome','platform':'windows','mobile':False})
           cs.headers.update({'User-Agent':UA,'Referer':'https://snaptik.app/en','Accept-Language':'en-US,en;q=0.9','X-Requested-With':'XMLHttpRequest'})
-          # carry cookies from first session where possible
-          for c in s.cookies: cs.cookies.set(c.name,c.value,domain=c.domain,path=c.path)
-          r=cs.get('https://snaptik.app/abc2.php',params=params,timeout=60,allow_redirects=True)
-          print('RESULT_STATUS',r.status_code,'URL',r.url,'CTYPE',r.headers.get('content-type'),'LEN',len(r.text))
-          open('snaptik-response.txt','w',encoding='utf-8').write(r.text)
-          text=html.unescape(r.text).replace('\\/','/').replace('\\u0026','&')
-          print('RESPONSE_HEAD_START')
-          print(re.sub(r'\s+',' ',text[:12000]))
-          print('RESPONSE_HEAD_END')
-          patterns=[
-            r'https?://[^"\'<>\s]+',
-            r'/file\.php\?[^"\'<>\s]+',
-            r'data-backup=["\']([^"\']+)',
-            r'data-token=["\']([^"\']+)'
-          ]
-          vals=[]
-          for p in patterns:
-            for x in re.findall(p,text,re.I):
-              if isinstance(x,tuple): x=x[0]
-              if x not in vals: vals.append(x)
-          print('CANDIDATES_START')
-          for x in vals[:100]: print(x)
-          print('CANDIDATES_END')
+          home=cs.get('https://snaptik.app/en',timeout=30)
+          print('HOME',home.status_code,len(home.text))
+          base={'url':VIDEO,'lang':'en'}
+          responses=[]
+          for i in range(5):
+              params=dict(base)
+              if i: params['_v']=str(int(time.time()*1000)+i)
+              r=cs.get('https://snaptik.app/abc2.php',params=params,timeout=60,allow_redirects=True)
+              text=html.unescape(r.text).replace('\\/','/').replace('\\u0026','&')
+              responses.append(text)
+              print('TRY',i,'STATUS',r.status_code,'LEN',len(text),'URL',r.url)
+              print('HEAD',re.sub(r'\s+',' ',text[:3000]))
+              if 'Updating' not in text and 'location.replace' not in text:
+                  break
+              time.sleep(1.2)
+          text='\n'.join(responses)
+          open('snaptik-response.txt','w',encoding='utf-8').write(text)
+          urls=[]
+          for p in [r'https?://[^"\'<>\s]+',r'/file\.php\?[^"\'<>\s]+',r'data-backup=["\']([^"\']+)',r'data-token=["\']([^"\']+)']:
+              for x in re.findall(p,text,re.I):
+                  if isinstance(x,tuple): x=x[0]
+                  x=html.unescape(x).replace('\\/','/').replace('\\u0026','&')
+                  if x not in urls: urls.append(x)
+          print('CANDIDATES')
+          for u in urls: print(u)
+          media=[u for u in urls if any(k in u.lower() for k in ['.mp4','file.php','snapxcdn','akamaized','tiktokcdn','bytecdn','muscdn'])]
+          if not media:
+              raise SystemExit('No media URL recovered')
+          u=urllib.parse.urljoin('https://snaptik.app',media[0])
+          print('CHOSEN',u)
+          d=cs.get(u,timeout=120,stream=True,allow_redirects=True)
+          print('DOWNLOAD',d.status_code,d.headers.get('content-type'),d.url)
+          d.raise_for_status()
+          with open('episode1.mp4','wb') as f:
+              for chunk in d.iter_content(1024*1024):
+                  if chunk: f.write(chunk)
+          size=os.path.getsize('episode1.mp4')
+          print('BYTES',size)
+          if size < 100000: raise SystemExit('Downloaded file too small')
           PY
-      - name: Upload response artifact
+      - name: Upload Episode 1
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: muffindrama-episode1
+          path: episode1.mp4
+          retention-days: 1
+      - name: Upload diagnostic response
         if: always()
         uses: actions/upload-artifact@v4
         with:
