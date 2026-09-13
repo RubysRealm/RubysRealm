@@ -1,0 +1,37 @@
+name: MuffinDrama Episode 2 Resolver Probe
+
+on:
+  push:
+    paths:
+      - '.github/workflows/muffin-ep2-diag.yml'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --silent @tobyg74/tiktok-api-dl
+      - name: Probe exact Episode 2
+        run: |
+          node - <<'NODE'
+          const Tiktok=require('@tobyg74/tiktok-api-dl');
+          const url='https://www.tiktok.com/@muffindrama_us/video/7682997015172762893';
+          const timeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),ms))]);
+          function urls(x,out=[]){ if(typeof x==='string'&&/^https?:\/\//.test(x)) out.push(x); else if(Array.isArray(x)) x.forEach(v=>urls(v,out)); else if(x&&typeof x==='object') Object.values(x).forEach(v=>urls(v,out)); return out; }
+          (async()=>{
+            for(const version of ['v2','v3','v1']){
+              try{
+                const r=await timeout(Tiktok.Downloader(url,{version}),20000);
+                const all=[...new Set(urls(r))];
+                console.log('VERSION',version,'STATUS',r?.status,'MESSAGE',r?.message||'');
+                console.log('RESULT_KEYS',Object.keys(r?.result||{}));
+                console.log('VIDEO_TYPE',typeof r?.result?.video,'VIDEO_KEYS',r?.result?.video&&typeof r.result.video==='object'?Object.keys(r.result.video):[]);
+                console.log('URLS',all.slice(0,20));
+              }catch(e){ console.log('VERSION',version,'ERROR',String(e?.message||e)); }
+            }
+          })();
+          NODE
