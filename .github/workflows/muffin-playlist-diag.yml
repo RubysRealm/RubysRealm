@@ -15,25 +15,59 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install resolver
+      - name: Install Chrome helper
         run: |
           npm init -y >/dev/null 2>&1
-          npm install --silent @tobyg74/tiktok-api-dl
-      - name: Probe direct short-drama episode downloaders
+          npm install --silent puppeteer-core
+      - name: Extract Episode 4 identity and media requests
         run: |
           cat > probe.cjs <<'JS'
-          const Tiktok=require('@tobyg74/tiktok-api-dl');
-          const url='https://www.tiktok.com/shortdrama/episode/7682993954661553173/4';
-          const timeout=(ms)=>new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),ms));
+          const puppeteer=require('puppeteer-core');
+          const fs=require('fs');
+          const chrome=['/usr/bin/google-chrome','/usr/bin/chromium','/usr/bin/chromium-browser'].find(p=>fs.existsSync(p));
+          if(!chrome) throw new Error('Chrome missing');
+          const target='https://www.tiktok.com/shortdrama/episode/7682993954661553173/4';
           (async()=>{
-            for (const version of ['v2','v3']) {
-              try {
-                const r=await Promise.race([Tiktok.Downloader(url,{version}),timeout(45000)]);
-                console.log('RESULT_'+version,JSON.stringify(r));
-              } catch(e) {
-                console.log('ERROR_'+version,String(e?.message||e));
-              }
+            const browser=await puppeteer.launch({headless:true,executablePath:chrome,args:['--no-sandbox','--disable-dev-shm-usage','--disable-blink-features=AutomationControlled']});
+            const page=await browser.newPage();
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36');
+            await page.setViewport({width:1440,height:1800});
+            const urls=[];
+            const jsonBodies=[];
+            function keep(u){
+              if(!u) return;
+              if(/tiktok|tiktokcdn|byteoversea|muscdn|ibytedtos|tos-maliva|video\//i.test(u)) urls.push(u);
             }
+            page.on('request',req=>keep(req.url()));
+            page.on('response',async resp=>{
+              const u=resp.url(); keep(u);
+              const ct=(resp.headers()['content-type']||'').toLowerCase();
+              if((ct.includes('json')||/api\//i.test(u)) && jsonBodies.length<80){
+                try{
+                  const t=await resp.text();
+                  if(t && /7682993954661553173|aweme|itemList|episode|video/i.test(t)) jsonBodies.push({url:u,status:resp.status(),body:t.slice(0,120000)});
+                }catch{}
+              }
+            });
+            await page.goto(target,{waitUntil:'domcontentloaded',timeout:90000});
+            await new Promise(r=>setTimeout(r,15000));
+            const data=await page.evaluate(()=>{
+              const html=document.documentElement.outerHTML;
+              const scripts=[...document.scripts].map(s=>s.textContent||'').join('\n');
+              const text=document.body?.innerText||'';
+              const video=[...document.querySelectorAll('video')].map(v=>({src:v.src,currentSrc:v.currentSrc,poster:v.poster}));
+              const resources=performance.getEntriesByType('resource').map(x=>x.name);
+              const all=html+'\n'+scripts+'\n'+resources.join('\n');
+              const ids=[...new Set([
+                ...[...all.matchAll(/@muffindrama_us\/video\/(\d{10,25})/g)].map(m=>m[1]),
+                ...[...all.matchAll(/["'](?:aweme_id|awemeId|itemId|item_id|videoId|video_id)["']\s*[:=]\s*["']?(\d{10,25})/g)].map(m=>m[1])
+              ])];
+              return {url:location.href,title:document.title,text:text.slice(0,20000),video,resources:resources.filter(u=>/video|tiktokcdn|byteoversea|muscdn|ibytedtos|tos-maliva/i.test(u)).slice(0,300),ids};
+            });
+            console.log('PAGE_DATA',JSON.stringify(data));
+            console.log('NETWORK_URLS',JSON.stringify([...new Set(urls)].slice(0,800)));
+            console.log('JSON_BODIES',JSON.stringify(jsonBodies));
+            await browser.close();
           })().catch(e=>{console.error(e);process.exit(1)});
           JS
-          timeout 120 node probe.cjs
+          timeout 240 node probe.cjs
