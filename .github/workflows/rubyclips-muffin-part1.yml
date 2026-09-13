@@ -29,7 +29,9 @@ jobs:
           npm init -y >/dev/null 2>&1
           npm install --silent @tobyg74/tiktok-api-dl
       - name: Resolve episodes
-        run: node rubyclips/muffin_part1_resolve.js
+        run: |
+          cp rubyclips/muffin_part1_resolve.js rubyclips/muffin_part1_resolve.cjs
+          node rubyclips/muffin_part1_resolve.cjs
       - name: Build Part 1
         run: python rubyclips/muffin_part1_build.py
       - name: Publish release
