@@ -17,74 +17,30 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Resolve confirmed Episode 1
+      - name: Resolve Episode 1 URL
         run: |
           set -euo pipefail
           npm init -y >/dev/null 2>&1
           npm install --silent @tobyg74/tiktok-api-dl
           node <<'JS'
           const fs = require('fs');
-          const https = require('https');
-          const http = require('http');
           const Tiktok = require('@tobyg74/tiktok-api-dl');
-          const source = 'https://www.tiktok.com/@muffindrama_us/video/7682997000391904526';
-
-          function download(url, out, redirects=0) {
-            return new Promise((resolve,reject)=>{
-              if (redirects>8) return reject(new Error('too many redirects'));
-              const lib = url.startsWith('https:') ? https : http;
-              const req = lib.get(url, {headers:{
-                'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
-                'Referer':'https://www.tiktok.com/',
-                'Accept':'*/*'
-              }}, res=>{
-                if ([301,302,303,307,308].includes(res.statusCode) && res.headers.location) {
-                  res.resume();
-                  return download(new URL(res.headers.location,url).href,out,redirects+1).then(resolve,reject);
-                }
-                console.log('DOWNLOAD_STATUS',res.statusCode,res.headers['content-type'],url);
-                if (res.statusCode!==200 && res.statusCode!==206) { res.resume(); return reject(new Error('HTTP '+res.statusCode)); }
-                const f=fs.createWriteStream(out); res.pipe(f); f.on('finish',()=>f.close(resolve)); f.on('error',reject);
-              }); req.on('error',reject);
-            });
-          }
-
+          const source='https://www.tiktok.com/@muffindrama_us/video/7682997000391904526';
           (async()=>{
-            let lastErr;
-            for (const version of ['v1','v2','v3']) {
-              try {
-                console.log('TRY_VERSION',version);
-                const r = await Tiktok.Downloader(source,{version});
-                fs.writeFileSync(`result-${version}.json`,JSON.stringify(r,null,2));
-                console.log('STATUS',r?.status,'MESSAGE',r?.message||'');
-                let urls=[];
-                const obj=r?.result||r;
-                const walk=x=>{
-                  if (!x) return;
-                  if (typeof x==='string' && /^https?:\/\//.test(x)) urls.push(x);
-                  else if (Array.isArray(x)) x.forEach(walk);
-                  else if (typeof x==='object') Object.values(x).forEach(walk);
-                };
-                walk(obj);
-                urls=[...new Set(urls)].filter(u=>/play|video|mp4|nowm|download|tiktokcdn|bytecdn|muscdn|akamaized|tos\//i.test(u));
-                console.log('CANDIDATE_COUNT',urls.length);
-                for (let i=0;i<Math.min(urls.length,20);i++) console.log('CAND',i,urls[i]);
-                for (const u of urls) {
-                  try {
-                    await download(u,'episode1.mp4');
-                    const size=fs.statSync('episode1.mp4').size;
-                    console.log('DOWNLOADED_BYTES',size,'FROM_VERSION',version);
-                    if (size>100000) return;
-                  } catch(e) {
-                    lastErr=e; console.log('CAND_FAIL',String(e));
-                    try { fs.unlinkSync('episode1.mp4'); } catch(_) {}
-                  }
-                }
-              } catch(e) { lastErr=e; console.log('VERSION_FAIL',version,String(e)); }
-            }
-            throw lastErr || new Error('No downloadable candidate found');
+            const r=await Tiktok.Downloader(source,{version:'v2'});
+            fs.writeFileSync('resolver.json',JSON.stringify(r,null,2));
+            const url=r?.result?.video?.playAddr?.[0];
+            if(!url) throw new Error('No playAddr returned');
+            fs.writeFileSync('media_url.txt',url);
+            console.log('MEDIA_URL_READY');
           })().catch(e=>{console.error(e);process.exit(1)});
           JS
+      - name: Download Episode 1
+        run: |
+          set -euo pipefail
+          URL="$(cat media_url.txt)"
+          curl -L --fail --retry 2 -A 'Mozilla/5.0' -e 'https://www.tiktok.com/' "$URL" -o episode1.mp4
+          test $(stat -c%s episode1.mp4) -gt 100000
       - name: Verify video
         run: ffprobe -v error -show_entries format=duration,size -of json episode1.mp4
       - name: Upload Episode 1
@@ -98,6 +54,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tiktok-api-results
-          path: result-*.json
+          path: resolver.json
           if-no-files-found: ignore
           retention-days: 1
