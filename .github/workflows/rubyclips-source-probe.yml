@@ -14,98 +14,77 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: '3.12'
-      - name: Capture Episode 1 from TikTok embed player
+          node-version: '22'
+      - name: Resolve confirmed Episode 1
         run: |
           set -euo pipefail
-          google-chrome --version || chromium --version || true
-          python -m pip install -q selenium requests
-          python - <<'PY'
-          import json, os, time, requests
-          from selenium import webdriver
-          from selenium.webdriver.chrome.options import Options
-          from selenium.webdriver.common.by import By
+          npm init -y >/dev/null 2>&1
+          npm install --silent @tobyg74/tiktok-api-dl
+          node <<'JS'
+          const fs = require('fs');
+          const https = require('https');
+          const http = require('http');
+          const Tiktok = require('@tobyg74/tiktok-api-dl');
+          const source = 'https://www.tiktok.com/@muffindrama_us/video/7682997000391904526';
 
-          URL='https://www.tiktok.com/embed/v2/7682997000391904526'
-          opts=Options()
-          opts.add_argument('--headless=new')
-          opts.add_argument('--no-sandbox')
-          opts.add_argument('--disable-dev-shm-usage')
-          opts.add_argument('--disable-blink-features=AutomationControlled')
-          opts.add_argument('--autoplay-policy=no-user-gesture-required')
-          opts.add_argument('--window-size=1280,900')
-          opts.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
-          opts.set_capability('goog:loggingPrefs', {'performance':'ALL','browser':'ALL'})
-          driver=webdriver.Chrome(options=opts)
-          driver.execute_cdp_cmd('Network.enable', {})
-          try:
-              driver.get(URL)
-              time.sleep(4)
-              # Trigger playback if a button is available.
-              for sel in ['button[aria-label*="play" i]','button[data-e2e*="play" i]','video']:
-                  try:
-                      els=driver.find_elements(By.CSS_SELECTOR,sel)
-                      if els:
-                          els[0].click()
-                          break
-                  except Exception:
-                      pass
-              try:
-                  driver.execute_script("const v=document.querySelector('video'); if(v){v.muted=true; v.play().catch(()=>{});} ")
-              except Exception:
-                  pass
-              time.sleep(12)
-              print('TITLE',driver.title)
-              print('CURRENT_URL',driver.current_url)
-              try:
-                  print('VIDEO_STATE',driver.execute_script("const v=document.querySelector('video'); return v?{src:v.src,currentSrc:v.currentSrc,readyState:v.readyState,duration:v.duration}:null"))
-              except Exception as e:
-                  print('VIDEO_STATE_ERROR',repr(e))
-              candidates=[]
-              for entry in driver.get_log('performance'):
-                  try:
-                      msg=json.loads(entry['message'])['message']
-                      if msg['method'] not in ('Network.responseReceived','Network.requestWillBeSent'):
-                          continue
-                      p=msg['params']
-                      if msg['method']=='Network.responseReceived':
-                          r=p.get('response',{})
-                          u=r.get('url',''); mime=r.get('mimeType',''); status=r.get('status')
-                      else:
-                          r=p.get('request',{})
-                          u=r.get('url',''); mime=''; status=''
-                      low=u.lower()
-                      if u and ('video' in mime.lower() or any(x in low for x in ['.mp4','video/tos','bytecdn','tiktokcdn','muscdn','akamaized','tos-useast','tos-maliva','tos-alisg'])):
-                          row=(u,mime,status)
-                          if row not in candidates: candidates.append(row)
-                  except Exception:
-                      pass
-              print('MEDIA_CANDIDATES',len(candidates))
-              for i,(u,m,s) in enumerate(candidates[:80]): print('CAND',i,s,m,u)
-              if not candidates:
-                  open('embed-page.html','w',encoding='utf-8').write(driver.page_source)
-                  raise SystemExit('No media request captured from embed player')
-              # Prefer successful video responses, then likely CDN media URLs.
-              ranked=sorted(candidates,key=lambda x:(0 if 'video' in (x[1] or '').lower() else 1,0 if x[2] in (200,206) else 1,len(x[0])))
-              media_url=ranked[0][0]
-              print('CHOSEN',media_url)
-              sess=requests.Session()
-              for c in driver.get_cookies(): sess.cookies.set(c['name'],c['value'],domain=c.get('domain'))
-              headers={'User-Agent':opts.arguments[-1].split('=',1)[-1],'Referer':URL,'Range':'bytes=0-'}
-              rr=sess.get(media_url,headers=headers,timeout=180,stream=True,allow_redirects=True)
-              print('DOWNLOAD_STATUS',rr.status_code,rr.headers.get('content-type'),rr.url)
-              rr.raise_for_status()
-              with open('episode1.mp4','wb') as f:
-                  for chunk in rr.iter_content(1024*1024):
-                      if chunk: f.write(chunk)
-              size=os.path.getsize('episode1.mp4')
-              print('DOWNLOADED_BYTES',size)
-              if size<100000: raise SystemExit('Downloaded file unexpectedly small')
-          finally:
-              driver.quit()
-          PY
+          function download(url, out, redirects=0) {
+            return new Promise((resolve,reject)=>{
+              if (redirects>8) return reject(new Error('too many redirects'));
+              const lib = url.startsWith('https:') ? https : http;
+              const req = lib.get(url, {headers:{
+                'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
+                'Referer':'https://www.tiktok.com/',
+                'Accept':'*/*'
+              }}, res=>{
+                if ([301,302,303,307,308].includes(res.statusCode) && res.headers.location) {
+                  res.resume();
+                  return download(new URL(res.headers.location,url).href,out,redirects+1).then(resolve,reject);
+                }
+                console.log('DOWNLOAD_STATUS',res.statusCode,res.headers['content-type'],url);
+                if (res.statusCode!==200 && res.statusCode!==206) { res.resume(); return reject(new Error('HTTP '+res.statusCode)); }
+                const f=fs.createWriteStream(out); res.pipe(f); f.on('finish',()=>f.close(resolve)); f.on('error',reject);
+              }); req.on('error',reject);
+            });
+          }
+
+          (async()=>{
+            let lastErr;
+            for (const version of ['v1','v2','v3']) {
+              try {
+                console.log('TRY_VERSION',version);
+                const r = await Tiktok.Downloader(source,{version});
+                fs.writeFileSync(`result-${version}.json`,JSON.stringify(r,null,2));
+                console.log('STATUS',r?.status,'MESSAGE',r?.message||'');
+                let urls=[];
+                const obj=r?.result||r;
+                const walk=x=>{
+                  if (!x) return;
+                  if (typeof x==='string' && /^https?:\/\//.test(x)) urls.push(x);
+                  else if (Array.isArray(x)) x.forEach(walk);
+                  else if (typeof x==='object') Object.values(x).forEach(walk);
+                };
+                walk(obj);
+                urls=[...new Set(urls)].filter(u=>/play|video|mp4|nowm|download|tiktokcdn|bytecdn|muscdn|akamaized|tos\//i.test(u));
+                console.log('CANDIDATE_COUNT',urls.length);
+                for (let i=0;i<Math.min(urls.length,20);i++) console.log('CAND',i,urls[i]);
+                for (const u of urls) {
+                  try {
+                    await download(u,'episode1.mp4');
+                    const size=fs.statSync('episode1.mp4').size;
+                    console.log('DOWNLOADED_BYTES',size,'FROM_VERSION',version);
+                    if (size>100000) return;
+                  } catch(e) {
+                    lastErr=e; console.log('CAND_FAIL',String(e));
+                    try { fs.unlinkSync('episode1.mp4'); } catch(_) {}
+                  }
+                }
+              } catch(e) { lastErr=e; console.log('VERSION_FAIL',version,String(e)); }
+            }
+            throw lastErr || new Error('No downloadable candidate found');
+          })().catch(e=>{console.error(e);process.exit(1)});
+          JS
       - name: Verify video
         run: ffprobe -v error -show_entries format=duration,size -of json episode1.mp4
       - name: Upload Episode 1
@@ -114,11 +93,11 @@ jobs:
           name: muffindrama-episode1
           path: episode1.mp4
           retention-days: 1
-      - name: Upload embed diagnostic
-        if: failure()
+      - name: Upload resolver diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tiktok-embed-diagnostic
-          path: embed-page.html
+          name: tiktok-api-results
+          path: result-*.json
           if-no-files-found: ignore
           retention-days: 1
