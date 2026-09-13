@@ -15,44 +15,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install browser helper
+      - name: Install resolver
         run: |
           npm init -y >/dev/null 2>&1
-          npm install --silent puppeteer-core
-          which google-chrome || which chromium || which chromium-browser || true
-      - name: Probe profile and Episode 1 for playlists
+          npm install --silent @tobyg74/tiktok-api-dl
+      - name: Probe direct short-drama episode downloaders
         run: |
           cat > probe.cjs <<'JS'
-          const puppeteer=require('puppeteer-core');
-          const fs=require('fs');
-          const {execSync}=require('child_process');
-          const chrome=['/usr/bin/google-chrome','/usr/bin/chromium','/usr/bin/chromium-browser'].find(p=>fs.existsSync(p));
-          if(!chrome) throw new Error('No Chrome executable found');
+          const Tiktok=require('@tobyg74/tiktok-api-dl');
+          const url='https://www.tiktok.com/shortdrama/episode/7682993954661553173/4';
+          const timeout=(ms)=>new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),ms));
           (async()=>{
-            const browser=await puppeteer.launch({headless:true,executablePath:chrome,args:['--no-sandbox','--disable-dev-shm-usage','--disable-blink-features=AutomationControlled']});
-            const page=await browser.newPage();
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36');
-            await page.setViewport({width:1440,height:1800});
-            async function inspect(url,label){
-              console.log('NAV',label,url);
-              await page.goto(url,{waitUntil:'domcontentloaded',timeout:90000});
-              await new Promise(r=>setTimeout(r,8000));
-              for(let i=0;i<18;i++){
-                await page.evaluate(()=>window.scrollTo(0,document.body.scrollHeight));
-                await new Promise(r=>setTimeout(r,700));
+            for (const version of ['v2','v3']) {
+              try {
+                const r=await Promise.race([Tiktok.Downloader(url,{version}),timeout(45000)]);
+                console.log('RESULT_'+version,JSON.stringify(r));
+              } catch(e) {
+                console.log('ERROR_'+version,String(e?.message||e));
               }
-              const data=await page.evaluate(()=>{
-                const links=[...document.querySelectorAll('a[href]')].map(a=>({href:a.href,text:(a.innerText||a.getAttribute('aria-label')||'').trim()}));
-                const scripts=[...document.scripts].map(s=>s.textContent||'').join('\n');
-                const mixIds=[...new Set([...scripts.matchAll(/(?:mixId|mix_id)["'\\s:]+(\d{10,25})/gi)].map(m=>m[1]))];
-                const mixNames=[...new Set([...scripts.matchAll(/(?:mixName|mix_name)["'\\s:]+["']([^"']{1,150})/gi)].map(m=>m[1]))];
-                return {url:location.href,title:document.title,body:(document.body?.innerText||'').slice(0,30000),links:links.filter(x=>/\/playlist\/|\/video\/|\/shortdrama/.test(x.href)).slice(0,500),mixIds,mixNames};
-              });
-              console.log(label+'_DATA',JSON.stringify(data));
             }
-            await inspect('https://www.tiktok.com/@muffindrama_us','PROFILE');
-            await inspect('https://www.tiktok.com/@muffindrama_us/video/7682997000391904526','EP1');
-            await browser.close();
           })().catch(e=>{console.error(e);process.exit(1)});
           JS
-          timeout 240 node probe.cjs
+          timeout 120 node probe.cjs
