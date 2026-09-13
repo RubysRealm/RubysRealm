@@ -11,39 +11,44 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - name: Probe alternate source relays
-        shell: bash
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install TikTok source tools
+        run: python -m pip install -U yt-dlp
+      - name: List oldest MuffinDrama uploads
         run: |
-          set +e
-          SRC='https://www.youtube.com/watch?v=q3h9Ke6boiU'
-          for API in 'https://cobalt-api.meowing.de/' 'https://capi.3kh0.net/'; do
-            echo "PROBING $API"
-            CODE="$(curl -L -sS --max-time 60 -o /tmp/cobalt.json -w '%{http_code}' \
-              -H 'Accept: application/json' -H 'Content-Type: application/json' \
-              -H 'User-Agent: rubys-realm-source/1.0 (+https://github.com/RubysRealm/RubysRealm)' \
-              --data "{\"url\":\"$SRC\",\"videoQuality\":\"720\",\"downloadMode\":\"auto\",\"youtubeVideoCodec\":\"h264\"}" \
-              "$API")"
-            echo "HTTP $CODE"
-            cat /tmp/cobalt.json || true
-            echo
-            if [ "$CODE" = '200' ]; then
-              URL="$(python3 - <<'PY'
-import json
-try:
- d=json.load(open('/tmp/cobalt.json'))
- print(d.get('url') or '')
-except Exception:
- print('')
-PY
-)"
-              if [ -n "$URL" ]; then
-                echo "SOURCE_URL_OK"
-                RC="$(curl -L -sS --connect-timeout 5 --max-time 30 -r 0-1048575 -o /tmp/source.bin -w '%{http_code}' "$URL")"
-                SIZE="$(wc -c </tmp/source.bin 2>/dev/null || echo 0)"
-                echo "RANGE_HTTP=$RC SIZE=$SIZE"
-                if [ "$SIZE" -gt 100000 ]; then exit 0; fi
-              fi
-            fi
-          done
-          exit 1
+          python - <<'PY'
+          import json
+          from yt_dlp import YoutubeDL
+
+          url='https://www.tiktok.com/@muffindrama_us'
+          opts={
+              'quiet': True,
+              'no_warnings': True,
+              'extract_flat': True,
+              'skip_download': True,
+              'playlistend': 500,
+              'socket_timeout': 45,
+              'retries': 3,
+          }
+          with YoutubeDL(opts) as ydl:
+              info=ydl.extract_info(url, download=False)
+          entries=[]
+          for e in (info or {}).get('entries') or []:
+              if not e: continue
+              vid=str(e.get('id') or '').strip()
+              title=str(e.get('title') or e.get('description') or '').replace('\n',' ').strip()
+              ts=int(e.get('timestamp') or e.get('release_timestamp') or 0)
+              webpage=str(e.get('webpage_url') or e.get('url') or '')
+              entries.append({'id':vid,'title':title,'timestamp':ts,'url':webpage})
+          if not entries:
+              raise SystemExit('No TikTok entries returned')
+          entries.sort(key=lambda x: (x['timestamp'] or 10**18, x['id']))
+          print('TOTAL', len(entries))
+          print('OLDEST_40_JSON')
+          print(json.dumps(entries[:40], ensure_ascii=False, indent=2))
+          PY
