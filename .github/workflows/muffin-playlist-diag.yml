@@ -19,54 +19,46 @@ jobs:
         run: |
           npm init -y >/dev/null 2>&1
           npm install --silent puppeteer-core
-      - name: Extract Episode 4 identity and media requests
+      - name: Resolve Episode 4 through SSSTik browser
         run: |
           cat > probe.cjs <<'JS'
           const puppeteer=require('puppeteer-core');
           const fs=require('fs');
           const chrome=['/usr/bin/google-chrome','/usr/bin/chromium','/usr/bin/chromium-browser'].find(p=>fs.existsSync(p));
           if(!chrome) throw new Error('Chrome missing');
-          const target='https://www.tiktok.com/shortdrama/episode/7682993954661553173/4';
+          const video='https://www.tiktok.com/@muffindrama_us/video/7682996946042297620';
           (async()=>{
             const browser=await puppeteer.launch({headless:true,executablePath:chrome,args:['--no-sandbox','--disable-dev-shm-usage','--disable-blink-features=AutomationControlled']});
             const page=await browser.newPage();
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36');
-            await page.setViewport({width:1440,height:1800});
-            const urls=[];
-            const jsonBodies=[];
-            function keep(u){
-              if(!u) return;
-              if(/tiktok|tiktokcdn|byteoversea|muscdn|ibytedtos|tos-maliva|video\//i.test(u)) urls.push(u);
+            await page.setViewport({width:1365,height:1600});
+            const net=[];
+            page.on('response',r=>{const u=r.url(); if(/tikcdn|ssstik|tiktok/.test(u)) net.push({url:u,status:r.status(),ct:r.headers()['content-type']||''})});
+            await page.goto('https://ssstik.io/en-1',{waitUntil:'domcontentloaded',timeout:90000});
+            await new Promise(r=>setTimeout(r,5000));
+            const pre=await page.evaluate(()=>({title:document.title,text:(document.body?.innerText||'').slice(0,6000),inputs:[...document.querySelectorAll('input')].map(x=>({id:x.id,name:x.name,type:x.type,placeholder:x.placeholder})),buttons:[...document.querySelectorAll('button')].map(x=>({id:x.id,type:x.type,text:x.innerText}))}));
+            console.log('PRE',JSON.stringify(pre));
+            const input=await page.$('input[type="text"],input[type="url"],input[name="id"],input');
+            if(!input) throw new Error('No input found');
+            await input.click({clickCount:3});
+            await input.type(video,{delay:4});
+            const form=await input.evaluateHandle(el=>el.form);
+            if(form && form.asElement()) {
+              await form.asElement().evaluate(f=>f.requestSubmit ? f.requestSubmit() : f.submit());
+            } else {
+              const btn=await page.$('button[type="submit"],button');
+              if(!btn) throw new Error('No submit button');
+              await btn.click();
             }
-            page.on('request',req=>keep(req.url()));
-            page.on('response',async resp=>{
-              const u=resp.url(); keep(u);
-              const ct=(resp.headers()['content-type']||'').toLowerCase();
-              if((ct.includes('json')||/api\//i.test(u)) && jsonBodies.length<80){
-                try{
-                  const t=await resp.text();
-                  if(t && /7682993954661553173|aweme|itemList|episode|video/i.test(t)) jsonBodies.push({url:u,status:resp.status(),body:t.slice(0,120000)});
-                }catch{}
-              }
-            });
-            await page.goto(target,{waitUntil:'domcontentloaded',timeout:90000});
-            await new Promise(r=>setTimeout(r,15000));
-            const data=await page.evaluate(()=>{
-              const html=document.documentElement.outerHTML;
-              const scripts=[...document.scripts].map(s=>s.textContent||'').join('\n');
-              const text=document.body?.innerText||'';
-              const video=[...document.querySelectorAll('video')].map(v=>({src:v.src,currentSrc:v.currentSrc,poster:v.poster}));
-              const resources=performance.getEntriesByType('resource').map(x=>x.name);
-              const all=html+'\n'+scripts+'\n'+resources.join('\n');
-              const ids=[...new Set([
-                ...[...all.matchAll(/@muffindrama_us\/video\/(\d{10,25})/g)].map(m=>m[1]),
-                ...[...all.matchAll(/["'](?:aweme_id|awemeId|itemId|item_id|videoId|video_id)["']\s*[:=]\s*["']?(\d{10,25})/g)].map(m=>m[1])
-              ])];
-              return {url:location.href,title:document.title,text:text.slice(0,20000),video,resources:resources.filter(u=>/video|tiktokcdn|byteoversea|muscdn|ibytedtos|tos-maliva/i.test(u)).slice(0,300),ids};
-            });
-            console.log('PAGE_DATA',JSON.stringify(data));
-            console.log('NETWORK_URLS',JSON.stringify([...new Set(urls)].slice(0,800)));
-            console.log('JSON_BODIES',JSON.stringify(jsonBodies));
+            await new Promise(r=>setTimeout(r,12000));
+            const out=await page.evaluate(()=>({
+              url:location.href,
+              title:document.title,
+              text:(document.body?.innerText||'').slice(0,12000),
+              links:[...document.querySelectorAll('a[href]')].map(a=>({href:a.href,text:(a.innerText||'').trim(),cls:a.className})).filter(x=>/tikcdn|download|watermark|video|ssstik/i.test(x.href+' '+x.text+' '+x.cls)).slice(0,100)
+            }));
+            console.log('OUT',JSON.stringify(out));
+            console.log('NET',JSON.stringify(net.slice(-150)));
             await browser.close();
           })().catch(e=>{console.error(e);process.exit(1)});
           JS
