@@ -17,50 +17,46 @@ jobs:
       - name: Start local Cobalt
         run: |
           set -euo pipefail
-          docker pull ghcr.io/imputnet/cobalt:11
+          docker pull ghcr.io/imputnet/cobalt:11 >/dev/null
           docker run -d --name cobalt -p 9000:9000 -e API_URL=http://127.0.0.1:9000/ ghcr.io/imputnet/cobalt:11
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:9000/ > cobalt-info.json; then break; fi
             sleep 1
           done
           cat cobalt-info.json
-      - name: Download confirmed Episode 1
+      - name: Probe confirmed Episode 1
         run: |
           set -euo pipefail
           VIDEO='https://www.tiktok.com/@muffindrama_us/video/7682997000391904526'
-          curl -fsS -X POST http://127.0.0.1:9000/ \
+          CODE=$(curl -sS -o cobalt-response.json -w '%{http_code}' -X POST http://127.0.0.1:9000/ \
             -H 'Accept: application/json' \
             -H 'Content-Type: application/json' \
-            --data "{\"url\":\"$VIDEO\",\"downloadMode\":\"auto\",\"videoQuality\":\"1080\",\"allowH265\":false,\"alwaysProxy\":true}" \
-            -o cobalt-response.json
+            --data "{\"url\":\"$VIDEO\",\"downloadMode\":\"auto\",\"videoQuality\":\"1080\",\"allowH265\":false,\"alwaysProxy\":true}")
+          echo HTTP_CODE=$CODE
           cat cobalt-response.json
           python - <<'PY'
-          import json, os, sys, urllib.parse, urllib.request
-          with open('cobalt-response.json','r',encoding='utf-8') as f: d=json.load(f)
-          print('STATUS',d.get('status'))
-          if d.get('status')=='error': raise SystemExit(json.dumps(d))
+          import json, os, urllib.parse, urllib.request
+          d=json.load(open('cobalt-response.json',encoding='utf-8'))
+          if d.get('status')=='error': raise SystemExit('COBALT_ERROR '+json.dumps(d))
           url=d.get('url')
           if not url and d.get('status')=='picker':
-              for x in d.get('picker') or []:
-                  if x.get('type')=='video' and x.get('url'):
-                      url=x['url']; break
-          if not url: raise SystemExit('Cobalt returned no downloadable video URL')
+              url=next((x.get('url') for x in d.get('picker',[]) if x.get('type')=='video' and x.get('url')),None)
+          if not url: raise SystemExit('Cobalt returned no downloadable video URL: '+json.dumps(d))
           url=urllib.parse.urljoin('http://127.0.0.1:9000/',url)
           print('MEDIA_URL',url)
-          req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0'})
-          with urllib.request.urlopen(req,timeout=180) as r, open('episode1.mp4','wb') as out:
+          with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0'}),timeout=180) as r, open('episode1.mp4','wb') as out:
               while True:
                   b=r.read(1024*1024)
                   if not b: break
                   out.write(b)
-          size=os.path.getsize('episode1.mp4')
-          print('DOWNLOADED_BYTES',size)
+          size=os.path.getsize('episode1.mp4'); print('DOWNLOADED_BYTES',size)
           if size<100000: raise SystemExit('Downloaded file is unexpectedly small')
           PY
       - name: Verify video
-        run: |
-          ffprobe -v error -show_entries format=duration,size -of json episode1.mp4
+        if: success()
+        run: ffprobe -v error -show_entries format=duration,size -of json episode1.mp4
       - name: Upload Episode 1
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: muffindrama-episode1
