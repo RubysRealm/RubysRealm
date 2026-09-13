@@ -1,0 +1,34 @@
+name: MuffinDrama playlist diagnostic
+on:
+  push:
+    paths:
+      - '.github/workflows/muffin-playlist-diag.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: |
+          npm init -y >/dev/null 2>&1
+          npm install --silent @tobyg74/tiktok-api-dl
+      - name: Probe playlist
+        run: |
+          cat > /tmp/probe.cjs <<'JS'
+          const Tiktok=require('@tobyg74/tiktok-api-dl');
+          (async()=>{
+            const id='7682993954661553173';
+            for (let page=1; page<=3; page++) {
+              const r=await Tiktok.Playlist(id,{page,count:20});
+              console.log('PAGE',page,JSON.stringify(r));
+              if(r.status!=='success'||!r.result?.hasMore) break;
+            }
+          })().catch(e=>{console.error(e);process.exit(1)});
+          JS
+          timeout 180 node /tmp/probe.cjs
