@@ -104,6 +104,26 @@ jobs:
           python -c "import json; d=json.load(open('/tmp/post.json')); assert d.get('ok') and d.get('postId') and str(d.get('channelName','')).lstrip('@').lower()=='rubaradaclips'"
           cp /tmp/post.json rubyclips/muffin_output/publish.json
 
+      - name: Queue this post for its TikTok story playlist
+        if: steps.state.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, subprocess
+          m=json.load(open('rubyclips/muffin_output/manifest.json'))
+          p=json.load(open('/tmp/post.json'))
+          subprocess.run([
+              'python','tools/record_tiktok_playlist_assignment.py',
+              '--account','rubaradaclips',
+              '--story-id',str(m['sourceSeriesId']),
+              '--story-title',str(m['sourceSeriesTitle']),
+              '--playlist-name',str(m['sourceSeriesTitle']),
+              '--part',str(m['segmentIndex']),
+              '--post-id',str(p['postId']),
+              '--source','rubaradaclips-workflow'
+          ], check=True)
+          PY
+
       - name: Advance corrected story state
         if: steps.state.outputs.ready == 'true'
         run: |
@@ -136,7 +156,7 @@ jobs:
           git config user.name 'rubyclips-publisher-bot'
           git config user.email 'actions@users.noreply.github.com'
           git pull --rebase --autostash
-          git add rubyclips/muffin_state.json
+          git add rubyclips/muffin_state.json tiktok_playlist_assignments.json
           git diff --cached --quiet || git commit -m 'Advance corrected MuffinDrama story queue [skip ci]'
           git push
 
