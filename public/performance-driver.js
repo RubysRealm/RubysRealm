@@ -1,109 +1,104 @@
 'use strict';
-(async()=>{
+(()=>{
   const params=new URLSearchParams(location.search);
-  if(params.get('performance')!=='human') return;
-  const demo=params.get('demo')==='1';
+  if(params.get('performance')!=='locked') return;
   const avatarZone=document.getElementById('avatarZone');
   if(!avatarZone) return;
 
-  const clips=[
-    'https://videos.pexels.com/video-files/8128280/8128280-uhd_3840_2160_25fps.mp4',
-    'https://videos.pexels.com/video-files/7047596/7047596-uhd_3840_2160_25fps.mp4',
-    'https://videos.pexels.com/video-files/9070180/9070180-uhd_3840_2160_25fps.mp4',
-    'https://videos.pexels.com/video-files/7849218/7849218-uhd_4096_2160_25fps.mp4'
-  ];
+  const idle=document.querySelector('.avatarIdle');
+  const talking=document.querySelector('.avatarTalking');
+  const chatClip=document.querySelector('.avatarChat');
+  const drinkClip=document.querySelector('.avatarDrink');
+  const snackClip=document.querySelector('.avatarSnack');
+  const all=[idle,talking,chatClip,drinkClip,snackClip].filter(Boolean);
+  const speech=document.getElementById('speech');
+  const chat=document.getElementById('chat');
+  const recentFollower=document.getElementById('recentFollower');
+  const recentGift=document.getElementById('recentGift');
 
   const style=document.createElement('style');
   style.textContent=`
-    #avatarZone.performanceHuman .avatarVideo{display:none!important}
-    #humanPerformance{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;z-index:1;filter:saturate(.78) contrast(1.06) brightness(.78) hue-rotate(334deg)}
-    #humanVignette{position:absolute;inset:0;z-index:2;pointer-events:none;background:linear-gradient(180deg,rgba(10,4,8,.05),rgba(8,2,5,.28)),radial-gradient(ellipse at center,transparent 54%,rgba(0,0,0,.34) 100%)}
-    #skinFaceOccluder{position:absolute;z-index:5;width:20%;aspect-ratio:.84;left:40%;top:10%;border-radius:48% 48% 45% 45%;background:rgba(8,4,8,.9);filter:blur(.7px);transform-origin:50% 70%;pointer-events:none}
-    #takaradaHead{position:absolute;z-index:6;width:24%;aspect-ratio:.88;left:38%;top:7%;overflow:hidden;border-radius:45% 45% 42% 42%;transform-origin:50% 72%;pointer-events:none;filter:drop-shadow(0 .5vh 1vh rgba(0,0,0,.48))}
-    #takaradaHead img{position:absolute;width:345%;height:auto;left:-123%;top:-18%;max-width:none}
-    #takaradaHead.speaking{animation:headTalk .42s ease-in-out infinite alternate}
-    @keyframes headTalk{from{transform:translate(var(--tx,0px),var(--ty,0px)) rotate(var(--rot,0deg)) scale(1)}to{transform:translate(var(--tx,0px),calc(var(--ty,0px) + .12vh)) rotate(var(--rot,0deg)) scale(1.006)}}
-    #humanStart{position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.38)}
-    #humanStart button{border:0;border-radius:999px;background:#ff1744;color:white;padding:1.25vh 1.8vh;font-size:1.55vh;font-weight:900;box-shadow:0 8px 28px rgba(0,0,0,.45)}
+    #avatarZone.lockedPreview .avatarVideo{display:block!important;opacity:0!important;transition:opacity .55s ease,transform 6s ease!important;transform:scale(1.025);filter:none!important}
+    #avatarZone.lockedPreview .avatarVideo.lockedVisible{opacity:1!important}
+    #avatarZone.lockedPreview.microLean .lockedVisible{transform:scale(1.045) translate(-.18%,.12%)}
+    #avatarZone.lockedPreview.microLean2 .lockedVisible{transform:scale(1.038) translate(.18%,-.08%)}
+    #lockedStart{position:absolute;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.42)}
+    #lockedStart button{border:0;border-radius:999px;background:#ff1744;color:#fff;font-size:1.65vh;font-weight:900;padding:1.35vh 2vh;box-shadow:0 8px 30px rgba(0,0,0,.48)}
+    #lockedBadge{position:absolute;left:3%;top:19%;z-index:10;background:rgba(0,0,0,.52);border:1px solid rgba(255,255,255,.18);border-radius:999px;padding:.45vh .75vh;font-size:1.05vh;font-weight:800;opacity:.75}
   `;
   document.head.appendChild(style);
+  avatarZone.classList.add('lockedPreview');
 
-  avatarZone.classList.add('performanceHuman');
-  const video=document.createElement('video');
-  video.id='humanPerformance'; video.muted=true; video.autoplay=!demo; video.playsInline=true; video.crossOrigin='anonymous'; video.preload='auto';
-  const vignette=document.createElement('div'); vignette.id='humanVignette';
-  const occ=document.createElement('div'); occ.id='skinFaceOccluder';
-  const head=document.createElement('div'); head.id='takaradaHead';
-  const headImg=document.createElement('img'); headImg.src='/takarada-avatar.jpg'; head.appendChild(headImg);
-  avatarZone.prepend(video); avatarZone.append(vignette,occ,head);
-
-  let clipIndex=0;
-  function nextClip(){
-    video.src=clips[clipIndex%clips.length];
-    clipIndex=(clipIndex+1)%clips.length;
-    if(!demo) video.play().catch(()=>{});
-  }
-  video.addEventListener('ended',nextClip);
-  video.addEventListener('error',()=>setTimeout(nextClip,900));
-  nextClip();
-
-  const speechObserver=new MutationObserver(()=>head.classList.toggle('speaking',avatarZone.classList.contains('reacting')));
-  speechObserver.observe(avatarZone,{attributes:true,attributeFilter:['class']});
-
-  let pose=null,lastDetect=0;
-  try{
-    const vision=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm');
-    const fileset=await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
-    pose=await vision.PoseLandmarker.createFromOptions(fileset,{
-      baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',delegate:'GPU'},
-      runningMode:'VIDEO',numPoses:1,minPoseDetectionConfidence:.35,minTrackingConfidence:.35
-    });
-  }catch(e){console.warn('Human performance pose tracker fallback',e?.message||e);}
-
-  function applyPose(lm){
-    if(!lm||!lm[0]) return;
-    const p=lm[0],nose=p[0],ls=p[11],rs=p[12];
-    if(!nose||!ls||!rs) return;
-    const shoulderMidX=(ls.x+rs.x)/2, shoulderMidY=(ls.y+rs.y)/2;
-    const angle=Math.atan2(rs.y-ls.y,rs.x-ls.x)*180/Math.PI;
-    const faceX=(nose.x-.5)*avatarZone.clientWidth;
-    const faceY=(nose.y-.22)*avatarZone.clientHeight;
-    const leanX=(shoulderMidX-.5)*avatarZone.clientWidth*.20;
-    const leanY=(shoulderMidY-.56)*avatarZone.clientHeight*.16;
-    const tx=faceX*.46+leanX*.54,ty=faceY*.44+leanY*.56;
-    const rot=Math.max(-9,Math.min(9,angle*.5));
-    head.style.setProperty('--tx',`${tx.toFixed(1)}px`);head.style.setProperty('--ty',`${ty.toFixed(1)}px`);head.style.setProperty('--rot',`${rot.toFixed(2)}deg`);
-    if(!head.classList.contains('speaking'))head.style.transform=`translate(${tx}px,${ty}px) rotate(${rot}deg)`;
-    occ.style.transform=`translate(${tx}px,${ty}px) rotate(${rot}deg)`;
+  for(const v of all){
+    try{v.pause();v.loop=false;v.autoplay=false;v.removeAttribute('loop');v.removeAttribute('autoplay');v.currentTime=0;}catch{}
   }
 
-  async function tick(now){
-    if(pose&&video.readyState>=2&&!video.paused&&now-lastDetect>75){
-      lastDetect=now;
-      try{const r=pose.detectForVideo(video,performance.now());applyPose(r.landmarks);}catch{}
-    }
-    requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
+  const badge=document.createElement('div');badge.id='lockedBadge';badge.textContent='TAKARADA • MINECRAFT';avatarZone.appendChild(badge);
+  const start=document.createElement('div');start.id='lockedStart';
+  const btn=document.createElement('button');btn.textContent='▶ START TAKARADA PREVIEW';start.appendChild(btn);avatarZone.appendChild(start);
 
-  if(demo){
-    const speech=document.getElementById('speech'),chat=document.getElementById('chat');
-    const recentFollower=document.getElementById('recentFollower'),recentGift=document.getElementById('recentGift');
-    const start=document.createElement('div');start.id='humanStart';
-    const btn=document.createElement('button');btn.textContent='▶ START REAL-MOTION TEST';start.appendChild(btn);avatarZone.appendChild(start);
-    const add=(text,cls='eventLine')=>{if(!chat)return;const d=document.createElement('div');d.className=cls;d.textContent=text;chat.appendChild(d);while(chat.children.length>7)chat.firstChild.remove();};
-    const talk=(text,ms=4500)=>{
-      if(speech){speech.textContent=text;speech.classList.add('show');}
-      avatarZone.classList.add('reacting');
-      try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.rate=.96;u.pitch=.92;const voices=speechSynthesis.getVoices();u.voice=voices.find(v=>/en-US/i.test(v.lang)&&/male|alex|daniel|fred/i.test(v.name))||voices.find(v=>/en-US/i.test(v.lang))||null;speechSynthesis.speak(u);}catch{}
-      setTimeout(()=>{if(speech)speech.classList.remove('show');avatarZone.classList.remove('reacting');},ms);
-    };
-    btn.onclick=()=>{
-      start.remove();video.play().catch(()=>{});
-      setTimeout(()=>{if(recentFollower)recentFollower.textContent='@test_viewer';add('@test_viewer followed');talk('Thanks for the follow, test viewer.');},9000);
-      setTimeout(()=>{if(recentGift)recentGift.textContent='@test_viewer · Rose';add('@test_viewer sent Rose');talk('Thank you for the rose, test viewer.');},32000);
-      setTimeout(()=>{add('@test_viewer: what are you building?','chatLine');talk('I am watching this build with you. It is coming together pretty clean.');},61000);
-      setTimeout(()=>{add('@test_viewer: this is relaxing','chatLine');talk('Yeah, this one is actually really relaxing to watch.');},94000);
-    };
+  let idleLoopTimer=null,leanTimer=null,running=false,speaking=false;
+  const timers=[];
+  const later=(ms,fn)=>{const t=setTimeout(fn,ms);timers.push(t);return t;};
+
+  function visible(v){
+    for(const x of all)x.classList.remove('lockedVisible');
+    if(v)v.classList.add('lockedVisible');
   }
+  function play(v,rate=.78,restart=true,loop=false){
+    if(!v)return;
+    for(const x of all){if(x!==v){try{x.pause();}catch{}}}
+    visible(v);v.loop=loop;v.playbackRate=rate;
+    try{if(restart||v.ended||v.currentTime>Math.max(.1,(v.duration||1)-.25))v.currentTime=0;v.play().catch(()=>{});}catch{}
+  }
+  function addLine(text,cls='chatLine'){
+    if(!chat)return;const d=document.createElement('div');d.className=cls;d.textContent=text;chat.appendChild(d);while(chat.children.length>6)chat.firstChild.remove();
+  }
+  function voiceFor(u){
+    try{const voices=speechSynthesis.getVoices();u.voice=voices.find(v=>/en-US/i.test(v.lang)&&/alex|daniel|fred|aaron|evan|tom|male/i.test(v.name))||voices.find(v=>/en-US/i.test(v.lang))||null;}catch{}
+  }
+  function returnToIdle(){
+    speaking=false;if(speech)speech.classList.remove('show');avatarZone.classList.remove('microLean','microLean2');play(idle,.72,false,false);scheduleIdleBurst(7000);
+  }
+  function speak(text,done){
+    speaking=true;clearTimeout(idleLoopTimer);if(speech){speech.textContent=text;speech.classList.add('show');}
+    play(talking,.86,true,true);
+    let finished=false;
+    const finish=()=>{if(finished)return;finished=true;returnToIdle();if(done)done();};
+    try{
+      speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.rate=.94;u.pitch=.90;u.volume=1;voiceFor(u);u.onend=finish;u.onerror=finish;speechSynthesis.speak(u);
+      later(Math.max(4500,Math.min(9000,text.length*72)),finish);
+    }catch{later(5200,finish);}
+  }
+  function glanceThenSpeak(text){
+    clearTimeout(idleLoopTimer);play(chatClip,.82,true,false);later(2300,()=>speak(text));
+  }
+  function scheduleIdleBurst(delay=4000){
+    clearTimeout(idleLoopTimer);idleLoopTimer=setTimeout(()=>{
+      if(!running||speaking)return;
+      play(idle,.70+Math.random()*.08,false,false);
+      avatarZone.classList.remove('microLean','microLean2');
+      avatarZone.classList.add(Math.random()>.5?'microLean':'microLean2');
+      const burst=5200+Math.random()*4200;
+      later(burst,()=>{
+        if(!running||speaking)return;
+        try{idle.pause();}catch{}avatarZone.classList.remove('microLean','microLean2');
+        scheduleIdleBurst(6500+Math.random()*10500);
+      });
+    },delay);
+  }
+  function runDemo(){
+    if(running)return;running=true;start.remove();
+    try{speechSynthesis.getVoices();}catch{}
+    const gameplayStart=document.getElementById('tapBtn');if(gameplayStart)try{gameplayStart.click();}catch{}
+    play(idle,.74,true,false);scheduleIdleBurst(5500);
+
+    later(18000,()=>{addLine('@mason: what are you building?','chatLine');glanceThenSpeak("I'm watching the cottage build right now. The roof is starting to come together.");});
+    later(47000,()=>{if(recentFollower)recentFollower.textContent='@mason';addLine('@mason followed','eventLine');speak('Mason, thanks for the follow. I appreciate it.');});
+    later(76000,()=>{if(recentGift)recentGift.textContent='@ava · Rose';addLine('@ava sent Rose','eventLine');speak('Ava, thank you for the rose. I appreciate you.');});
+    later(105000,()=>{addLine('@jay: this build is relaxing','chatLine');glanceThenSpeak("Yeah, that's why I like these long builds. You can just hang out and watch it come together.");});
+    later(133000,()=>{if(drinkClip){play(drinkClip,.84,true,false);later(5000,returnToIdle);}});
+  }
+  btn.addEventListener('click',runDemo,{once:true});
+  visible(idle);
 })();
