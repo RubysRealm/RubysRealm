@@ -4,6 +4,9 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 1,8,15,22 * * *'
+  push:
+    paths:
+      - 'podcast_repurpose/takurada_publish.trigger'
 
 permissions:
   contents: write
