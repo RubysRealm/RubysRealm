@@ -5,6 +5,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 DEFAULT_LEDGER = Path('tiktok_playlist_assignments.json')
+ACCOUNT_ALIASES = {
+    'master-pov': 'takurada',
+    'takurada': 'takurada',
+    'rubaradaclips': 'rubaradaclips',
+}
 
 
 def load(path: Path):
@@ -33,18 +38,21 @@ def main():
     path = Path(args.ledger)
     data = load(path)
     playlist = (args.playlist_name or args.story_title).strip()
-    key = (args.account.strip().lower(), str(args.story_id), int(args.part))
+    account_raw = args.account.strip().lower()
+    account = ACCOUNT_ALIASES.get(account_raw, account_raw)
+    key = (account, str(args.story_id), int(args.part))
     now = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
     found = None
     for row in data['assignments']:
-        row_key = (str(row.get('account', '')).lower(), str(row.get('storyId', '')), int(row.get('partNumber', 0)))
+        row_account = ACCOUNT_ALIASES.get(str(row.get('account', '')).lower(), str(row.get('account', '')).lower())
+        row_key = (row_account, str(row.get('storyId', '')), int(row.get('partNumber', 0)))
         if row_key == key:
             found = row
             break
 
     values = {
-        'account': args.account,
+        'account': account,
         'storyId': str(args.story_id),
         'storyTitle': args.story_title.strip(),
         'playlistName': playlist,
