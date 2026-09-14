@@ -60,7 +60,19 @@ jobs:
 
       - name: Resolve upcoming episodes
         if: steps.state.outputs.ready == 'true'
-        run: node rubyclips/muffin_story_resolve_tikwm.cjs
+        run: |
+          if python - <<'PY'
+          import json, sys
+          s=json.load(open('rubyclips/muffin_state.json'))
+          sys.exit(0 if str(s.get('currentSeriesId'))=='7682993954661553173' and int(s.get('nextEpisode',0))>=40 else 1)
+          PY
+          then
+            echo 'Using NetShort alternate source for current Rubaradaclips story.'
+            node rubyclips/muffin_alt_resolve.js
+          else
+            echo 'Using existing TikWM resolver.'
+            node rubyclips/muffin_story_resolve_tikwm.cjs
+          fi
 
       - name: Build and verify corrected part
         if: steps.state.outputs.ready == 'true'
