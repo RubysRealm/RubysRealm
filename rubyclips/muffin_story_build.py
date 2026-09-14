@@ -10,6 +10,7 @@ FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
 PACKING_TARGET_SECONDS = 590.0
 HARD_MAX_SECONDS = 598.5
 OUTPUT_FPS = 30
+PIPELINE_REVISION = 'avsync-v3-idempotent'
 
 OUT.mkdir(parents=True, exist_ok=True)
 state = json.loads(STATE.read_text())
@@ -19,6 +20,7 @@ part = int(state['nextPart'])
 restart_generation = int(state.get('restartGeneration', 2))
 series_id = str(state['currentSeriesId'])
 series_title = str(state['currentSeriesTitle']).strip()
+logical_post_key = f'rubyclips:{series_id}:r{restart_generation}:p{part}'
 
 ordered = sorted((e for e in eps if int(e['episode']) >= next_ep), key=lambda e: int(e['episode']))
 if not ordered or int(ordered[0]['episode']) != next_ep:
@@ -127,6 +129,8 @@ if story_hashtag == '#':
 
 manifest = {
     'platform': 'rubyclips-tiktok-story-v1',
+    'pipelineRevision': PIPELINE_REVISION,
+    'logicalPostKey': logical_post_key,
     'sourceProvider': 'tiktok',
     'sourceChannel': '@muffindrama_us',
     'sourceSeriesId': series_id,
@@ -157,6 +161,8 @@ manifest = {
     'nextEpisode': nums[-1] + 1,
     'storyComplete': nums[-1] >= last_episode,
     'restartGeneration': restart_generation,
-    'storyHashtag': story_hashtag
+    'storyHashtag': story_hashtag,
+    'pipelineRevision': PIPELINE_REVISION,
+    'logicalPostKey': logical_post_key
 }, indent=2) + '\n')
 print(json.dumps(manifest, indent=2))
