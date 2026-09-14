@@ -111,6 +111,25 @@ jobs:
           test -n "$POST_ID"
           echo "POST_ID=$POST_ID" >> "$GITHUB_ENV"
 
+      - name: Queue this post for its TikTok story playlist
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, subprocess
+          m=json.load(open('podcast_repurpose/output/manifest.json'))
+          subprocess.run([
+              'python','tools/record_tiktok_playlist_assignment.py',
+              '--account','master-pov',
+              '--story-id',str(m['storyId']),
+              '--story-title',str(m['title']),
+              '--playlist-name',str(m['title']),
+              '--part',str(m['partNumber']),
+              '--total-parts',str(m['totalParts']),
+              '--post-id',os.environ['POST_ID'],
+              '--source','master-pov-workflow'
+          ], check=True)
+          PY
+
       - name: Advance only after Buffer accepts the TikTok post
         run: |
           set -euo pipefail
@@ -140,7 +159,7 @@ jobs:
           PY
           git config user.name 'rubys-realm-bot'
           git config user.email 'actions@users.noreply.github.com'
-          git add podcast_repurpose/state.json
+          git add podcast_repurpose/state.json tiktok_playlist_assignments.json
           if ! git diff --cached --quiet; then
             git commit -m 'Advance podcast TikTok queue after Buffer acceptance [skip ci]'
             git pull --rebase origin main
