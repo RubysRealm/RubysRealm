@@ -11,7 +11,8 @@ const CREATOR_CHANNEL = '@bushcraftinthewildforest';
 const TIKTOK_STORY_CHANNEL = '@muffindrama_us';
 const MAX_AUTO_SECONDS = 599;
 const MIN_STORY_RESTART_GENERATION = 2;
-const PUBLISHER_VERSION = 'existing-video-parts-v8-tiktok-story-restart';
+const REQUIRED_STORY_PIPELINE_REVISION = 'avsync-v3-idempotent';
+const PUBLISHER_VERSION = 'existing-video-parts-v9-tiktok-idempotent';
 
 function validateBase(m) {
   if (!m?.file || !String(m.file).endsWith('.mp4')) throw new Error('Blocked: missing MP4.');
@@ -40,10 +41,13 @@ function validateTikTokStory(m, tag) {
   if (!Number.isInteger(index) || index < 1) throw new Error('Blocked: invalid story part number.');
   if (String(m?.sourceProvider || '').toLowerCase() !== 'tiktok') throw new Error('Blocked: TikTok story provider mismatch.');
   if (String(m?.sourceChannel || '').toLowerCase() !== TIKTOK_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: TikTok story channel mismatch.');
+  if (String(m?.pipelineRevision || '') !== REQUIRED_STORY_PIPELINE_REVISION) throw new Error('Blocked: stale TikTok story pipeline revision.');
   const seriesId = String(m?.sourceSeriesId || '').trim();
   if (!/^\d{10,25}$/.test(seriesId)) throw new Error('Blocked: invalid TikTok series id.');
   const restart = Number(m?.restartGeneration || 0);
   if (!Number.isInteger(restart) || restart < MIN_STORY_RESTART_GENERATION) throw new Error('Blocked: stale TikTok story generation.');
+  const expectedLogicalPostKey = `rubyclips:${seriesId}:r${restart}:p${index}`;
+  if (String(m?.logicalPostKey || '') !== expectedLogicalPostKey) throw new Error('Blocked: invalid logical post key.');
   const ids = Array.isArray(m?.sourceVideoIds) ? m.sourceVideoIds.map(x => String(x).trim()) : [];
   if (!ids.length || ids.some(id => !/^\d{10,25}$/.test(id))) throw new Error('Blocked: invalid TikTok episode ids.');
   const urls = Array.isArray(m?.sourceUrls) ? m.sourceUrls.map(String) : [];
@@ -131,6 +135,7 @@ export default async function handler(req, res) {
       sourceVideoId: manifest.sourceVideoId ? String(manifest.sourceVideoId) : null,
       sourceSeriesId: manifest.sourceSeriesId ? String(manifest.sourceSeriesId) : null,
       sourceVideoIds: Array.isArray(manifest.sourceVideoIds) ? manifest.sourceVideoIds.map(String) : null,
+      logicalPostKey: manifest.logicalPostKey || null,
       segmentIndex: numbering.index,
       segmentTotal: numbering.total,
       videoUrl,
