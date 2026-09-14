@@ -60,9 +60,7 @@ jobs:
 
       - name: Resolve upcoming episodes
         if: steps.state.outputs.ready == 'true'
-        run: |
-          cp rubyclips/muffin_story_resolve.js rubyclips/muffin_story_resolve.cjs
-          node rubyclips/muffin_story_resolve.cjs
+        run: node rubyclips/muffin_story_resolve_tikwm.cjs
 
       - name: Build and verify corrected part
         if: steps.state.outputs.ready == 'true'
