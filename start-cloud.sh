@@ -12,5 +12,5 @@ NODE_PID=$!
 sleep 2
 CHROME="$(find /ms-playwright -type f -path '*/chrome-linux/chrome' -o -path '*/chrome-linux64/chrome' 2>/dev/null | head -n1)"
 if [ -z "$CHROME" ]; then CHROME="$(find /ms-playwright -type f -name chrome 2>/dev/null | head -n1)"; fi
-if [ -n "$CHROME" ]; then "$CHROME" --no-sandbox --disable-dev-shm-usage --disable-gpu --autoplay-policy=no-user-gesture-required --window-position=0,0 --window-size=${STREAM_WIDTH:-720},${STREAM_HEIGHT:-1280} --kiosk "http://127.0.0.1:${PORT:-10000}/stage" >/tmp/chrome.log 2>&1 & fi
+if [ -n "$CHROME" ]; then "$CHROME" --no-sandbox --disable-dev-shm-usage --disable-gpu --autoplay-policy=no-user-gesture-required --window-position=0,0 --window-size=${STREAM_WIDTH:-720},${STREAM_HEIGHT:-1280} --kiosk "http://127.0.0.1:${PORT:-10000}/stage?renderer=cloud" >/tmp/chrome.log 2>&1 & fi
 wait "$NODE_PID"
