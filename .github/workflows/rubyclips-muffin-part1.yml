@@ -54,6 +54,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
+          python -m pip install --quiet --upgrade yt-dlp
           npm init -y >/dev/null 2>&1
           npm install --silent puppeteer-core @tobyg74/tiktok-api-dl
 
