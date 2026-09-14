@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import subprocess
+import json
+import shutil
 
 import repurpose as base
 
@@ -13,8 +14,6 @@ def render_part(source, title, index, total, start, end, dest):
     font = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
     dur = max(1.0, end - start)
 
-    # Match the exact foreground geometry used below, then place the complete
-    # title/part block at the midpoint of the empty area above the picture.
     info = base.probe(source)
     sw = max(1, info["width"])
     sh = max(1, info["height"])
@@ -51,5 +50,96 @@ def render_part(source, title, index, total, start, end, dest):
     ])
 
 
+def choose_viable_story(state):
+    current = state.get("current") or {}
+    if current.get("id"):
+        episode = {
+            "id": current["id"],
+            "title": current.get("title") or "Master POV",
+            "url": current.get("url") or "",
+        }
+        if not episode["url"]:
+            items = base.catalog()
+            matches = [item for item in items if item["id"] == current["id"]]
+            if not matches:
+                raise RuntimeError(f"Active story {current['id']} is missing from the source catalog")
+            episode = matches[0]
+        meta = base.metadata(episode["url"])
+        return episode, int(current.get("next_part") or 1), meta
+
+    completed = set(state.get("completed") or [])
+    items = base.catalog()
+    failures = []
+    for item in items:
+        if item["id"] in completed:
+            continue
+        try:
+            meta = base.metadata(item["url"])
+            duration = float(meta.get("duration") or 0)
+            if duration <= 0:
+                raise RuntimeError("duration unavailable")
+            return item, 1, meta
+        except Exception as exc:
+            failures.append(f"{item['id']}: {exc}")
+            print(f"Skipping unavailable handoff candidate {item['id']} for this run: {exc}")
+            continue
+    detail = "; ".join(failures[:8])
+    raise RuntimeError(f"No viable uncompleted source story was available. {detail}")
+
+
+def main():
+    shutil.rmtree(base.WORK, ignore_errors=True)
+    shutil.rmtree(base.OUT, ignore_errors=True)
+    base.WORK.mkdir(parents=True, exist_ok=True)
+    base.OUT.mkdir(parents=True, exist_ok=True)
+
+    state = base.load_state()
+    episode, next_part, meta = choose_viable_story(state)
+    title = str(meta.get("title") or episode["title"] or "Master POV")
+    duration = float(meta.get("duration") or 0)
+    if duration <= 0:
+        raise RuntimeError("Source video duration is unavailable")
+
+    segments = base.segment_plan(duration, meta.get("chapters") or [])
+    if next_part < 1 or next_part > len(segments):
+        if state.get("current"):
+            raise RuntimeError(
+                f"Active story state is invalid: requested part {next_part} of {len(segments)}"
+            )
+        next_part = 1
+
+    source = base.download_source(episode["url"])
+    start, end = segments[next_part - 1]
+    dest = base.OUT / f"{episode['id']}-part-{next_part:02d}-of-{len(segments):02d}.mp4"
+    render_part(source, title, next_part, len(segments), start, end, dest)
+    info = base.probe(dest)
+    if info["width"] != 1080 or info["height"] != 1920:
+        raise RuntimeError(f"Bad output dimensions: {info['width']}x{info['height']}")
+    if info["duration"] < 60:
+        raise RuntimeError(f"Part is unexpectedly short: {info['duration']:.1f}s")
+
+    manifest = {
+        "pipeline": "rubys-realm-podcast-repurpose-v1",
+        "source": {
+            "catalog": base.SOURCE_CHANNEL,
+            "id": episode["id"],
+            "url": episode["url"],
+            "title": title,
+            "durationSeconds": round(duration, 3),
+        },
+        "part": next_part,
+        "totalParts": len(segments),
+        "segmentStart": round(start, 3),
+        "segmentEnd": round(end, 3),
+        "durationSeconds": round(info["duration"], 3),
+        "width": info["width"],
+        "height": info["height"],
+        "video": str(dest.relative_to(base.ROOT)),
+        "qualityPassed": True,
+    }
+    (base.OUT / "manifest.json").write_text(json.dumps(manifest, indent=2))
+    print(json.dumps(manifest, indent=2))
+
+
 base.render_part = render_part
-base.main()
+main()
