@@ -70,31 +70,53 @@ function itemIdFromUrl(value) {
   return m ? m[1] : null;
 }
 
+function looksLikeMedia(value) {
+  return /\/aweme\/v1\/play\/|\/video\/tos|\.mp4(?:[?&#]|$)|mime_type=video|video_mp4|bytevc1|play_addr|playAddr/i.test(String(value || ''));
+}
+
 async function browserFallback(episode) {
   if (!chrome) return null;
-  const browser = await puppeteer.launch({ headless: true, executablePath: chrome, args: ['--no-sandbox','--disable-dev-shm-usage','--autoplay-policy=no-user-gesture-required'] });
+  const browser = await puppeteer.launch({ headless: true, executablePath: chrome, args: ['--no-sandbox','--disable-dev-shm-usage','--autoplay-policy=no-user-gesture-required','--disable-blink-features=AutomationControlled'] });
   try {
     const page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36');
+    const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36';
+    await page.setUserAgent(ua);
     await page.setViewport({ width: 1440, height: 1800 });
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US','en'] });
+      Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3,4,5] });
+    });
     const captured = [];
     const directMedia = new Map();
+    const mediaCandidates = [];
     const targetId = String(KNOWN_EPISODE_IDS[episode] || '');
+    const addMedia = value => {
+      const s = String(value || '');
+      if (!s || s.startsWith('blob:') || s.startsWith('data:')) return;
+      if (!mediaCandidates.includes(s)) mediaCandidates.push(s);
+    };
     const capture = value => {
       if (!value) return;
       const s = String(value);
       for (const id of collectVideoIds(s)) if (id !== seriesId && !captured.includes(id)) captured.push(id);
       const id = itemIdFromUrl(s);
       if (id && /\/aweme\/v1\/play\//i.test(s) && !directMedia.has(id)) directMedia.set(id, s);
+      if (looksLikeMedia(s)) addMedia(s);
     };
-    page.on('request', req => capture(req.url()));
+    page.on('request', req => {
+      capture(req.url());
+      if (req.resourceType() === 'media') addMedia(req.url());
+    });
     page.on('response', resp => {
       const u = resp.url();
       capture(u);
+      const headers = resp.headers() || {};
+      if (String(headers['content-type'] || '').toLowerCase().startsWith('video/')) addMedia(u);
       const id = itemIdFromUrl(u);
       if (id && /\/aweme\/v1\/play\//i.test(u)) {
-        const location = resp.headers()?.location;
-        if (location) directMedia.set(id, location);
+        const location = headers.location;
+        if (location) { directMedia.set(id, location); addMedia(location); }
       }
     });
 
@@ -105,7 +127,7 @@ async function browserFallback(episode) {
     async function clickEpisodeNumber() {
       return page.evaluate((n) => {
         const wanted = String(n);
-        const els = [...document.querySelectorAll('button,[role="button"],a')];
+        const els = [...document.querySelectorAll('button,[role="button"],a,[class*="ButtonEpisode"]')];
         const el = els.find(x => (x.textContent || '').trim() === wanted || (x.getAttribute('aria-label') || '').trim() === wanted);
         if (!el) return false;
         el.click();
@@ -113,35 +135,49 @@ async function browserFallback(episode) {
       }, episode).catch(() => false);
     }
 
+    let clicked = false;
     if (!(targetId && directMedia.has(targetId))) {
-      await clickEpisodeNumber();
+      clicked = await clickEpisodeNumber();
       await sleep(5000);
     }
 
-    if (!(targetId && directMedia.has(targetId)) && episode > 1) {
+    if (!(targetId && directMedia.has(targetId)) && !mediaCandidates.length && episode > 1) {
       const priorUrl = `https://www.tiktok.com/shortdrama/episode/${seriesId}/${episode - 1}`;
       await page.goto(priorUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
       await sleep(3500);
-      await clickEpisodeNumber();
+      clicked = await clickEpisodeNumber() || clicked;
       await sleep(7000);
     }
 
-    const d = await page.evaluate(() => ({ location: location.href, canonical: document.querySelector('link[rel="canonical"]')?.href || '', appLinks: [...document.querySelectorAll('meta[property="al:ios:url"],meta[property="al:android:url"]')].map(x => x.content || ''), html: document.documentElement?.outerHTML || '', scripts: [...document.scripts].map(s => s.textContent || '').join('\n'), resources: performance.getEntriesByType('resource').map(x => x.name) }));
-    capture(d.location); capture(d.canonical); capture(d.html); capture(d.scripts); for (const x of d.appLinks) capture(x); for (const x of d.resources) capture(x);
+    const d = await page.evaluate(() => ({
+      location: location.href,
+      canonical: document.querySelector('link[rel="canonical"]')?.href || '',
+      appLinks: [...document.querySelectorAll('meta[property="al:ios:url"],meta[property="al:android:url"]')].map(x => x.content || ''),
+      videoSrcs: [...document.querySelectorAll('video,video source')].flatMap(x => [x.currentSrc || '', x.src || '', x.getAttribute?.('src') || '']).filter(Boolean),
+      html: document.documentElement?.outerHTML || '',
+      scripts: [...document.scripts].map(s => s.textContent || '').join('\n'),
+      resources: performance.getEntriesByType('resource').map(x => x.name)
+    }));
+    capture(d.location); capture(d.canonical); capture(d.html); capture(d.scripts);
+    for (const x of d.appLinks) capture(x);
+    for (const x of d.resources) capture(x);
+    for (const x of d.videoSrcs) addMedia(x);
 
     const cookies = await page.cookies().catch(() => []);
     const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+    console.log(`Episode ${episode} browser probe: clicked=${clicked} url=${d.location} ids=${captured.length} mediaCandidates=${mediaCandidates.length} direct=${directMedia.size}`);
+
     if (targetId && directMedia.has(targetId)) {
       const media = directMedia.get(targetId);
-      console.log(`Episode ${episode}: captured rendered TikTok media stream for item ${targetId}.`);
+      console.log(`Episode ${episode}: captured rendered TikTok play stream for item ${targetId}.`);
       return { episode, sourceUrl: `https://www.tiktok.com/@${AUTHOR}/video/${targetId}`, shortDramaUrl: targetUrl, videoId: targetId, media, cookieHeader, sourceHint: 'shortdrama-rendered-play-stream' };
     }
 
-    for (const [id, media] of directMedia.entries()) {
-      if (captured.includes(id)) {
-        console.log(`Episode ${episode}: using captured rendered media stream ${id}.`);
-        return { episode, sourceUrl: `https://www.tiktok.com/@${AUTHOR}/video/${id}`, shortDramaUrl: targetUrl, videoId: id, media, cookieHeader, sourceHint: 'shortdrama-rendered-play-stream' };
-      }
+    if (mediaCandidates.length) {
+      const media = mediaCandidates[mediaCandidates.length - 1];
+      const id = targetId || captured[captured.length - 1] || `episode-${episode}`;
+      console.log(`Episode ${episode}: using rendered video/CDN source ${String(media).slice(0,180)}.`);
+      return { episode, sourceUrl: targetUrl, shortDramaUrl: targetUrl, videoId: id, media, cookieHeader, sourceHint: 'shortdrama-rendered-video-source' };
     }
 
     for (const id of captured.slice(0, 40)) { const resolved = await resolveMedia(id, episode, 'shortdrama-browser'); if (resolved) return resolved; }
