@@ -65,20 +65,85 @@ function collectVideoIds(text) {
   return [...new Set(out)];
 }
 
+function itemIdFromUrl(value) {
+  const m = String(value || '').match(/[?&]item_id=(\d{10,25})/i);
+  return m ? m[1] : null;
+}
+
 async function browserFallback(episode) {
   if (!chrome) return null;
-  const browser = await puppeteer.launch({ headless: true, executablePath: chrome, args: ['--no-sandbox','--disable-dev-shm-usage'] });
+  const browser = await puppeteer.launch({ headless: true, executablePath: chrome, args: ['--no-sandbox','--disable-dev-shm-usage','--autoplay-policy=no-user-gesture-required'] });
   try {
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36');
     await page.setViewport({ width: 1440, height: 1800 });
     const captured = [];
-    const capture = value => { for (const id of collectVideoIds(value)) if (id !== seriesId && !captured.includes(id)) captured.push(id); };
-    page.on('request', req => capture(req.url())); page.on('response', resp => capture(resp.url()));
-    await page.goto(`https://www.tiktok.com/shortdrama/episode/${seriesId}/${episode}`, { waitUntil: 'domcontentloaded', timeout: 90000 });
-    await sleep(8000);
+    const directMedia = new Map();
+    const targetId = String(KNOWN_EPISODE_IDS[episode] || '');
+    const capture = value => {
+      if (!value) return;
+      const s = String(value);
+      for (const id of collectVideoIds(s)) if (id !== seriesId && !captured.includes(id)) captured.push(id);
+      const id = itemIdFromUrl(s);
+      if (id && /\/aweme\/v1\/play\//i.test(s) && !directMedia.has(id)) directMedia.set(id, s);
+    };
+    page.on('request', req => capture(req.url()));
+    page.on('response', resp => {
+      const u = resp.url();
+      capture(u);
+      const id = itemIdFromUrl(u);
+      if (id && /\/aweme\/v1\/play\//i.test(u)) {
+        const location = resp.headers()?.location;
+        if (location) directMedia.set(id, location);
+      }
+    });
+
+    const targetUrl = `https://www.tiktok.com/shortdrama/episode/${seriesId}/${episode}`;
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
+    await sleep(4500);
+
+    async function clickEpisodeNumber() {
+      return page.evaluate((n) => {
+        const wanted = String(n);
+        const els = [...document.querySelectorAll('button,[role="button"],a')];
+        const el = els.find(x => (x.textContent || '').trim() === wanted || (x.getAttribute('aria-label') || '').trim() === wanted);
+        if (!el) return false;
+        el.click();
+        return true;
+      }, episode).catch(() => false);
+    }
+
+    if (!(targetId && directMedia.has(targetId))) {
+      await clickEpisodeNumber();
+      await sleep(5000);
+    }
+
+    if (!(targetId && directMedia.has(targetId)) && episode > 1) {
+      const priorUrl = `https://www.tiktok.com/shortdrama/episode/${seriesId}/${episode - 1}`;
+      await page.goto(priorUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
+      await sleep(3500);
+      await clickEpisodeNumber();
+      await sleep(7000);
+    }
+
     const d = await page.evaluate(() => ({ location: location.href, canonical: document.querySelector('link[rel="canonical"]')?.href || '', appLinks: [...document.querySelectorAll('meta[property="al:ios:url"],meta[property="al:android:url"]')].map(x => x.content || ''), html: document.documentElement?.outerHTML || '', scripts: [...document.scripts].map(s => s.textContent || '').join('\n'), resources: performance.getEntriesByType('resource').map(x => x.name) }));
-    capture(d.location); capture(d.canonical); capture(d.html); capture(d.scripts); for (const x of d.appLinks) capture(x); for (const x of d.resources) capture(x); await page.close();
+    capture(d.location); capture(d.canonical); capture(d.html); capture(d.scripts); for (const x of d.appLinks) capture(x); for (const x of d.resources) capture(x);
+
+    const cookies = await page.cookies().catch(() => []);
+    const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+    if (targetId && directMedia.has(targetId)) {
+      const media = directMedia.get(targetId);
+      console.log(`Episode ${episode}: captured rendered TikTok media stream for item ${targetId}.`);
+      return { episode, sourceUrl: `https://www.tiktok.com/@${AUTHOR}/video/${targetId}`, shortDramaUrl: targetUrl, videoId: targetId, media, cookieHeader, sourceHint: 'shortdrama-rendered-play-stream' };
+    }
+
+    for (const [id, media] of directMedia.entries()) {
+      if (captured.includes(id)) {
+        console.log(`Episode ${episode}: using captured rendered media stream ${id}.`);
+        return { episode, sourceUrl: `https://www.tiktok.com/@${AUTHOR}/video/${id}`, shortDramaUrl: targetUrl, videoId: id, media, cookieHeader, sourceHint: 'shortdrama-rendered-play-stream' };
+      }
+    }
+
     for (const id of captured.slice(0, 40)) { const resolved = await resolveMedia(id, episode, 'shortdrama-browser'); if (resolved) return resolved; }
     return null;
   } catch (e) { console.error(`Episode ${episode} browser fallback: ${e.message}`); return null; }
@@ -108,7 +173,10 @@ function durationOf(file) {
     const file = path.join(WORK, `ep${episode}.mp4`);
     let dur;
     try {
-      execFileSync('curl', ['-L','--fail','--retry','3','--retry-delay','1','--connect-timeout','25','-A','Mozilla/5.0','-e','https://www.tiktok.com/', item.media, '-o', file], { stdio: 'inherit' });
+      const curlArgs = ['-L','--fail','--retry','3','--retry-delay','1','--connect-timeout','25','-A','Mozilla/5.0','-e', item.shortDramaUrl || 'https://www.tiktok.com/'];
+      if (item.cookieHeader) curlArgs.push('-H', `Cookie: ${item.cookieHeader}`);
+      curlArgs.push(item.media, '-o', file);
+      execFileSync('curl', curlArgs, { stdio: 'inherit' });
       const size = fs.existsSync(file) ? fs.statSync(file).size : 0;
       if (size < 100000) throw new Error(`downloaded file is too small (${size} bytes)`);
       dur = durationOf(file);
