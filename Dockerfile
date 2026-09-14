@@ -1,6 +1,10 @@
 FROM mcr.microsoft.com/playwright:v1.55.0-noble
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg xvfb xdotool pulseaudio pulseaudio-utils espeak-ng fonts-dejavu-core curl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg xvfb xdotool pulseaudio pulseaudio-utils espeak-ng fonts-dejavu-core curl ca-certificates \
+    && curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb -o /tmp/google-chrome.deb \
+    && apt-get install -y /tmp/google-chrome.deb \
+    && rm -f /tmp/google-chrome.deb \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev
