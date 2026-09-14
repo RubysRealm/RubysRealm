@@ -8,10 +8,12 @@ const BASE = 'rubyclips';
 const WORK = path.join(BASE, 'muffin_work');
 const STATE_PATH = path.join(BASE, 'muffin_state.json');
 const LOOKAHEAD_EPISODES = 12;
-const HARD_MAX_SECONDS = 599.0;
+const PACKING_TARGET_SECONDS = 590.0;
 const AUTHOR = 'muffindrama_us';
 const KNOWN_EPISODE_IDS = {
   1: '7682997000391904526',
+  2: '7682997015172762893',
+  3: '7682996961800244494',
   4: '7682996995631385869',
   5: '7682997029995318541',
   6: '7682996992389156109',
@@ -117,16 +119,16 @@ function durationOf(file) {
       break;
     }
 
-    if (resolved.length && packedSeconds + dur > HARD_MAX_SECONDS) {
+    if (resolved.length && packedSeconds + dur > PACKING_TARGET_SECONDS) {
       fs.unlinkSync(file);
-      console.log(`Episode ${episode} would exceed ${HARD_MAX_SECONDS}s; Part ${state.nextPart} is full.`);
+      console.log(`Episode ${episode} would exceed ${PACKING_TARGET_SECONDS}s; Part ${state.nextPart} is full.`);
       break;
     }
 
     resolved.push({ episode, sourceUrl: item.sourceUrl, shortDramaUrl: item.shortDramaUrl, videoId: item.videoId, sourceHint: item.sourceHint, file, duration: dur });
     packedSeconds += dur;
     console.log(`Resolved Episode ${episode} -> ${item.videoId} (${item.sourceHint}) ${dur.toFixed(2)}s; packed=${packedSeconds.toFixed(2)}s`);
-    if (packedSeconds >= 598.0) break;
+    if (packedSeconds >= PACKING_TARGET_SECONDS) break;
   }
 
   if (!resolved.length || Number(resolved[0].episode) !== firstEpisode) throw new Error(`Resolver did not produce required Episode ${firstEpisode}.`);
