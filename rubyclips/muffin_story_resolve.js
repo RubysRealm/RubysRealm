@@ -25,7 +25,8 @@ const KNOWN_EPISODE_IDS = {
   12: '7682996981949582605',
   13: '7682997023217306893',
   14: '7682996977897917709',
-  15: '7682996991823056141'
+  15: '7682996991823056141',
+  39: '7680667081213234450'
 };
 
 const state = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
@@ -59,7 +60,7 @@ async function resolveMedia(videoId, episode, sourceHint = 'candidate') {
 function collectVideoIds(text) {
   if (!text) return [];
   const out = [], s = String(text);
-  const patterns = [new RegExp(`@${AUTHOR}\\/video\\/(\\d{10,25})`, 'gi'), /["'](?:aweme_id|awemeId|itemId|item_id|videoId|video_id|group_id|groupId)["']\s*[:=]\s*["']?(\d{10,25})/gi, /aweme\/detail\/(\d{10,25})/gi];
+  const patterns = [new RegExp(`@${AUTHOR}\\/video\\/(\\d{10,25})`, 'gi'), /["'](?:aweme_id|awemeId|itemId|item_id|videoId|video_id|group_id|groupId)["']\s*[:=]\s*["']?(\d{10,25})/gi, /aweme\/detail\/(\d{10,25})/gi, /[?&]item_id=(\d{10,25})/gi];
   for (const re of patterns) for (const m of s.matchAll(re)) out.push(m[1]);
   return [...new Set(out)];
 }
