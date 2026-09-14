@@ -5,7 +5,7 @@ let state=null,player=null,ready=false,lastId=null,lastError=null;
 const title=document.getElementById('gameTitle'),chat=document.getElementById('chat'),speech=document.getElementById('speech'),tap=document.getElementById('tap');
 const avatarZone=document.getElementById('avatarZone');
 const recentFollower=document.getElementById('recentFollower'),recentGift=document.getElementById('recentGift');let lastChatTs=0;
-const avatarChat=document.querySelector('.avatarChat'),avatarDrink=document.querySelector('.avatarDrink');let actionTimer=null;
+const avatarChat=document.querySelector('.avatarChat'),avatarDrink=document.querySelector('.avatarDrink'),avatarSnack=document.querySelector('.avatarSnack');let actionTimer=null;
 window.__playerStatus={code:-999,label:'loading',position:0,error:null};
 const labels={'-1':'unstarted','0':'ended','1':'playing','2':'paused','3':'buffering','5':'cued'};
 function report(code,error=null){
@@ -14,10 +14,10 @@ function report(code,error=null){
   window.__playerStatus={code,label:lastError?'error':(labels[code]||'loading'),error:lastError,videoId:state?.current?.id,position:nativeMode?nativeVideo.currentTime:(ready?player.getCurrentTime():0)};
   if(lastError)title.textContent=lastError;
 }
-function say(text){speech.textContent=text;speech.classList.add('show');avatarZone.classList.remove('chatting','drinking');avatarZone.classList.add('reacting');clearTimeout(say.timer);say.timer=setTimeout(()=>{speech.classList.remove('show');avatarZone.classList.remove('reacting');},5200);}
+function say(text){speech.textContent=text;speech.classList.add('show');avatarZone.classList.remove('chatting','drinking','snacking');avatarZone.classList.add('reacting');clearTimeout(say.timer);say.timer=setTimeout(()=>{speech.classList.remove('show');avatarZone.classList.remove('reacting');},5200);}
 function addLine(text,cls='chatLine'){const d=document.createElement('div');d.className=cls;d.textContent=text;chat.appendChild(d);while(chat.children.length>7)chat.firstChild.remove();}
 function renderState(s){if(s.recentFollower)recentFollower.textContent='@'+s.recentFollower.user;if(s.recentGift)recentGift.textContent='@'+s.recentGift.user+' · '+s.recentGift.gift;for(const c of s.chat||[]){if(c.ts>lastChatTs){addLine('@'+c.user+': '+c.text);lastChatTs=c.ts}}}
-function playAction(kind){if(avatarZone.classList.contains('reacting'))return;const video=kind==='drinking'?avatarDrink:avatarChat;if(!video)return;clearTimeout(actionTimer);avatarZone.classList.remove('chatting','drinking');avatarZone.classList.add(kind);video.currentTime=0;video.play().catch(()=>{});const done=()=>{avatarZone.classList.remove(kind);video.removeEventListener('ended',done)};video.addEventListener('ended',done);actionTimer=setTimeout(done,6500)}
+function playAction(kind){if(avatarZone.classList.contains('reacting'))return;const video=kind==='drinking'?avatarDrink:kind==='snacking'?avatarSnack:avatarChat;if(!video)return;clearTimeout(actionTimer);avatarZone.classList.remove('chatting','drinking','snacking');avatarZone.classList.add(kind);video.currentTime=0;video.play().catch(()=>{});const done=()=>{avatarZone.classList.remove(kind);video.removeEventListener('ended',done)};video.addEventListener('ended',done);actionTimer=setTimeout(done,6500)}
 function loadVideo(){
   if(state?.current?.sourceUrl){
     if(!nativeMode||nativeSource!==state.current.sourceUrl){nativeMode=true;nativeSource=state.current.sourceUrl;lastError=null;lastId=null;if(ready)player.pauseVideo();document.getElementById('yt').style.display='none';nativeVideo.style.display='block';nativeVideo.src=state.current.sourceUrl;nativeVideo.loop=!!state.current.test;nativeVideo.muted=!isCloud;nativeVideo.volume=.58;title.textContent=state.current.title;nativeVideo.play().catch(()=>{tap.style.display='flex';});}
@@ -53,4 +53,4 @@ nativeVideo.addEventListener('error',()=>report(-994,'Direct video playback fail
 setInterval(()=>{if(nativeMode)report(nativeVideo.ended?0:(nativeVideo.paused?2:(nativeVideo.readyState>=2&&!nativeVideo.seeking?1:3)));else if(ready)report(player.getPlayerState());},2000);
 setTimeout(()=>{if(!ready&&!nativeMode)report(-996,'YouTube did not finish loading');},30000);
 setInterval(update,15000);update();
-setTimeout(()=>playAction('drinking'),75000);setInterval(()=>playAction('drinking'),420000);
+setTimeout(()=>playAction('drinking'),75000);setInterval(()=>playAction('drinking'),420000);setTimeout(()=>playAction('snacking'),210000);setInterval(()=>playAction('snacking'),600000);
