@@ -1,59 +1,33 @@
 'use strict';
 const params=new URLSearchParams(location.search),isCloud=params.get('renderer')==='cloud';
-const nativeVideo=document.getElementById("nativeVideo");let nativeMode=false,nativeSource=null;
+const nativeVideo=document.getElementById('nativeVideo');let nativeMode=false,nativeSource=null;
 let state=null,player=null,ready=false,lastId=null,lastError=null;
 const title=document.getElementById('gameTitle'),chat=document.getElementById('chat'),speech=document.getElementById('speech'),tap=document.getElementById('tap');
 const avatarZone=document.getElementById('avatarZone');
-const recentFollower=document.getElementById('recentFollower'),recentGift=document.getElementById('recentGift');let lastChatTs=0;
-const avatarChat=document.querySelector('.avatarChat'),avatarDrink=document.querySelector('.avatarDrink'),avatarSnack=document.querySelector('.avatarSnack');let actionTimer=null;
+const recentFollower=document.getElementById('recentFollower'),recentGift=document.getElementById('recentGift');let lastChatTs=0,lastChatReaction=0;
+const avatarIdle=document.querySelector('.avatarIdle'),avatarTalking=document.querySelector('.avatarTalking'),avatarChat=document.querySelector('.avatarChat'),avatarDrink=document.querySelector('.avatarDrink'),avatarSnack=document.querySelector('.avatarSnack');
+const avatarVideos=[avatarIdle,avatarTalking,avatarChat,avatarDrink,avatarSnack].filter(Boolean);
+let actionTimer=null,actionBusyUntil=0,lastDrink=Date.now(),lastSnack=Date.now(),lastGlance=0;
 window.__playerStatus={code:-999,label:'loading',position:0,error:null};
 const labels={'-1':'unstarted','0':'ended','1':'playing','2':'paused','3':'buffering','5':'cued'};
-function report(code,error=null){
-  if(error)lastError=error;
-  if(code===1)lastError=null;
-  window.__playerStatus={code,label:lastError?'error':(labels[code]||'loading'),error:lastError,videoId:state?.current?.id,position:nativeMode?nativeVideo.currentTime:(ready?player.getCurrentTime():0)};
-  if(lastError)title.textContent=lastError;
-}
-function say(text){speech.textContent=text;speech.classList.add('show');avatarZone.classList.remove('chatting','drinking','snacking');avatarZone.classList.add('reacting');clearTimeout(say.timer);say.timer=setTimeout(()=>{speech.classList.remove('show');avatarZone.classList.remove('reacting');},5200);}
+const rnd=(a,b)=>a+Math.random()*(b-a),rndi=(a,b)=>Math.floor(rnd(a,b+1));
+function report(code,error=null){if(error)lastError=error;if(code===1)lastError=null;window.__playerStatus={code,label:lastError?'error':(labels[code]||'loading'),error:lastError,videoId:state?.current?.id,position:nativeMode?nativeVideo.currentTime:(ready?player.getCurrentTime():0)};if(lastError)title.textContent=lastError;}
+function clearPresence(){avatarZone.classList.remove('chatting','drinking','snacking','reacting','focused');}
+function say(text,ms=5200){if(!text)return;speech.textContent=text;speech.classList.add('show');clearPresence();avatarZone.classList.add('reacting');actionBusyUntil=Date.now()+ms;if(avatarTalking){try{avatarTalking.currentTime=0;avatarTalking.playbackRate=rnd(.94,1.05);avatarTalking.play().catch(()=>{});}catch{}}clearTimeout(say.timer);say.timer=setTimeout(()=>{speech.classList.remove('show');avatarZone.classList.remove('reacting');actionBusyUntil=0;},ms);}
 function addLine(text,cls='chatLine'){const d=document.createElement('div');d.className=cls;d.textContent=text;chat.appendChild(d);while(chat.children.length>7)chat.firstChild.remove();}
 function renderState(s){if(s.recentFollower)recentFollower.textContent='@'+s.recentFollower.user;if(s.recentGift)recentGift.textContent='@'+s.recentGift.user+' · '+s.recentGift.gift;for(const c of s.chat||[]){if(c.ts>lastChatTs){addLine('@'+c.user+': '+c.text);lastChatTs=c.ts}}}
-function playAction(kind){if(avatarZone.classList.contains('reacting'))return;const video=kind==='drinking'?avatarDrink:kind==='snacking'?avatarSnack:avatarChat;if(!video)return;clearTimeout(actionTimer);avatarZone.classList.remove('chatting','drinking','snacking');avatarZone.classList.add(kind);video.currentTime=0;video.play().catch(()=>{});const done=()=>{avatarZone.classList.remove(kind);video.removeEventListener('ended',done)};video.addEventListener('ended',done);actionTimer=setTimeout(done,6500)}
-function loadVideo(){
-  // The cloud renderer uses the direct source for maximum reliability and full-length playback.
-  // Phone/browser previews deliberately use YouTube's own player so Safari never has to decode
-  // the cloud-only source URL. This keeps approval previews independent from the broadcast codec.
-  if(isCloud&&state?.current?.sourceUrl){
-    if(!nativeMode||nativeSource!==state.current.sourceUrl){nativeMode=true;nativeSource=state.current.sourceUrl;lastError=null;lastId=null;if(ready)player.pauseVideo();document.getElementById('yt').style.display='none';nativeVideo.style.display='block';nativeVideo.src=state.current.sourceUrl;nativeVideo.loop=!!state.current.test;nativeVideo.muted=false;nativeVideo.volume=.58;title.textContent=state.current.title;nativeVideo.play().catch(()=>{tap.style.display='flex';});}
-    return;
-  }
-  if(nativeMode){nativeMode=false;nativeSource=null;nativeVideo.pause();nativeVideo.removeAttribute('src');nativeVideo.load();nativeVideo.style.display='none';document.getElementById('yt').style.display='block';lastId=null;lastError=null;tap.style.display='none';}
-
-  if(!ready||!state?.current?.id||lastId===state.current.id)return;
-  lastId=state.current.id;lastError=null;
-  title.textContent=state.current.title;
-  player.mute();player.loadVideoById(lastId);
-  if(!state.playing)player.pauseVideo();
-  if(!isCloud)setTimeout(()=>{try{const ps=player.getPlayerState();if(ps!==YT.PlayerState.PLAYING&&ps!==YT.PlayerState.BUFFERING)tap.style.display='flex';}catch{}},3500);
-}
-window.onYouTubeIframeAPIReady=()=>{
-  player=new YT.Player('yt',{width:'100%',height:'100%',playerVars:{origin:location.origin,autoplay:1,mute:1,controls:1,rel:0,fs:0,playsinline:1},events:{
-    onReady:()=>{ready=true;loadVideo();},
-    onStateChange:({data})=>{if(nativeMode)return;report(data);if(data===1){tap.style.display='none';if(isCloud){player.unMute();player.setVolume(58);}}},
-    onError:({data})=>{if(nativeMode)return;const messages={2:'Invalid video ID',5:'YouTube playback failed',100:'Video unavailable',101:'Embedding disabled for this video',150:'Embedding disabled for this video',153:'YouTube rejected the player identification'};report(-data,(messages[data]||'YouTube playback error')+' (code '+data+')');tap.style.display='flex';},
-    onAutoplayBlocked:()=>{if(nativeMode)return;tap.style.display='flex';report(-998,'Tap START GAMEPLAY to preview');}
-  }});
-};
+function playAction(kind,forced=false){if(!forced&&(Date.now()<actionBusyUntil||avatarZone.classList.contains('reacting')))return false;const video=kind==='drinking'?avatarDrink:kind==='snacking'?avatarSnack:avatarChat;if(!video)return false;clearTimeout(actionTimer);clearPresence();avatarZone.classList.add(kind);video.currentTime=0;video.playbackRate=rnd(.94,1.06);video.play().catch(()=>{});const fallback=kind==='drinking'?rndi(6500,9000):kind==='snacking'?rndi(6000,8500):rndi(3500,5600);actionBusyUntil=Date.now()+fallback;const done=()=>{avatarZone.classList.remove(kind);video.removeEventListener('ended',done);actionBusyUntil=0;};video.addEventListener('ended',done,{once:true});actionTimer=setTimeout(done,fallback);if(kind==='drinking')lastDrink=Date.now();if(kind==='snacking')lastSnack=Date.now();if(kind==='chatting')lastGlance=Date.now();return true;}
+function microPresence(){if(Date.now()<actionBusyUntil)return;const roll=Math.random();if(avatarIdle)avatarIdle.playbackRate=rnd(.96,1.04);if(roll<.46){avatarZone.classList.add('focused');setTimeout(()=>avatarZone.classList.remove('focused'),rndi(2500,5200));}else if(roll<.72&&Date.now()-lastGlance>45000){playAction('chatting');}else if(roll<.86){for(const v of avatarVideos)v.style.filter=`brightness(${rnd(.985,1.025).toFixed(3)}) contrast(${rnd(.99,1.02).toFixed(3)})`;setTimeout(()=>avatarVideos.forEach(v=>v.style.filter=''),rndi(1800,3200));}else if(Date.now()-lastDrink>6*60*1000){playAction('drinking');}else if(Date.now()-lastSnack>12*60*1000){playAction('snacking');}}
+function scheduleHumanLoop(){setTimeout(()=>{microPresence();scheduleHumanLoop();},rndi(18000,42000));}
+function scheduleDrink(){setTimeout(()=>{if(Date.now()>=actionBusyUntil)playAction('drinking');scheduleDrink();},rndi(7*60*1000,12*60*1000));}
+function scheduleSnack(){setTimeout(()=>{if(Date.now()>=actionBusyUntil)playAction('snacking');scheduleSnack();},rndi(14*60*1000,24*60*1000));}
+function loadVideo(){if(isCloud&&state?.current?.sourceUrl){if(!nativeMode||nativeSource!==state.current.sourceUrl){nativeMode=true;nativeSource=state.current.sourceUrl;lastError=null;lastId=null;if(ready)player.pauseVideo();document.getElementById('yt').style.display='none';nativeVideo.style.display='block';nativeVideo.src=state.current.sourceUrl;nativeVideo.loop=!!state.current.test;nativeVideo.muted=false;nativeVideo.volume=.58;title.textContent=state.current.title;nativeVideo.play().catch(()=>{tap.style.display='flex';});}return;}if(nativeMode){nativeMode=false;nativeSource=null;nativeVideo.pause();nativeVideo.removeAttribute('src');nativeVideo.load();nativeVideo.style.display='none';document.getElementById('yt').style.display='block';lastId=null;lastError=null;tap.style.display='none';}if(!ready||!state?.current?.id||lastId===state.current.id)return;lastId=state.current.id;lastError=null;title.textContent=state.current.title;player.mute();player.loadVideoById(lastId);if(!state.playing)player.pauseVideo();if(!isCloud)setTimeout(()=>{try{const ps=player.getPlayerState();if(ps!==YT.PlayerState.PLAYING&&ps!==YT.PlayerState.BUFFERING)tap.style.display='flex';}catch{}},3500);}
+window.onYouTubeIframeAPIReady=()=>{player=new YT.Player('yt',{width:'100%',height:'100%',playerVars:{origin:location.origin,autoplay:1,mute:1,controls:1,rel:0,fs:0,playsinline:1},events:{onReady:()=>{ready=true;loadVideo();},onStateChange:({data})=>{if(nativeMode)return;report(data);if(data===1){tap.style.display='none';if(isCloud){player.unMute();player.setVolume(58);}}},onError:({data})=>{if(nativeMode)return;const messages={2:'Invalid video ID',5:'YouTube playback failed',100:'Video unavailable',101:'Embedding disabled for this video',150:'Embedding disabled for this video',153:'YouTube rejected the player identification'};report(-data,(messages[data]||'YouTube playback error')+' (code '+data+')');tap.style.display='flex';},onAutoplayBlocked:()=>{if(nativeMode)return;tap.style.display='flex';report(-998,'Tap START GAMEPLAY to preview');}}});};
 document.getElementById('tapBtn').onclick=()=>{if(nativeMode){nativeVideo.play().catch(()=>{});return;}if(ready){lastError=null;title.textContent=state?.current?.title||'Gameplay';player.mute();player.playVideo();tap.style.display='none';}};
 async function update(){try{state=await(await fetch('/api/state',{cache:'no-store'})).json();renderState(state);loadVideo();}catch{title.textContent='Reconnecting to cloud service…';}}
 const apiScript=document.createElement('script');apiScript.src='https://www.youtube.com/iframe_api';apiScript.onerror=()=>report(-997,'YouTube player could not load');document.head.append(apiScript);
-if(typeof io==='function'){
- const socket=io();socket.on('status',s=>{state=s;renderState(s);loadVideo();});socket.on('queue',s=>{state=s;renderState(s);lastId=null;loadVideo();});
- socket.on('playback',p=>{if(state)state.playing=p.playing;if(nativeMode){p.playing?nativeVideo.play().catch(()=>{}):nativeVideo.pause();}else if(ready)p.playing?player.playVideo():player.pauseVideo();});
- socket.on('chat',c=>{lastChatTs=Math.max(lastChatTs,c.ts||0);addLine('@'+c.user+': '+c.text);playAction('chatting')});socket.on('event',e=>{if(e.type==='commentary')say(e.text);else if(e.type==='follow'){recentFollower.textContent='@'+e.user;addLine(e.text,'eventLine');say('Thanks for the follow, '+e.user+'.');}else if(e.type==='gift'){recentGift.textContent='@'+e.user+' · '+e.gift;addLine(e.text,'eventLine');say('Thank you for the '+e.gift+', '+e.user+'.');}});
-}
-nativeVideo.addEventListener('playing',()=>{lastError=null;tap.style.display='none';report(1);});
-nativeVideo.addEventListener('error',()=>{if(nativeMode)report(-994,'Direct video playback failed: '+(nativeVideo.error?.message||'unknown error'));});
+if(typeof io==='function'){const socket=io();socket.on('status',s=>{state=s;renderState(s);loadVideo();});socket.on('queue',s=>{state=s;renderState(s);lastId=null;loadVideo();});socket.on('playback',p=>{if(state)state.playing=p.playing;if(nativeMode){p.playing?nativeVideo.play().catch(()=>{}):nativeVideo.pause();}else if(ready)p.playing?player.playVideo():player.pauseVideo();});socket.on('chat',c=>{lastChatTs=Math.max(lastChatTs,c.ts||0);addLine('@'+c.user+': '+c.text);if(Date.now()-lastChatReaction>9000&&Math.random()<.72){lastChatReaction=Date.now();playAction('chatting');}});socket.on('event',e=>{if(e.type==='commentary')say(e.text);else if(e.type==='follow'){recentFollower.textContent='@'+e.user;addLine(e.text,'eventLine');say('Thanks for the follow, '+e.user+'.');}else if(e.type==='gift'){recentGift.textContent='@'+e.user+' · '+e.gift;addLine(e.text,'eventLine');say('Thank you for the '+e.gift+', '+e.user+'.',6200);}});}
+nativeVideo.addEventListener('playing',()=>{lastError=null;tap.style.display='none';report(1);});nativeVideo.addEventListener('error',()=>{if(nativeMode)report(-994,'Direct video playback failed: '+(nativeVideo.error?.message||'unknown error'));});
 setInterval(()=>{if(nativeMode)report(nativeVideo.ended?0:(nativeVideo.paused?2:(nativeVideo.readyState>=2&&!nativeVideo.seeking?1:3)));else if(ready)report(player.getPlayerState());},2000);
 setTimeout(()=>{if(!ready&&!nativeMode)report(-996,'YouTube did not finish loading');},30000);
-setInterval(update,15000);update();
-setTimeout(()=>playAction('drinking'),75000);setInterval(()=>playAction('drinking'),420000);setTimeout(()=>playAction('snacking'),210000);setInterval(()=>playAction('snacking'),600000);
+setInterval(update,15000);update();scheduleHumanLoop();scheduleDrink();scheduleSnack();setTimeout(()=>microPresence(),12000);
