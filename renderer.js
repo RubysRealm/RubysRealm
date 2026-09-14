@@ -11,10 +11,20 @@ process.on('SIGTERM',()=>{stopping=true;browser?.close();});
 for(let i=0;i<60;i++){try{if((await fetch(local+'/api/state')).ok)break;}catch{}await pause(1000);}
 while(!stopping){
  try{
-  browser=await chromium.launch({headless:false,args:['--no-sandbox','--disable-dev-shm-usage','--autoplay-policy=no-user-gesture-required','--kiosk','--window-position=0,0',`--window-size=${process.env.STREAM_WIDTH||720},${process.env.STREAM_HEIGHT||1280}`]});
+  browser=await chromium.launch({
+   executablePath:'/usr/bin/google-chrome-stable',
+   headless:false,
+   args:[
+    '--no-sandbox','--disable-dev-shm-usage','--autoplay-policy=no-user-gesture-required',
+    '--kiosk','--window-position=0,0',`--window-size=${process.env.STREAM_WIDTH||720},${process.env.STREAM_HEIGHT||1280}`,
+    '--disable-background-timer-throttling','--disable-renderer-backgrounding','--disable-backgrounding-occluded-windows'
+   ]
+  });
   const page=await browser.newPage({viewport:{width:Number(process.env.STREAM_WIDTH||720),height:Number(process.env.STREAM_HEIGHT||1280)}});
   page.on('pageerror',e=>console.log('Stage script error:',e.message));
+  page.on('console',m=>{if(m.type()==='error')console.log('Stage console error:',m.text());});
   await page.goto(origin+'/stage?renderer=cloud',{waitUntil:'domcontentloaded',timeout:60000});
+  console.log('Cloud renderer: Google Chrome with full media codecs');
   let endedId=null,lastLabel=null,frameNumber=0,clicked=false;
   while(!stopping&&!page.isClosed()){
    const s=await page.evaluate(()=>window.__playerStatus||{code:-999,label:'loading'});
