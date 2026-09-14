@@ -3,6 +3,7 @@ const params=new URLSearchParams(location.search),isCloud=params.get('renderer')
 const nativeVideo=document.getElementById("nativeVideo");let nativeMode=false,nativeSource=null;
 let state=null,player=null,ready=false,lastId=null,lastError=null;
 const title=document.getElementById('gameTitle'),chat=document.getElementById('chat'),speech=document.getElementById('speech'),tap=document.getElementById('tap');
+const avatarZone=document.getElementById('avatarZone');
 window.__playerStatus={code:-999,label:'loading',position:0,error:null};
 const labels={'-1':'unstarted','0':'ended','1':'playing','2':'paused','3':'buffering','5':'cued'};
 function report(code,error=null){
@@ -11,7 +12,7 @@ function report(code,error=null){
   window.__playerStatus={code,label:lastError?'error':(labels[code]||'loading'),error:lastError,videoId:state?.current?.id,position:nativeMode?nativeVideo.currentTime:(ready?player.getCurrentTime():0)};
   if(lastError)title.textContent=lastError;
 }
-function say(text){speech.textContent=text;speech.classList.add('show');clearTimeout(say.timer);say.timer=setTimeout(()=>speech.classList.remove('show'),5200);}
+function say(text){speech.textContent=text;speech.classList.add('show');avatarZone.classList.add('reacting');clearTimeout(say.timer);say.timer=setTimeout(()=>{speech.classList.remove('show');avatarZone.classList.remove('reacting');},5200);}
 function addLine(text,cls='chatLine'){const d=document.createElement('div');d.className=cls;d.textContent=text;chat.appendChild(d);while(chat.children.length>7)chat.firstChild.remove();}
 function loadVideo(){
   if(state?.current?.sourceUrl){
