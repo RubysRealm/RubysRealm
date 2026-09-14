@@ -24,6 +24,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Sync latest queue state
+        run: |
+          git fetch origin main
+          git reset --hard origin/main
+
       - name: Check story state
         id: state
         run: |
@@ -78,24 +83,46 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$VIDEO" "$MANIFEST" --clobber
           else
-            gh release create "$TAG" "$VIDEO" "$MANIFEST" --title "RubyClips corrected story Part ${PART}" --notes "Corrected normalized A/V concat, lowered title placement, dynamic story hashtag."
+            gh release create "$TAG" "$VIDEO" "$MANIFEST" --title "RubyClips corrected story Part ${PART}" --notes "Normalized A/V concat, lowered title, dynamic story hashtag, idempotent publishing."
           fi
 
-      - name: Wait for corrected publisher
+      - name: Check durable publish marker
+        id: publish_marker
         if: steps.state.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="$(cat /tmp/rubyclips_tag)"
+          rm -rf /tmp/existing-publish
+          mkdir -p /tmp/existing-publish
+          if gh release download "$TAG" --pattern publish.json --dir /tmp/existing-publish >/dev/null 2>&1; then
+            cp /tmp/existing-publish/publish.json /tmp/post.json
+            python -c "import json; d=json.load(open('/tmp/post.json')); assert d.get('ok') and d.get('postId') and str(d.get('channelName','')).lstrip('@').lower()=='rubaradaclips'"
+            echo 'already=true' >> "$GITHUB_OUTPUT"
+            echo "Part already has a durable publish marker; Buffer call will be skipped."
+          else
+            echo 'already=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Wait for idempotent publisher
+        if: steps.state.outputs.ready == 'true' && steps.publish_marker.outputs.already != 'true'
         run: |
           URL='https://rubys-realm.vercel.app/api/rubyclips-post?health=1'
           for i in $(seq 1 90); do
             CODE="$(curl -sS -o /tmp/health.json -w '%{http_code}' "$URL" || true)"
-            if [ "$CODE" = '200' ] && grep -q 'existing-video-parts-v8-tiktok-story-restart' /tmp/health.json; then exit 0; fi
+            if [ "$CODE" = '200' ] && grep -q 'existing-video-parts-v9-tiktok-idempotent' /tmp/health.json; then exit 0; fi
             sleep 5
           done
           cat /tmp/health.json || true
           exit 1
 
-      - name: Send corrected part to Buffer
-        if: steps.state.outputs.ready == 'true'
+      - name: Send part to Buffer once
+        if: steps.state.outputs.ready == 'true' && steps.publish_marker.outputs.already != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           TAG="$(cat /tmp/rubyclips_tag)"
           URL="https://rubys-realm.vercel.app/api/rubyclips-post?tag=${TAG}"
           CODE="$(curl -sS --max-time 120 -o /tmp/post.json -w '%{http_code}' "$URL" || true)"
@@ -103,30 +130,18 @@ jobs:
           test "$CODE" = '200'
           python -c "import json; d=json.load(open('/tmp/post.json')); assert d.get('ok') and d.get('postId') and str(d.get('channelName','')).lstrip('@').lower()=='rubaradaclips'"
           cp /tmp/post.json rubyclips/muffin_output/publish.json
+          cp /tmp/post.json /tmp/publish.json
+          gh release upload "$TAG" /tmp/publish.json --clobber
 
-      - name: Queue this post for its TikTok story playlist
+      - name: Restore existing publish result
+        if: steps.state.outputs.ready == 'true' && steps.publish_marker.outputs.already == 'true'
+        run: cp /tmp/post.json rubyclips/muffin_output/publish.json
+
+      - name: Advance story state exactly once
         if: steps.state.outputs.ready == 'true'
         run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json, subprocess
-          m=json.load(open('rubyclips/muffin_output/manifest.json'))
-          p=json.load(open('/tmp/post.json'))
-          subprocess.run([
-              'python','tools/record_tiktok_playlist_assignment.py',
-              '--account','rubaradaclips',
-              '--story-id',str(m['sourceSeriesId']),
-              '--story-title',str(m['sourceSeriesTitle']),
-              '--playlist-name',str(m['sourceSeriesTitle']),
-              '--part',str(m['segmentIndex']),
-              '--post-id',str(p['postId']),
-              '--source','rubaradaclips-workflow'
-          ], check=True)
-          PY
-
-      - name: Advance corrected story state
-        if: steps.state.outputs.ready == 'true'
-        run: |
+          git fetch origin main
+          git reset --hard origin/main
           python - <<'PY'
           import json
           from pathlib import Path
@@ -137,14 +152,23 @@ jobs:
               raise SystemExit('Refusing to advance stale restart generation')
           part=int(info['part'])
           episodes=[int(x) for x in info['episodes']]
+          first_episode=episodes[0]
+          next_episode=int(info['nextEpisode'])
+          if int(s.get('nextPart',0)) == part + 1 and int(s.get('nextEpisode',0)) == next_episode:
+              print('Queue state was already advanced for this part; leaving it unchanged.')
+              raise SystemExit(0)
+          if int(s.get('nextPart',0)) != part or int(s.get('nextEpisode',0)) != first_episode:
+              raise SystemExit(f"Refusing out-of-order state advance: state part={s.get('nextPart')} episode={s.get('nextEpisode')} built part={part} episode={first_episode}")
           s['lastPostedPart']=part
           s['lastPostedEpisodes']=episodes
-          s['nextEpisode']=int(info['nextEpisode'])
+          s['nextEpisode']=next_episode
           s['nextPart']=part+1
           s['lastPackingPolicy']='max-whole-episodes-under-590s'
           s['concatPolicy']='normalized-filter-concat-v2'
           s['overlayLayoutVersion']='story-title-lowered-v2'
           s['lastStoryHashtag']=info.get('storyHashtag')
+          s['pipelineRevision']=info.get('pipelineRevision')
+          s['lastLogicalPostKey']=info.get('logicalPostKey')
           if info.get('storyComplete'):
               sid=str(s['currentSeriesId'])
               done=[str(x) for x in s.get('completedSeriesIds',[])]
@@ -155,9 +179,8 @@ jobs:
           PY
           git config user.name 'rubyclips-publisher-bot'
           git config user.email 'actions@users.noreply.github.com'
-          git pull --rebase --autostash
-          git add rubyclips/muffin_state.json tiktok_playlist_assignments.json
-          git diff --cached --quiet || git commit -m 'Advance corrected MuffinDrama story queue [skip ci]'
+          git add rubyclips/muffin_state.json
+          git diff --cached --quiet || git commit -m 'Advance idempotent MuffinDrama story queue [skip ci]'
           git push
 
       - name: Save diagnostics
