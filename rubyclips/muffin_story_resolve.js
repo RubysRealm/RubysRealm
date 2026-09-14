@@ -26,7 +26,16 @@ const KNOWN_EPISODE_IDS = {
   13: '7682997023217306893',
   14: '7682996977897917709',
   15: '7682996991823056141',
-  39: '7680667081213234450'
+  39: '7680667081213234450',
+  40: '7682997059560951054',
+  41: '7682997068738071822',
+  42: '7682997029441703182',
+  43: '7682997049444289805',
+  44: '7682997046084685069',
+  45: '7682997097267809550',
+  46: '7682997091664235790',
+  47: '7682997037314395406',
+  48: '7682997041479388429'
 };
 
 const state = JSON.parse(fs.readFileSync(STATE_PATH, 'utf8'));
@@ -94,6 +103,7 @@ async function browserFallback(episode) {
     const addMedia = value => {
       const s = String(value || '');
       if (!s || s.startsWith('blob:') || s.startsWith('data:')) return;
+      if (/\/tiktok\/webapp\/main\/webapp-desktop\/playback1\.mp4/i.test(s)) return;
       if (!mediaCandidates.includes(s)) mediaCandidates.push(s);
     };
     const capture = value => {
@@ -217,6 +227,7 @@ function durationOf(file) {
       if (size < 100000) throw new Error(`downloaded file is too small (${size} bytes)`);
       dur = durationOf(file);
       if (!Number.isFinite(dur) || dur <= 0) throw new Error(`invalid duration ${dur}`);
+      if (dur < 10 && String(item.sourceHint || '').includes('rendered')) throw new Error(`rejecting ${dur.toFixed(2)}s rendered placeholder media`);
     } catch (e) {
       try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch {}
       if (episode === firstEpisode || resolved.length === 0) throw new Error(`Episode ${episode}: download/verify failed: ${e.message}`);
