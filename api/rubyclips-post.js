@@ -10,7 +10,8 @@ const TIKTOK_STORY_PLATFORM = 'rubyclips-tiktok-story-v1';
 const CREATOR_CHANNEL = '@bushcraftinthewildforest';
 const TIKTOK_STORY_CHANNEL = '@muffindrama_us';
 const MAX_AUTO_SECONDS = 599;
-const PUBLISHER_VERSION = 'existing-video-parts-v7-tiktok-story';
+const MIN_STORY_RESTART_GENERATION = 2;
+const PUBLISHER_VERSION = 'existing-video-parts-v8-tiktok-story-restart';
 
 function validateBase(m) {
   if (!m?.file || !String(m.file).endsWith('.mp4')) throw new Error('Blocked: missing MP4.');
@@ -41,12 +42,16 @@ function validateTikTokStory(m, tag) {
   if (String(m?.sourceChannel || '').toLowerCase() !== TIKTOK_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: TikTok story channel mismatch.');
   const seriesId = String(m?.sourceSeriesId || '').trim();
   if (!/^\d{10,25}$/.test(seriesId)) throw new Error('Blocked: invalid TikTok series id.');
+  const restart = Number(m?.restartGeneration || 0);
+  if (!Number.isInteger(restart) || restart < MIN_STORY_RESTART_GENERATION) throw new Error('Blocked: stale TikTok story generation.');
   const ids = Array.isArray(m?.sourceVideoIds) ? m.sourceVideoIds.map(x => String(x).trim()) : [];
   if (!ids.length || ids.some(id => !/^\d{10,25}$/.test(id))) throw new Error('Blocked: invalid TikTok episode ids.');
   const urls = Array.isArray(m?.sourceUrls) ? m.sourceUrls.map(String) : [];
   if (!urls.length || urls.some(url => !url.includes('tiktok.com/'))) throw new Error('Blocked: invalid TikTok episode URLs.');
-  const expected = `rubyclips-tt-${seriesId}-p${index}`;
-  if (tag !== expected) throw new Error('Blocked: release tag does not match TikTok story part.');
+  const storyHashtag = String(m?.storyHashtag || '').trim();
+  if (!/^#[A-Za-z0-9]+$/.test(storyHashtag) || !String(m.caption).includes(storyHashtag)) throw new Error('Blocked: missing story-title hashtag.');
+  const expected = `rubyclips-tt-${seriesId}-r${restart}-p${index}`;
+  if (tag !== expected) throw new Error('Blocked: release tag does not match TikTok story restart/part.');
   return { index, total: Number(m?.segmentTotal || 0) || null };
 }
 
@@ -88,7 +93,7 @@ export default async function handler(req, res) {
 
   try {
     const tag = String(req.query?.tag || '').trim();
-    if (!/^rubyclips-(?:fb-\d+|src-[A-Za-z0-9_-]{6,20})(?:-s\d+)?$/.test(tag) && !/^rubyclips-tt-\d{10,25}-p\d+$/.test(tag)) {
+    if (!/^rubyclips-(?:fb-\d+|src-[A-Za-z0-9_-]{6,20})(?:-s\d+)?$/.test(tag) && !/^rubyclips-tt-\d{10,25}-r\d+-p\d+$/.test(tag)) {
       return res.status(400).json({ ok: false, error: 'A valid RubyClips release tag is required.' });
     }
 
