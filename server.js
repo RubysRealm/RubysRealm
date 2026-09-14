@@ -2,7 +2,6 @@ import express from "express";
 import http from "http";
 import { Server as SocketIOServer } from "socket.io";
 import { spawn } from "child_process";
-import { WebcastPushConnection } from "tiktok-live-connector";
 
 const app = express();
 const server = http.createServer(app);
@@ -27,7 +26,25 @@ function addEvent(type,text,extra={}){const e={type,text,ts:Date.now(),...extra}
 function commentary(title){const t=title.toLowerCase();let p;if(t.includes("cave"))p=["These caves are actually coming together.","The lighting down here is clean.","I would absolutely get lost in this cave."];else if(t.includes("rain"))p=["The rain makes this build way more relaxing.","This is a good spot for a rainy build.","That roof is going to look good in this weather."];else if(t.includes("snow")||t.includes("christmas"))p=["This snow build is ridiculously cozy.","The winter atmosphere is perfect.","I like where this village is going."];else p=["That build is coming together.","I like this spot.","This is actually relaxing to watch."];return p[Math.floor(Math.random()*p.length)]}
 function startBroadcast(){if(ffmpeg)return {ok:true,message:"Broadcast already running"};const rtmp=process.env.RTMP_URL;if(!rtmp)return {ok:false,message:"RTMP_URL is not configured yet"};const w=process.env.STREAM_WIDTH||"720",h=process.env.STREAM_HEIGHT||"1280",fps=process.env.STREAM_FPS||"30";const args=["-hide_banner","-loglevel","warning","-thread_queue_size","1024","-f","x11grab","-draw_mouse","0","-framerate",fps,"-video_size",`${w}x${h}`,"-i",":99.0","-thread_queue_size","1024","-f","pulse","-i","takarada.monitor","-c:v","libx264","-preset","veryfast","-tune","zerolatency","-pix_fmt","yuv420p","-b:v","3500k","-maxrate","4000k","-bufsize","7000k","-g",String(Number(fps)*2),"-c:a","aac","-b:a","128k","-ar","44100","-f","flv",rtmp];ffmpeg=spawn("ffmpeg",args,{stdio:["ignore","ignore","pipe"]});ffmpeg.stderr.on("data",d=>console.log("[ffmpeg]",String(d).trim()));ffmpeg.on("exit",c=>{console.log("ffmpeg exited",c);ffmpeg=null;io.emit("status",state())});io.emit("status",state());return {ok:true,message:"Cloud broadcast started"}}
 function stopBroadcast(){if(!ffmpeg)return {ok:true,message:"Broadcast already stopped"};ffmpeg.kill("SIGTERM");ffmpeg=null;io.emit("status",state());return {ok:true,message:"Cloud broadcast stopped"}}
-async function connectTikTok(){if(!TIKTOK_USERNAME)return;try{const t=new WebcastPushConnection(TIKTOK_USERNAME,{processInitialData:false});t.on("chat",d=>addChat(d.uniqueId||d.nickname||"viewer",d.comment||""));t.on("follow",d=>addEvent("follow",`${d.uniqueId||d.nickname||"viewer"} followed`));t.on("gift",d=>addEvent("gift",`${d.uniqueId||d.nickname||"viewer"} sent ${d.giftName||"gift"}`,{gift:d.giftName||"gift"}));await t.connect();tiktokConnected=true;io.emit("status",state())}catch(e){console.log("TikTok event connection unavailable:",e?.message||e);tiktokConnected=false}}
+async function connectTikTok(){
+  if(!TIKTOK_USERNAME)return;
+  try{
+    const mod=await import("tiktok-live-connector");
+    const TikTokLiveConnection=mod.TikTokLiveConnection;
+    const WebcastEvent=mod.WebcastEvent;
+    if(!TikTokLiveConnection||!WebcastEvent)throw new Error("TikTok connector API unavailable");
+    const t=new TikTokLiveConnection(TIKTOK_USERNAME,{processInitialData:false});
+    t.on(WebcastEvent.CHAT,d=>addChat(d.user?.uniqueId||d.uniqueId||d.user?.nickname||"viewer",d.comment||""));
+    t.on(WebcastEvent.FOLLOW,d=>addEvent("follow",`${d.user?.uniqueId||d.uniqueId||d.user?.nickname||"viewer"} followed`));
+    t.on(WebcastEvent.GIFT,d=>{const user=d.user?.uniqueId||d.uniqueId||d.user?.nickname||"viewer";const gift=d.giftDetails?.giftName||d.giftName||`gift ${d.giftId||""}`.trim();addEvent("gift",`${user} sent ${gift}`,{gift})});
+    await t.connect();
+    tiktokConnected=true;
+    io.emit("status",state());
+  }catch(e){
+    console.log("TikTok event connection unavailable:",e?.message||e);
+    tiktokConnected=false;
+  }
+}
 app.get("/",(req,res)=>res.redirect("/control?token="+encodeURIComponent(CONTROL_TOKEN)));
 app.get("/stage",(req,res)=>res.sendFile(process.cwd()+"/public/stage.html"));
 app.get("/preview",(req,res)=>res.sendFile(process.cwd()+"/public/stage.html"));
