@@ -46,6 +46,6 @@ if(typeof io==='function'){
 }
 nativeVideo.addEventListener('playing',()=>{lastError=null;tap.style.display='none';report(1);});
 nativeVideo.addEventListener('error',()=>report(-994,'Direct video playback failed: '+(nativeVideo.error?.message||'unknown error')));
-setInterval(()=>{if(nativeMode)report(nativeVideo.ended?0:(nativeVideo.paused?2:(nativeVideo.readyState>=3?1:3)));else if(ready)report(player.getPlayerState());},2000);
+setInterval(()=>{if(nativeMode)report(nativeVideo.ended?0:(nativeVideo.paused?2:(nativeVideo.readyState>=2&&!nativeVideo.seeking?1:3)));else if(ready)report(player.getPlayerState());},2000);
 setTimeout(()=>{if(!ready&&!nativeMode)report(-996,'YouTube did not finish loading');},30000);
 setInterval(update,15000);update();
