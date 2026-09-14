@@ -35,7 +35,8 @@ jobs:
               f.write(f"ready={'true' if ready else 'false'}\n")
               f.write(f"next_episode={s['nextEpisode']}\n")
               f.write(f"next_part={s['nextPart']}\n")
-          print(f"Story={s['currentSeriesTitle']} next episode={s['nextEpisode']} next part={s['nextPart']} ready={ready}")
+              f.write(f"restart_generation={s.get('restartGeneration',0)}\n")
+          print(f"Story={s['currentSeriesTitle']} restart={s.get('restartGeneration')} next episode={s['nextEpisode']} next part={s['nextPart']} ready={ready}")
           PY
 
       - uses: actions/setup-node@v4
@@ -57,41 +58,42 @@ jobs:
           cp rubyclips/muffin_story_resolve.js rubyclips/muffin_story_resolve.cjs
           node rubyclips/muffin_story_resolve.cjs
 
-      - name: Build longest safe part
+      - name: Build and verify corrected part
         if: steps.state.outputs.ready == 'true'
         run: python rubyclips/muffin_story_build.py
 
-      - name: Publish release
+      - name: Publish restart release
         if: steps.state.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           SERIES_ID="$(python -c "import json; print(json.load(open('rubyclips/muffin_output/manifest.json'))['sourceSeriesId'])")"
+          RESTART="$(python -c "import json; print(json.load(open('rubyclips/muffin_output/manifest.json'))['restartGeneration'])")"
           PART="$(python -c "import json; print(json.load(open('rubyclips/muffin_output/manifest.json'))['segmentIndex'])")"
           VIDEO_NAME="$(python -c "import json; print(json.load(open('rubyclips/muffin_output/manifest.json'))['file'])")"
-          TAG="rubyclips-tt-${SERIES_ID}-p${PART}"
+          TAG="rubyclips-tt-${SERIES_ID}-r${RESTART}-p${PART}"
           VIDEO="rubyclips/muffin_output/${VIDEO_NAME}"
           MANIFEST='rubyclips/muffin_output/manifest.json'
           echo "$TAG" > /tmp/rubyclips_tag
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$VIDEO" "$MANIFEST" --clobber
           else
-            gh release create "$TAG" "$VIDEO" "$MANIFEST" --title "RubyClips MuffinDrama Part ${PART}" --notes "Consecutive MuffinDrama episodes packed in order under the 599-second TikTok ceiling."
+            gh release create "$TAG" "$VIDEO" "$MANIFEST" --title "RubyClips corrected story Part ${PART}" --notes "Corrected normalized A/V concat, lowered title placement, dynamic story hashtag."
           fi
 
-      - name: Wait for publisher
+      - name: Wait for corrected publisher
         if: steps.state.outputs.ready == 'true'
         run: |
           URL='https://rubys-realm.vercel.app/api/rubyclips-post?health=1'
           for i in $(seq 1 90); do
             CODE="$(curl -sS -o /tmp/health.json -w '%{http_code}' "$URL" || true)"
-            if [ "$CODE" = '200' ] && grep -q 'existing-video-parts-v7-tiktok-story' /tmp/health.json; then exit 0; fi
+            if [ "$CODE" = '200' ] && grep -q 'existing-video-parts-v8-tiktok-story-restart' /tmp/health.json; then exit 0; fi
             sleep 5
           done
           cat /tmp/health.json || true
           exit 1
 
-      - name: Send to Buffer
+      - name: Send corrected part to Buffer
         if: steps.state.outputs.ready == 'true'
         run: |
           TAG="$(cat /tmp/rubyclips_tag)"
@@ -102,7 +104,7 @@ jobs:
           python -c "import json; d=json.load(open('/tmp/post.json')); assert d.get('ok') and d.get('postId') and str(d.get('channelName','')).lstrip('@').lower()=='rubaradaclips'"
           cp /tmp/post.json rubyclips/muffin_output/publish.json
 
-      - name: Advance story state
+      - name: Advance corrected story state
         if: steps.state.outputs.ready == 'true'
         run: |
           python - <<'PY'
@@ -111,13 +113,18 @@ jobs:
           p=Path('rubyclips/muffin_state.json')
           s=json.loads(p.read_text())
           info=json.load(open('rubyclips/muffin_output/part-info.json'))
+          if int(s.get('restartGeneration',0)) != int(info.get('restartGeneration',-1)):
+              raise SystemExit('Refusing to advance stale restart generation')
           part=int(info['part'])
           episodes=[int(x) for x in info['episodes']]
           s['lastPostedPart']=part
           s['lastPostedEpisodes']=episodes
           s['nextEpisode']=int(info['nextEpisode'])
           s['nextPart']=part+1
-          s['lastPackingPolicy']='max-whole-episodes-under-599s'
+          s['lastPackingPolicy']='max-whole-episodes-under-590s'
+          s['concatPolicy']='normalized-filter-concat-v2'
+          s['overlayLayoutVersion']='story-title-lowered-v2'
+          s['lastStoryHashtag']=info.get('storyHashtag')
           if info.get('storyComplete'):
               sid=str(s['currentSeriesId'])
               done=[str(x) for x in s.get('completedSeriesIds',[])]
@@ -130,7 +137,7 @@ jobs:
           git config user.email 'actions@users.noreply.github.com'
           git pull --rebase --autostash
           git add rubyclips/muffin_state.json
-          git diff --cached --quiet || git commit -m 'Advance MuffinDrama hourly story queue [skip ci]'
+          git diff --cached --quiet || git commit -m 'Advance corrected MuffinDrama story queue [skip ci]'
           git push
 
       - name: Save diagnostics
