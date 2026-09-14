@@ -101,16 +101,34 @@ function durationOf(file) {
     let item;
     try { item = await identifyEpisodeVideo(episode); }
     catch (e) { if (episode === firstEpisode) throw e; console.error(`Stopping lookahead at Episode ${episode}: ${e.message}`); break; }
+
     const file = path.join(WORK, `ep${episode}.mp4`);
-    execFileSync('curl', ['-L','--fail','--retry','3','--retry-delay','1','--connect-timeout','25','-A','Mozilla/5.0','-e','https://www.tiktok.com/', item.media, '-o', file], { stdio: 'inherit' });
-    if (fs.statSync(file).size < 100000) throw new Error(`Episode ${episode}: downloaded file is too small.`);
-    const dur = durationOf(file);
-    if (resolved.length && packedSeconds + dur > HARD_MAX_SECONDS) { fs.unlinkSync(file); console.log(`Episode ${episode} would exceed ${HARD_MAX_SECONDS}s; Part ${state.nextPart} is full.`); break; }
+    let dur;
+    try {
+      execFileSync('curl', ['-L','--fail','--retry','3','--retry-delay','1','--connect-timeout','25','-A','Mozilla/5.0','-e','https://www.tiktok.com/', item.media, '-o', file], { stdio: 'inherit' });
+      const size = fs.existsSync(file) ? fs.statSync(file).size : 0;
+      if (size < 100000) throw new Error(`downloaded file is too small (${size} bytes)`);
+      dur = durationOf(file);
+      if (!Number.isFinite(dur) || dur <= 0) throw new Error(`invalid duration ${dur}`);
+    } catch (e) {
+      try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+      if (episode === firstEpisode || resolved.length === 0) throw new Error(`Episode ${episode}: download/verify failed: ${e.message}`);
+      console.error(`Stopping lookahead at Episode ${episode}: download/verify failed: ${e.message}`);
+      break;
+    }
+
+    if (resolved.length && packedSeconds + dur > HARD_MAX_SECONDS) {
+      fs.unlinkSync(file);
+      console.log(`Episode ${episode} would exceed ${HARD_MAX_SECONDS}s; Part ${state.nextPart} is full.`);
+      break;
+    }
+
     resolved.push({ episode, sourceUrl: item.sourceUrl, shortDramaUrl: item.shortDramaUrl, videoId: item.videoId, sourceHint: item.sourceHint, file, duration: dur });
     packedSeconds += dur;
-    console.log(`Resolved Episode ${episode} -> ${item.videoId} (${sourceHint = item.sourceHint}) ${dur.toFixed(2)}s; packed=${packedSeconds.toFixed(2)}s`);
+    console.log(`Resolved Episode ${episode} -> ${item.videoId} (${item.sourceHint}) ${dur.toFixed(2)}s; packed=${packedSeconds.toFixed(2)}s`);
     if (packedSeconds >= 598.0) break;
   }
+
   if (!resolved.length || Number(resolved[0].episode) !== firstEpisode) throw new Error(`Resolver did not produce required Episode ${firstEpisode}.`);
   fs.writeFileSync(path.join(WORK, 'episodes.json'), JSON.stringify(resolved, null, 2) + '\n');
   console.log(`Prepared ${resolved.length} consecutive episodes starting at ${firstEpisode}; ${packedSeconds.toFixed(2)} seconds.`);
