@@ -3,10 +3,7 @@ name: Ruby's Realm podcast repurpose and TikTok publish
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 1,8,15,22 * * *'
-  push:
-    paths:
-      - 'podcast_repurpose/takurada_publish.trigger'
+    - cron: '0 * * * *'
 
 permissions:
   contents: write
@@ -23,18 +20,45 @@ jobs:
       - name: Checkout Ruby's Realm
         uses: actions/checkout@v4
 
+      - name: Enforce Takurada posting cadence
+        id: cadence
+        run: |
+          python - <<'PY'
+          import json, os
+          from datetime import datetime, timezone, timedelta
+          from pathlib import Path
+
+          state_path = Path('podcast_repurpose/state.json')
+          state = json.loads(state_path.read_text()) if state_path.exists() else {}
+          last = state.get('last_post_at')
+          allowed = True
+          if last:
+              last_dt = datetime.fromisoformat(last.replace('Z', '+00:00'))
+              allowed = datetime.now(timezone.utc) - last_dt >= timedelta(hours=6)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"allowed={'true' if allowed else 'false'}\n")
+          if not allowed:
+              next_ok = last_dt + timedelta(hours=6)
+              print(f"Takurada cadence gate: too soon. Next eligible at {next_ok.isoformat()}.")
+          else:
+              print('Takurada cadence gate: publish allowed.')
+          PY
+
       - name: Set up Python
+        if: steps.cadence.outputs.allowed == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: Install video tools
+        if: steps.cadence.outputs.allowed == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-dejavu-core
           python -m pip install --upgrade pip yt-dlp
 
       - name: Prepare corrected next long-form story part
+        if: steps.cadence.outputs.allowed == 'true'
         env:
           PODCAST_VIDEO_SOURCE: https://www.dailymotion.com/user/MasterPOVYT/videos
           PART_TARGET_SECONDS: '180'
@@ -43,6 +67,7 @@ jobs:
         run: python podcast_repurpose/repurpose_centered.py
 
       - name: Convert manifest for existing Buffer TikTok publisher
+        if: steps.cadence.outputs.allowed == 'true'
         run: |
           python - <<'PY'
           import json
@@ -70,6 +95,7 @@ jobs:
           PY
 
       - name: Publish corrected part as release asset
+        if: steps.cadence.outputs.allowed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -90,6 +116,7 @@ jobs:
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
 
       - name: Wait for existing Buffer TikTok endpoint
+        if: steps.cadence.outputs.allowed == 'true'
         run: |
           set -euo pipefail
           URL='https://rubys-realm.vercel.app/api/auto-post'
@@ -104,6 +131,7 @@ jobs:
           exit 1
 
       - name: Send corrected part through Buffer to TikTok
+        if: steps.cadence.outputs.allowed == 'true'
         run: |
           set -euo pipefail
           URL="https://rubys-realm.vercel.app/api/auto-post?tag=${RELEASE_TAG}"
@@ -115,6 +143,7 @@ jobs:
           echo "POST_ID=$POST_ID" >> "$GITHUB_ENV"
 
       - name: Queue this post for its TikTok story playlist
+        if: steps.cadence.outputs.allowed == 'true'
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -134,10 +163,12 @@ jobs:
           PY
 
       - name: Advance only after Buffer accepts the TikTok post
+        if: steps.cadence.outputs.allowed == 'true'
         run: |
           set -euo pipefail
           python - <<'PY'
           import json
+          from datetime import datetime, timezone
           from pathlib import Path
           state_path=Path('podcast_repurpose/state.json')
           state=json.loads(state_path.read_text()) if state_path.exists() else {'current':None,'completed':[]}
@@ -158,6 +189,7 @@ jobs:
                 'next_part':part+1,
                 'total_parts':total
               }
+          state['last_post_at']=datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
           state_path.write_text(json.dumps(state,indent=2)+'\n')
           PY
           git config user.name 'rubys-realm-bot'
@@ -170,7 +202,7 @@ jobs:
           fi
 
       - name: Keep a short-term copy of the posted part
-        if: always()
+        if: ${{ always() && steps.cadence.outputs.allowed == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: podcast-repurpose-${{ github.run_number }}
