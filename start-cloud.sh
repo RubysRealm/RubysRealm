@@ -9,23 +9,7 @@ pactl set-default-sink takarada >/dev/null 2>&1 || true
 pactl set-default-source takarada.monitor >/dev/null 2>&1 || true
 node server.js &
 NODE_PID=$!
-sleep 2
-CHROME="$(find /ms-playwright -type f -path '*/chrome-linux/chrome' -o -path '*/chrome-linux64/chrome' 2>/dev/null | head -n1)"
-if [ -z "$CHROME" ]; then CHROME="$(find /ms-playwright -type f -name chrome 2>/dev/null | head -n1)"; fi
-if [ -n "$CHROME" ]; then
-  "$CHROME" --no-sandbox --disable-dev-shm-usage --disable-gpu --autoplay-policy=no-user-gesture-required --window-position=0,0 --window-size=${STREAM_WIDTH:-720},${STREAM_HEIGHT:-1280} --kiosk "http://127.0.0.1:${PORT:-10000}/stage?renderer=cloud" >/tmp/chrome.log 2>&1 &
-  (
-    sleep 8
-    for TRY in 1 2 3; do
-      STATE="$(curl -fsS http://127.0.0.1:${PORT:-10000}/api/state 2>/dev/null || true)"
-      if echo "$STATE" | grep -q '"label":"playing"'; then
-        echo "Cloud gameplay is playing"
-        break
-      fi
-      echo "Cloud gameplay not playing yet - sending real browser click"
-      xdotool mousemove 360 775 click 1 >/dev/null 2>&1 || true
-      sleep 4
-    done
-  ) &
-fi
+node renderer.js &
+RENDERER_PID=$!
+trap 'kill "$RENDERER_PID" "$NODE_PID" 2>/dev/null || true' TERM INT EXIT
 wait "$NODE_PID"
