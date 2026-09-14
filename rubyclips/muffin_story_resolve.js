@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const puppeteer = require('puppeteer-core');
-const { Tiktok } = require('@tobyg74/tiktok-api-dl');
+const Tiktok = require('@tobyg74/tiktok-api-dl');
 
 const BASE = 'rubyclips';
 const WORK = path.join(BASE, 'muffin_work');
