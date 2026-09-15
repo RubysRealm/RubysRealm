@@ -12,10 +12,29 @@ for i in $(seq 1 50); do
   sleep 0.2
 done
 if ! DISPLAY=:99 xdotool getdisplaygeometry >/dev/null 2>&1; then cat /tmp/xvfb.log >&2; exit 1; fi
-pulseaudio --system --daemonize=yes --disallow-exit --exit-idle-time=-1 --load="module-native-protocol-unix socket=/tmp/pulse/native auth-anonymous=1" --load="module-null-sink sink_name=takarada sink_properties=device.description=Takarada" >/tmp/pulse.log 2>&1 || true
+
+# PulseAudio system mode drops privileges to the pulse user. Give that user the
+# runtime directories before starting so the null sink and unix socket stay alive.
+chown -R pulse:pulse /tmp/pulse /tmp/pulse-home 2>/dev/null || true
+pulseaudio --system --daemonize=yes --disallow-exit --exit-idle-time=-1 \
+  --load="module-native-protocol-unix socket=/tmp/pulse/native auth-anonymous=1" \
+  --load="module-null-sink sink_name=takarada rate=44100 channels=2 sink_properties=device.description=Takarada" \
+  >/tmp/pulse.log 2>&1
 export PULSE_SERVER=unix:/tmp/pulse/native
-pactl set-default-sink takarada >/dev/null 2>&1 || true
-pactl set-default-source takarada.monitor >/dev/null 2>&1 || true
+PULSE_READY=0
+for i in $(seq 1 75); do
+  if pactl info >/dev/null 2>&1; then PULSE_READY=1; break; fi
+  sleep 0.2
+done
+if [ "$PULSE_READY" != "1" ]; then
+  echo "PulseAudio failed to become ready" >&2
+  cat /tmp/pulse.log >&2 || true
+  exit 1
+fi
+pactl set-default-sink takarada
+pactl set-default-source takarada.monitor
+
+echo "Cloud audio ready: takarada sink + monitor"
 node bootstrap.js &
 NODE_PID=$!
 node renderer.js &
