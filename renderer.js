@@ -1,46 +1,45 @@
-import {chromium} from 'playwright';
+import {spawn} from 'node:child_process';
 import fs from 'node:fs';
 const port=process.env.PORT||10000;
 const local=`http://127.0.0.1:${port}`;
-const origin=process.env.RENDER_EXTERNAL_URL||local;
 const headers={'Content-Type':'application/json','x-control-token':process.env.CONTROL_TOKEN||'change-me'};
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
-async function post(path,data){const r=await fetch(local+path,{method:'POST',headers,body:JSON.stringify(data)});if(!r.ok)throw new Error('Renderer report failed: '+r.status);}
-let stopping=false,browser;
-process.on('SIGTERM',()=>{stopping=true;browser?.close();});
+async function post(path,data){const r=await fetch(local+path,{method:'POST',headers,body:JSON.stringify(data)});if(!r.ok)throw new Error(`POST ${path} failed ${r.status}`);return r;}
+async function getState(){return await(await fetch(local+'/api/state',{cache:'no-store'})).json();}
+let stopping=false,dl=null,player=null,currentId=null,startedAt=0,pausedAt=0,totalPaused=0,lastReported='',shotBusy=false;
+process.on('SIGTERM',()=>{stopping=true;stopCurrent();});
+process.on('SIGINT',()=>{stopping=true;stopCurrent();});
+function stopCurrent(){for(const p of [dl,player]){try{p?.kill('SIGTERM')}catch{}}dl=null;player=null;currentId=null;}
+async function report(label,error=null){if(!currentId)return;const pos=startedAt?Math.max(0,Math.floor((Date.now()-startedAt-totalPaused-(pausedAt?Date.now()-pausedAt:0))/1000)):0;const key=`${label}|${error||''}`;if(key!==lastReported){console.log('Cloud playback:',JSON.stringify({label,error,videoId:currentId,position:pos}));lastReported=key;}await post('/api/player-state',{renderer:'cloud',code:label==='playing'?1:label==='paused'?2:label==='buffering'?3:-1,label,error,videoId:currentId,position:pos}).catch(()=>{});}
+function screenshot(){if(shotBusy)return;shotBusy=true;const p=spawn('ffmpeg',['-hide_banner','-loglevel','error','-f','x11grab','-video_size',`${process.env.STREAM_WIDTH||720}x${process.env.STREAM_HEIGHT||1280}`,'-i',':99.0','-frames:v','1','-y','/tmp/cloud-frame-next.jpg']);p.on('exit',()=>{try{fs.renameSync('/tmp/cloud-frame-next.jpg','/tmp/cloud-frame.jpg')}catch{}shotBusy=false});p.on('error',()=>{shotBusy=false});}
+function startVideo(id){return new Promise((resolve)=>{
+ currentId=id;startedAt=Date.now();pausedAt=0;totalPaused=0;lastReported='';
+ console.log('Starting direct gameplay',id);
+ const yargs=['--no-playlist','--no-warnings','--retries','20','--fragment-retries','20','--retry-sleep','fragment:2','--extractor-args','youtube:player_client=android_vr,web_safari','-f','18/best[ext=mp4][vcodec^=avc1][acodec!=none][height<=720]/best[ext=mp4][acodec!=none][height<=720]/best[height<=720]','-o','-',`https://www.youtube.com/watch?v=${id}`];
+ dl=spawn('yt-dlp',yargs,{stdio:['ignore','pipe','pipe']});
+ player=spawn('ffplay',['-hide_banner','-loglevel','warning','-autoexit','-fs','-noborder','-i','pipe:0'],{stdio:['pipe','ignore','pipe'],env:{...process.env,SDL_AUDIODRIVER:'pulseaudio'}});
+ dl.stdout.pipe(player.stdin);
+ let yerr='',perr='',done=false;
+ const finish=async(kind,code)=>{if(done)return;done=true;try{dl?.stdout?.unpipe(player?.stdin)}catch{};try{player?.stdin?.end()}catch{};const same=currentId===id;dl=null;player=null;if(!same)return resolve({ended:false});
+  if(stopping)return resolve({ended:false});
+  if(code===0||kind==='player'&&code===0){await report('ended');currentId=null;return resolve({ended:true});}
+  const msg=(kind==='yt-dlp'?yerr:perr).trim().slice(-700)||`${kind} exited ${code}`;await report('error',msg);currentId=null;resolve({ended:false,error:msg});};
+ dl.stderr.on('data',d=>{yerr=(yerr+String(d)).slice(-4000)});player.stderr.on('data',d=>{perr=(perr+String(d)).slice(-4000)});
+ dl.on('error',e=>{yerr=e.message;finish('yt-dlp',-1)});player.on('error',e=>{perr=e.message;finish('player',-1)});
+ dl.on('exit',c=>{if(c&&c!==0)finish('yt-dlp',c)});player.on('exit',c=>finish('player',c));
+ setTimeout(()=>{if(currentId===id&&player&&!player.killed)report('playing').catch(()=>{});},9000);
+ });}
 for(let i=0;i<60;i++){try{if((await fetch(local+'/api/state')).ok)break;}catch{}await pause(1000);}
-const gameplayOnlyCss=`
-#avatarZone,#bottom,#chat,#recentActivity,#speech,#brand,#avatarFX,#shade{display:none!important}
-#gameZone{position:absolute!important;inset:0!important;top:0!important;left:0!important;width:100%!important;height:100%!important;background:#000!important}
-#nativeVideo,#yt{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;object-fit:contain!important;background:#000!important}
-`;
+console.log('Cloud renderer: direct yt-dlp + ffplay gameplay with original audio');
+let playTask=null,lastPlaying=true;
 while(!stopping){
  try{
-  browser=await chromium.launch({executablePath:'/usr/bin/google-chrome-stable',headless:false,args:['--no-sandbox','--disable-dev-shm-usage','--autoplay-policy=no-user-gesture-required','--kiosk','--window-position=0,0',`--window-size=${process.env.STREAM_WIDTH||720},${process.env.STREAM_HEIGHT||1280}`,'--disable-background-timer-throttling','--disable-renderer-backgrounding','--disable-backgrounding-occluded-windows']});
-  const page=await browser.newPage({viewport:{width:Number(process.env.STREAM_WIDTH||720),height:Number(process.env.STREAM_HEIGHT||1280)}});
-  page.on('pageerror',e=>console.log('Stage script error:',e.message));
-  page.on('console',m=>{if(m.type()==='error')console.log('Stage console error:',m.text());});
-  await page.goto(origin+'/stage?renderer=cloud',{waitUntil:'domcontentloaded',timeout:60000});
-  await page.addStyleTag({content:gameplayOnlyCss}).catch(()=>{});
-  console.log('Cloud renderer: restored direct gameplay player');
-  let endedId=null,lastLabel=null,frameNumber=0,clicked=false;
-  while(!stopping&&!page.isClosed()){
-   await page.addStyleTag({content:gameplayOnlyCss}).catch(()=>{});
-   await page.evaluate(()=>{const v=document.getElementById('nativeVideo');if(v){v.muted=false;v.volume=1;}}).catch(()=>{});
-   const s=await page.evaluate(()=>window.__playerStatus||{code:-999,label:'loading'});
-   if(s.label!==lastLabel){console.log('Cloud playback:',JSON.stringify(s));lastLabel=s.label;}
-   if(s.label==='error'||s.label==='unstarted'){
-    const frames=page.frames().filter(f=>f.url().includes('youtube.com/embed'));
-    s.diagnostic=(await Promise.all(frames.map(f=>f.locator('body').innerText({timeout:3000}).catch(()=>'')))).join(' ').slice(0,1500);
-   }
-   await post('/api/player-state',{...s,renderer:'cloud'});
-   if(s.label==='ended'&&s.videoId&&s.videoId!==endedId){endedId=s.videoId;await post('/api/video-ended',{videoId:s.videoId});}
-   if(s.label==='playing'){endedId=null;clicked=false;}
-   if(!clicked&&await page.locator('#tapBtn').isVisible().catch(()=>false)){await page.locator('#tapBtn').click().catch(()=>{});clicked=true;}
-   if(frameNumber++%3===0){await page.screenshot({path:'/tmp/cloud-frame-next.jpg',type:'jpeg',quality:80});fs.renameSync('/tmp/cloud-frame-next.jpg','/tmp/cloud-frame.jpg');}
-   await pause(5000);
-  }
- }catch(e){console.log('Cloud renderer stopped:',e.message);await post('/api/player-state',{renderer:'cloud',code:-995,label:'error',error:e.message}).catch(()=>{});}
- await browser?.close().catch(()=>{});
- if(!stopping)await pause(10000);
+  const st=await getState();const wanted=st.current?.id;
+  if(wanted&&wanted!==currentId){stopCurrent();await pause(500);playTask=startVideo(wanted).then(async r=>{if(r.ended)await post('/api/video-ended',{videoId:wanted}).catch(()=>{});});}
+  if(currentId&&st.playing!==lastPlaying){if(st.playing){try{dl?.kill('SIGCONT');player?.kill('SIGCONT')}catch{};if(pausedAt){totalPaused+=Date.now()-pausedAt;pausedAt=0;}await report('playing');}else{try{dl?.kill('SIGSTOP');player?.kill('SIGSTOP')}catch{};pausedAt=Date.now();await report('paused');}lastPlaying=st.playing;}
+  if(currentId&&st.playing&&startedAt)await report('playing');
+  screenshot();
+ }catch(e){console.log('renderer loop error',e.message);}
+ await pause(5000);
 }
+stopCurrent();
