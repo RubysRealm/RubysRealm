@@ -1,6 +1,8 @@
 name: Takarada Free Phone Host
 
 on:
+  issues:
+    types: [opened]
   schedule:
     - cron: '29 * * * *'
   workflow_dispatch:
@@ -11,6 +13,7 @@ concurrency:
 
 jobs:
   phone:
+    if: github.event_name != 'issues' || github.event.issue.title == 'START_TAKARADA_FREE_PHONE'
     runs-on: ubuntu-latest
     timeout-minutes: 335
     env:
