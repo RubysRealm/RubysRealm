@@ -3,79 +3,53 @@ import http from "http";
 import { Server as SocketIOServer } from "socket.io";
 import { spawn } from "child_process";
 import fs from "fs";
-import {pipeline} from "node:stream/promises";
-import {Transform} from "node:stream";
-import {createDirector} from "./director.js";
 
-const app=express();const server=http.createServer(app);const io=new SocketIOServer(server,{cors:{origin:"*"}});
-const PORT=Number(process.env.PORT||10000),CONTROL_TOKEN=process.env.CONTROL_TOKEN||"change-me",TIKTOK_USERNAME=(process.env.TIKTOK_USERNAME||"takurada").replace(/^@/,"").trim();
-const RTMP_SERVER=(process.env.RTMP_SERVER||"").trim(),RTMP_STREAM_KEY=(process.env.RTMP_STREAM_KEY||"").trim();
+const app=express();
+const server=http.createServer(app);
+const io=new SocketIOServer(server,{cors:{origin:"*"}});
+const PORT=Number(process.env.PORT||10000);
+const CONTROL_TOKEN=process.env.CONTROL_TOKEN||"change-me";
+const RTMP_SERVER=(process.env.RTMP_SERVER||"").trim();
+const RTMP_STREAM_KEY=(process.env.RTMP_STREAM_KEY||"").trim();
 const mediaSources=JSON.parse(process.env.MEDIA_SOURCES||"{}");
-const mediaRoot=process.env.MEDIA_ROOT||"/tmp/takarada-media";fs.mkdirSync(mediaRoot,{recursive:true});let playbackTest=true;
 const videos=[["c6FAO3-zvhE","Lush Caves"],["AirXwBsNPDw","Rainy Riverside"],["wcIUiy_Ofcw","Ghibli Nostalgic"],["y8yMP36qHXA","Rainy Swamp"],["Zoq4ogt2wtU","Pine Forest House"],["Dy3VtjcHdCs","Rainy Cliff"],["ykHsq6yUNGg","Rainy Flower Forest"],["nUbDQ0wUESU","Medieval Farmhouse"],["snvLyjMcgh0","Rainy River"],["N6S53tOB1ss","Rainy Jungle Tree House"],["C_WaC-JmhFo","Rainy Mountain"],["eHSxedwXaM0","Rainy Cherry Grove"],["oCIpgdb2pM4","Rainy Mangrove Swamp"],["yTTutYKV1rk","Rainy Overgrown Laputa Part 1"],["2byiUUc0SnQ","Rainy Overgrown Laputa Part 2"],["UDRhiTUMVQY","Ghibli Nostalgic 1.20"],["wV9VatPiPf4","Rainy Spruce Island"],["LoeTtwvBD_k","Rainy Beach House"],["-DRRSTrLHTI","Rainy Greenhouse"],["bp-1X7sQ_2M","Rainy Cherry Lake"],["Ps0oA1nt3mw","Rainy Meadow"],["pW0iacBW1MU","Snowy Mountain"],["Az9X6YFzcBU","Christmas Snow Village"],["i9U-rUObowg","Rainy Mountain 1.21"],["IsXCRoImZ3c","Rainy Pale Garden"],["AepZzZS6j_U","Rainy Dark Forest"],["GFmBMg7-b44","Rainy Farmhouse"],["CIHsdaqCXwM","Rainy River Island"],["hYJY95sAeFc","Rainy Pale Cherry"],["O6yrzYkn2i8","Rainy Old Treehouse"]].map(([id,title])=>({id,title}));
-let index=0,playing=true,ffmpeg=null,tiktokConnected=false,recentChat=[],recentEvents=[];let tiktokConnection=null,tiktokConnecting=false;let cloudPlayerState={code:-999,label:"waiting",videoId:null,updatedAt:0};
-let broadcastWanted=false,broadcastStatus="stopped",broadcastError=null,broadcastStartedAt=null,lastChatReplyAt=0,recentFollower=null,recentGift=null;
-let speaking=false,speechQueue=[],currentSpeech=null,director=null,totalLikes=0,directorDemoLastRun=0;
-app.use(express.json());app.use((req,res,next)=>{res.setHeader("Referrer-Policy","strict-origin-when-cross-origin");next()});app.use(express.static("public"));
-function auth(req,res,next){const t=req.query.token||req.headers["x-control-token"];if(t!==CONTROL_TOKEN)return res.status(403).send("Bad control token");next()}
-function getRtmp(){const direct=(process.env.RTMP_URL||"").trim();if(direct)return direct;if(!RTMP_SERVER||!RTMP_STREAM_KEY)return"";return RTMP_SERVER.replace(/\/$/,"")+"/"+RTMP_STREAM_KEY.replace(/^\//,"")}
-function cur(){const video=videos[index];return {...video,sourceUrl:mediaSources[video.id]||null}}
-function state(){const current=playbackTest?{...cur(),title:"Cloud readiness test",sourceUrl:"/demo-gameplay.webm",test:true}:cur();return{index,count:videos.length,playing,current,next:videos[(index+1)%videos.length],broadcasting:!!ffmpeg,broadcastWanted,broadcastStatus,broadcastError,broadcastStartedAt,tiktokConnected,username:TIKTOK_USERNAME||null,cloudPlayerState,version:"takarada-director-1",rtmpConfigured:!!getRtmp(),mediaReady:!!current.sourceUrl&&!current.test,playbackTest,recentFollower,recentGift,totalLikes,chat:recentChat.slice(-8),events:recentEvents.slice(-8),speech:{speaking,current:currentSpeech,queued:speechQueue.length},director:director?.state?.()||null}}
-function nextVideo(d=1){index=(index+d+videos.length)%videos.length;playing=true;io.emit("queue",state())}
-function addChat(user,text){const c={user,text,ts:Date.now()};recentChat.push(c);recentChat=recentChat.slice(-50);io.emit("chat",c)}
-function speechPriority(type,extra){if(type==="gift")return 100;if(type==="follow")return 90;if(type==="commentary"&&extra?.reason==="chat")return 82;if(type==="share")return 75;if(type==="commentary"&&extra?.reason==="likes")return 55;return 30}
-function queueSpeech(text,priority=30){text=String(text||"").trim();if(!text)return;if(currentSpeech?.text===text||speechQueue.some(x=>x.text===text))return;speechQueue.push({text,priority,ts:Date.now()});speechQueue.sort((a,b)=>b.priority-a.priority||a.ts-b.ts);while(speechQueue.length>12)speechQueue.pop();pumpSpeech()}
-function pumpSpeech(){if(speaking||!speechQueue.length)return;const item=speechQueue.shift();speaking=true;currentSpeech=item;const f=`/tmp/takarada-${Date.now()}.wav`;const done=()=>{speaking=false;currentSpeech=null;try{fs.unlinkSync(f)}catch{};setTimeout(pumpSpeech,160)};const synth=spawn("espeak-ng",["-v","en-us","-s","155","-p","48","-a","135","-w",f,item.text]);synth.on("close",code=>{if(code)return done();const p=spawn("paplay",["--device=takarada",f]);p.on("close",done);p.on("error",done)});synth.on("error",done)}
-function addEvent(type,text,extra={}){const e={type,text,ts:Date.now(),...extra};recentEvents.push(e);recentEvents=recentEvents.slice(-50);io.emit("event",e);let spoken=text;if(type==="follow")spoken=`Thanks for the follow, ${extra.user||"friend"}.`;else if(type==="gift")spoken=`${extra.user||"friend"}, thank you for the ${extra.gift||"gift"}.`;else if(type==="share")spoken=`${extra.user||"friend"}, thanks for sharing the live.`;if(type==="commentary"||type==="follow"||type==="gift"||type==="share")queueSpeech(spoken,speechPriority(type,extra));io.emit("status",state())}
+let index=0,playing=true,ffmpeg=null;
+let cloudPlayerState={code:-999,label:"waiting",videoId:null,position:0,updatedAt:0};
+let broadcastWanted=false,broadcastStatus="stopped",broadcastError=null,broadcastStartedAt=null;
 
-director=createDirector({framePath:"/tmp/cloud-frame.jpg",getState:state,emitEvent:addEvent});
-
-function replyToComment(user,text){if(Date.now()-lastChatReplyAt<12000||!text?.trim())return;const reply=director.reply(user,text);if(reply)lastChatReplyAt=Date.now()}
-function safeBroadcastError(value,rtmp){return String(value||"").replaceAll(rtmp,"[TikTok destination]").replace(/rtmps?:\/\/\S+/gi,"[TikTok destination]").slice(-600)}
-function scheduleBroadcastRetry(){if(!broadcastWanted)return;setTimeout(()=>{if(broadcastWanted&&!ffmpeg)startBroadcast(true)},12000).unref()}
-function startBroadcast(retry=false){if(playbackTest){broadcastWanted=false;return{ok:false,message:"Readiness test is active. Full footage must be connected before TikTok broadcast."}};if(ffmpeg)return{ok:true,message:"Broadcast already running"};if(cloudPlayerState.label!=="playing"||Date.now()-cloudPlayerState.updatedAt>15000){if(!retry)broadcastWanted=false;return{ok:false,message:"Gameplay is not ready. Check the cloud player status before starting."}};const rtmp=getRtmp();if(!rtmp){if(!retry)broadcastWanted=false;return{ok:false,message:"TikTok streaming destination is not configured yet"}};broadcastWanted=true;broadcastStatus="starting";broadcastError=null;const w=process.env.STREAM_WIDTH||"720",h=process.env.STREAM_HEIGHT||"1280",fps=process.env.STREAM_FPS||"30";const args=["-hide_banner","-loglevel","warning","-thread_queue_size","1024","-f","x11grab","-draw_mouse","0","-framerate",fps,"-video_size",`${w}x${h}`,"-i",":99.0","-thread_queue_size","1024","-f","pulse","-i","takarada.monitor","-c:v","libx264","-preset","veryfast","-tune","zerolatency","-pix_fmt","yuv420p","-b:v","3500k","-maxrate","4000k","-bufsize","7000k","-g",String(Number(fps)*2),"-c:a","aac","-b:a","128k","-ar","44100","-f","flv",rtmp];ffmpeg=spawn("ffmpeg",args,{stdio:["ignore","ignore","pipe"]});let stderr="";ffmpeg.stderr.on("data",d=>{stderr=(stderr+String(d)).slice(-4000)});ffmpeg.on("spawn",()=>{broadcastStatus="streaming";broadcastStartedAt=Date.now();io.emit("status",state())});ffmpeg.on("error",e=>{broadcastError=safeBroadcastError(e.message,rtmp)});ffmpeg.on("exit",c=>{const wanted=broadcastWanted;ffmpeg=null;broadcastStartedAt=null;broadcastStatus=wanted?"reconnecting":"stopped";if(c&&!broadcastError)broadcastError=safeBroadcastError(stderr||`Encoder exited with code ${c}`,rtmp);io.emit("status",state());if(wanted)scheduleBroadcastRetry()});io.emit("status",state());return{ok:true,message:"Cloud encoder is connecting to TikTok"}}
-function stopBroadcast(){broadcastWanted=false;broadcastStatus="stopped";broadcastError=null;broadcastStartedAt=null;if(!ffmpeg){io.emit("status",state());return{ok:true,message:"Broadcast already stopped"}};const processToStop=ffmpeg;ffmpeg=null;processToStop.kill("SIGTERM");io.emit("status",state());return{ok:true,message:"Cloud broadcast stopped"}}
-async function connectTikTok(){
- if(!TIKTOK_USERNAME||tiktokConnected||tiktokConnecting)return;
- tiktokConnecting=true;
- try{
-  const {TikTokLiveConnection,WebcastEvent,ControlEvent}=await import("tiktok-live-connector");
-  const t=new TikTokLiveConnection(TIKTOK_USERNAME,{processInitialData:false});tiktokConnection=t;
-  t.on(WebcastEvent.CHAT,d=>{const user=d.user?.uniqueId||d.uniqueId||d.user?.nickname||"viewer",text=d.comment||"";addChat(user,text);replyToComment(user,text);});
-  t.on(WebcastEvent.FOLLOW,d=>{const user=d.user?.uniqueId||d.uniqueId||d.user?.nickname||"viewer";recentFollower={user,ts:Date.now()};addEvent("follow",user+" followed",{user});});
-  t.on(WebcastEvent.GIFT,d=>{if(d.giftType===1&&!d.repeatEnd)return;const user=d.user?.uniqueId||d.uniqueId||d.user?.nickname||"viewer",gift=d.giftDetails?.giftName||d.giftName||"a gift";recentGift={user,gift,ts:Date.now()};addEvent("gift",user+" sent "+gift,{user,gift});});
-  if(WebcastEvent.LIKE)t.on(WebcastEvent.LIKE,d=>{const user=d.user?.uniqueId||d.uniqueId||d.user?.nickname||"viewer",count=Math.max(1,Number(d.likeCount||1));totalLikes+=count;director.onLike(user,count);io.emit("status",state());});
-  if(WebcastEvent.SHARE)t.on(WebcastEvent.SHARE,d=>{const user=d.user?.uniqueId||d.uniqueId||d.user?.nickname||"viewer";director.onShare(user);});
-  if(ControlEvent?.DISCONNECTED)t.on(ControlEvent.DISCONNECTED,()=>{tiktokConnected=false;io.emit("status",state());});
-  if(ControlEvent?.ERROR)t.on(ControlEvent.ERROR,()=>{});
-  await t.connect();tiktokConnected=true;io.emit("status",state());
- }catch(e){tiktokConnected=false;await tiktokConnection?.disconnect().catch(()=>{});console.log("TikTok connection waiting:",e?.message||String(e));}
- finally{tiktokConnecting=false;}
+app.use(express.json());
+app.use(express.static("public"));
+function auth(req,res,next){const t=req.query.token||req.headers["x-control-token"];if(t!==CONTROL_TOKEN)return res.status(403).send("Bad control token");next();}
+function getRtmp(){const direct=(process.env.RTMP_URL||"").trim();if(direct)return direct;if(!RTMP_SERVER||!RTMP_STREAM_KEY)return"";return RTMP_SERVER.replace(/\/$/,"")+"/"+RTMP_STREAM_KEY.replace(/^\//,"");}
+function cur(){const v=videos[index];return {...v,sourceUrl:mediaSources[v.id]||null};}
+function state(){const current=cur();return{version:"gameplay-only-1",gameplayOnly:true,index,count:videos.length,playing,current,next:videos[(index+1)%videos.length],cloudPlayerState,broadcasting:!!ffmpeg,broadcastWanted,broadcastStatus,broadcastError,broadcastStartedAt,rtmpConfigured:!!getRtmp(),mediaReady:!!current.sourceUrl||cloudPlayerState.label==="playing",playbackTest:false,audioMode:"original-gameplay"};}
+function nextVideo(d=1){index=(index+d+videos.length)%videos.length;playing=true;cloudPlayerState={code:-999,label:"loading",videoId:cur().id,position:0,updatedAt:Date.now()};io.emit("queue",state());}
+function safeBroadcastError(value,rtmp){return String(value||"").replaceAll(rtmp,"[TikTok destination]").replace(/rtmps?:\/\/\S+/gi,"[TikTok destination]").slice(-600);}
+function scheduleBroadcastRetry(){if(!broadcastWanted)return;setTimeout(()=>{if(broadcastWanted&&!ffmpeg)startBroadcast(true);},12000).unref();}
+function startBroadcast(retry=false){
+ if(ffmpeg)return{ok:true,message:"Broadcast already running"};
+ if(cloudPlayerState.label!=="playing"||Date.now()-cloudPlayerState.updatedAt>15000){if(!retry)broadcastWanted=false;return{ok:false,message:"Gameplay is not playing in the cloud yet."};}
+ const rtmp=getRtmp();if(!rtmp){if(!retry)broadcastWanted=false;return{ok:false,message:"TikTok streaming destination is not configured yet."};}
+ broadcastWanted=true;broadcastStatus="starting";broadcastError=null;
+ const w=process.env.STREAM_WIDTH||"720",h=process.env.STREAM_HEIGHT||"1280",fps=process.env.STREAM_FPS||"30";
+ const args=["-hide_banner","-loglevel","warning","-thread_queue_size","1024","-f","x11grab","-draw_mouse","0","-framerate",fps,"-video_size",`${w}x${h}`,"-i",":99.0","-thread_queue_size","1024","-f","pulse","-i","takarada.monitor","-c:v","libx264","-preset","veryfast","-tune","zerolatency","-pix_fmt","yuv420p","-b:v","3500k","-maxrate","4000k","-bufsize","7000k","-g",String(Number(fps)*2),"-c:a","aac","-b:a","160k","-ar","44100","-f","flv",rtmp];
+ ffmpeg=spawn("ffmpeg",args,{stdio:["ignore","ignore","pipe"]});let stderr="";
+ ffmpeg.stderr.on("data",d=>{stderr=(stderr+String(d)).slice(-4000);});
+ ffmpeg.on("spawn",()=>{broadcastStatus="streaming";broadcastStartedAt=Date.now();io.emit("status",state());});
+ ffmpeg.on("error",e=>{broadcastError=safeBroadcastError(e.message,rtmp);});
+ ffmpeg.on("exit",c=>{const wanted=broadcastWanted;ffmpeg=null;broadcastStartedAt=null;broadcastStatus=wanted?"reconnecting":"stopped";if(c&&!broadcastError)broadcastError=safeBroadcastError(stderr||`Encoder exited with code ${c}`,rtmp);io.emit("status",state());if(wanted)scheduleBroadcastRetry();});
+ io.emit("status",state());return{ok:true,message:"Cloud encoder is connecting to TikTok with gameplay audio."};
 }
-setInterval(connectTikTok,60000).unref();
-app.get("/",(req,res)=>res.type("html").send('<meta name="viewport" content="width=device-width,initial-scale=1"><title>Takarada Control</title><body style="background:#090a0f;color:white;font:18px system-ui;padding:32px"><h1>Takarada Cloud Live</h1><p>Open your private control link to manage the stream.</p><a style="color:#ff5677" href="/preview">View layout preview</a></body>'));app.get("/stage",(req,res)=>res.sendFile(process.cwd()+"/public/stage.html"));app.get("/preview",(req,res)=>res.sendFile(process.cwd()+"/public/stage.html"));app.get("/control",auth,(req,res)=>res.sendFile(process.cwd()+"/public/control.html"));app.get("/api/state",(req,res)=>res.json(state()));app.get("/api/director",(req,res)=>res.json({ok:true,version:"takarada-director-1",player:cloudPlayerState,director:director.state(),speech:{speaking,current:currentSpeech,queued:speechQueue.length},tiktokConnected,totalLikes}));
-app.post("/api/director-demo/run",async(req,res)=>{
- const now=Date.now();if(now-directorDemoLastRun<25000)return res.status(429).json({ok:false,message:"Demo is already running. Give it a few seconds."});directorDemoLastRun=now;
- try{
-  const image=await fetch(`https://i.ytimg.com/vi/${cur().id}/maxresdefault.jpg`);if(image.ok)fs.writeFileSync("/tmp/cloud-frame.jpg",Buffer.from(await image.arrayBuffer()));
-  playbackTest=false;playing=true;cloudPlayerState={code:1,label:"playing",error:null,position:83,diagnostic:"director-demo",videoId:cur().id,updatedAt:Date.now()};await director.analyze();director.forceCommentary();io.emit("status",state());
-  setTimeout(()=>{recentFollower={user:"Mason",ts:Date.now()};addEvent("follow","Mason followed",{user:"Mason",demo:true})},3000).unref();
-  setTimeout(()=>{addChat("Ava","what part of the build are we at?");director.reply("Ava","what part of the build are we at?")},7000).unref();
-  setTimeout(()=>{recentGift={user:"Builder",gift:"Rose",ts:Date.now()};addEvent("gift","Builder sent Rose",{user:"Builder",gift:"Rose",demo:true})},11000).unref();
-  setTimeout(()=>{totalLikes+=250;director.onLike("Mason",250);io.emit("status",state())},15000).unref();
-  setTimeout(()=>{director.onShare("Ava");io.emit("status",state())},19000).unref();
-  res.json({ok:true,context:director.state().context});
- }catch(e){res.status(500).json({ok:false,message:String(e.message||e).slice(0,200)})}
-});
-app.use("/media",express.static(mediaRoot));
-app.put("/api/test-media",auth,async(req,res)=>{
- const file=mediaRoot+"/playback-test.mp4",temp=file+".upload";let size=0;
- if(fs.existsSync(temp))return res.status(409).json({ok:false,message:"Upload already in progress"});
- try{await pipeline(req,new Transform({transform(chunk,enc,cb){size+=chunk.length;cb(size>50*1024*1024?new Error("Test file exceeds 50MB"):null,chunk)}}),fs.createWriteStream(temp,{flags:"wx"}));fs.renameSync(temp,file);res.json({ok:true,size});}
- catch(e){try{fs.unlinkSync(temp)}catch{}if(!res.headersSent)res.status(400).json({ok:false,message:e.message});}
-});
-app.post("/api/player-state",auth,(req,res)=>{if(req.body?.renderer==="cloud"){cloudPlayerState={code:Number(req.body.code),label:String(req.body.label||"unknown"),error:req.body.error||null,position:Number(req.body.position||0),diagnostic:String(req.body.diagnostic||"").slice(0,1500),videoId:req.body.videoId||null,updatedAt:Date.now()};if(cloudPlayerState.error)console.log("cloud player error",cloudPlayerState.error)}res.json({ok:true})});
-app.post("/api/action/:action",auth,async(req,res)=>{const a=req.params.action;let r={ok:true,message:"OK"};if(a==="test-on"){playbackTest=true;playing=true;io.emit("queue",state());}else if(a==="test-off"){playbackTest=false;io.emit("queue",state());}else if(a==="reaction-test"){await director.analyze();director.forceCommentary();r.message="Gameplay-aware director reaction played"}else if(a==="next")nextVideo(1);else if(a==="prev")nextVideo(-1);else if(a==="play"){playing=true;io.emit("playback",{playing})}else if(a==="pause"){playing=false;io.emit("playback",{playing})}else if(a==="start")r=startBroadcast();else if(a==="stop")r=stopBroadcast();else return res.status(404).json({ok:false,message:"Unknown action"});res.json({...r,state:state()})});app.post("/api/video-ended",auth,(req,res)=>{if(!playbackTest&&req.body.videoId===cur().id)nextVideo(1);res.json(state())});
-app.get("/api/cloud-frame",auth,(req,res)=>{res.setHeader("Cache-Control","no-store");if(!fs.existsSync("/tmp/cloud-frame.jpg"))return res.status(503).send("Cloud frame not ready");res.sendFile("/tmp/cloud-frame.jpg")});
+function stopBroadcast(){broadcastWanted=false;broadcastStatus="stopped";broadcastError=null;broadcastStartedAt=null;if(!ffmpeg){io.emit("status",state());return{ok:true,message:"Broadcast already stopped"};}const p=ffmpeg;ffmpeg=null;p.kill("SIGTERM");io.emit("status",state());return{ok:true,message:"Cloud broadcast stopped"};}
+
+app.get("/",(req,res)=>res.type("html").send('<meta name="viewport" content="width=device-width,initial-scale=1"><title>Takarada Gameplay Live</title><body style="background:#090a0f;color:white;font:18px system-ui;padding:32px"><h1>Takarada Gameplay Live</h1><p>Gameplay-only cloud stream.</p><a style="color:#ff5677" href="/preview">Open gameplay preview</a></body>'));
+app.get("/stage",(req,res)=>res.sendFile(process.cwd()+"/public/stage.html"));
+app.get("/preview",(req,res)=>res.sendFile(process.cwd()+"/public/stage.html"));
+app.get("/control",auth,(req,res)=>res.sendFile(process.cwd()+"/public/control.html"));
+app.get("/api/state",(req,res)=>res.json(state()));
+app.post("/api/player-state",auth,(req,res)=>{if(req.body?.renderer==="cloud"){cloudPlayerState={code:Number(req.body.code),label:String(req.body.label||"unknown"),error:req.body.error||null,position:Number(req.body.position||0),duration:Number(req.body.duration||0),volume:Number(req.body.volume??1),muted:!!req.body.muted,videoId:req.body.videoId||null,updatedAt:Date.now()};if(cloudPlayerState.error)console.log("cloud player error",cloudPlayerState.error);}res.json({ok:true});});
+app.post("/api/action/:action",auth,(req,res)=>{const a=req.params.action;let r={ok:true,message:"OK"};if(a==="next")nextVideo(1);else if(a==="prev")nextVideo(-1);else if(a==="play"){playing=true;io.emit("playback",{playing});r.message="Gameplay playing";}else if(a==="pause"){playing=false;io.emit("playback",{playing});r.message="Gameplay paused";}else if(a==="start")r=startBroadcast();else if(a==="stop")r=stopBroadcast();else if(a==="test-on"||a==="test-off"||a==="reaction-test")r={ok:false,message:"Facecam/voice test mode is disabled. This build is gameplay-only."};else return res.status(404).json({ok:false,message:"Unknown action"});res.json({...r,state:state()});});
+app.post("/api/video-ended",auth,(req,res)=>{if(req.body.videoId===cur().id)nextVideo(1);res.json(state());});
+app.get("/api/cloud-frame",auth,(req,res)=>{res.setHeader("Cache-Control","no-store");if(!fs.existsSync("/tmp/cloud-frame.jpg"))return res.status(503).send("Cloud frame not ready");res.sendFile("/tmp/cloud-frame.jpg");});
 io.on("connection",s=>s.emit("status",state()));
-server.listen(PORT,"0.0.0.0",()=>{console.log(`Takarada cloud live on :${PORT}`);connectTikTok();if(process.env.AUTO_START==="true"&&process.env.RTMP_URL)setTimeout(startBroadcast,7000)});
+server.listen(PORT,"0.0.0.0",()=>{console.log(`Takarada gameplay-only live on :${PORT}`);if(process.env.AUTO_START==="true"&&getRtmp())setTimeout(startBroadcast,7000);});
