@@ -13,19 +13,13 @@ $ADB -s "$SERIAL" shell wm density 320 || true
 $ADB -s "$SERIAL" shell settings put system screen_off_timeout 2147483647 || true
 $ADB -s "$SERIAL" shell svc power stayon true || true
 
-# Install the Takarada full-screen feed app from this branch.
+# Install the verified Takarada full-screen feed app first.
 $ADB -s "$SERIAL" install -r virtual-phone/prebuilt/takarada-display.apk
-
-# Install Aurora Store from the reproducible F-Droid build so TikTok can be
-# installed from the Google Play catalog without bundling a TikTok APK mirror.
-curl -fL --retry 3 -o "$ROOT/aurora.apk" https://f-droid.org/repo/com.aurora.store_76.apk
-$ADB -s "$SERIAL" install -r "$ROOT/aurora.apk" || true
-
-# Start the feed once so the app is initialized.
 $ADB -s "$SERIAL" shell am start -n com.takarada.display/.MainActivity --es url "$FEED_URL" || true
-sleep 3
+sleep 2
 
-# Expose Android through scrcpy -> Xvfb -> password-protected noVNC.
+# Expose Android immediately through scrcpy -> Xvfb -> password-protected noVNC.
+# Optional app-store/TikTok installation happens only after control is available.
 export DISPLAY=:99
 Xvfb :99 -screen 0 720x1280x24 -nolisten tcp >"$ROOT/xvfb.log" 2>&1 &
 sleep 1
@@ -61,11 +55,10 @@ PASSWORD_CIPHER=$(printf '%s' "$VNC_PASSWORD" | openssl pkeyutl -encrypt -pubin 
 echo "TAKARADA_PHONE_URL=$FULL_URL"
 echo "Virtual Android phone is ready."
 echo "Android: $($ADB -s "$SERIAL" shell getprop ro.build.version.release | tr -d '\r')"
-echo "Aurora: $($ADB -s "$SERIAL" shell pm path com.aurora.store 2>/dev/null | head -1 | tr -d '\r')"
 echo "Display: $($ADB -s "$SERIAL" shell pm path com.takarada.display 2>/dev/null | head -1 | tr -d '\r')"
 
-# Hand the URL back through the trigger issue. The VNC password is RSA-OAEP
-# encrypted, so posting the comment on a public repository does not expose it.
+# Hand the access URL back through the trigger issue. The VNC password is
+# RSA-OAEP encrypted, so it is safe to transport through a public issue comment.
 if [ -n "${TRIGGER_ISSUE:-}" ] && [ -n "${GH_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
   BODY=$(cat <<EOF
 TAKARADA_PHONE_READY
@@ -74,11 +67,18 @@ PASSWORD_RSA_OAEP: $PASSWORD_CIPHER
 RUN_ID: ${GITHUB_RUN_ID:-unknown}
 EOF
 )
-  gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$TRIGGER_ISSUE/comments" -f body="$BODY" >/dev/null
+  gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$TRIGGER_ISSUE/comments" -f body="$BODY" >/dev/null || echo 'WARNING: could not post phone access callback'
 fi
 
-# Put Aurora Store in front for first-time TikTok installation/login.
-$ADB -s "$SERIAL" shell monkey -p com.aurora.store -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+# Optional first-time app-store setup. Never kill the phone if this fails;
+# once the tunnel exists we can install/repair apps interactively.
+AURORA_APK="$ROOT/aurora.apk"
+if curl -fL --retry 2 --connect-timeout 15 --max-time 90 -o "$AURORA_APK" https://f-droid.org/repo/com.aurora.store_76.apk; then
+  $ADB -s "$SERIAL" install -r "$AURORA_APK" || true
+  $ADB -s "$SERIAL" shell monkey -p com.aurora.store -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+else
+  echo 'WARNING: Aurora Store download failed; phone remains available for interactive repair.'
+fi
 
 # Keep the free runner alive while the virtual phone is being used.
 END=$((SECONDS + 18600))
