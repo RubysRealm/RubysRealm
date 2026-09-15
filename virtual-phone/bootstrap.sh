@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PHONE_ROOT=${PHONE_ROOT:-/opt/takarada-phone}
-ANDROID_IMAGE=${ANDROID_IMAGE:-redroid/redroid:12.0.0_64only-latest}
+ANDROID_IMAGE=${ANDROID_IMAGE:-redroid/redroid:13.0.0_64only-latest}
 ADB_SERIAL=${ADB_SERIAL:-127.0.0.1:5555}
 WIDTH=${WIDTH:-720}
 HEIGHT=${HEIGHT:-1280}
@@ -10,6 +10,17 @@ DPI=${DPI:-320}
 TAKARADA_FEED_URL=${TAKARADA_FEED_URL:-https://takarada-cloud-live.onrender.com/preview}
 
 export DEBIAN_FRONTEND=noninteractive
+
+ARCH=$(dpkg --print-architecture)
+PAGE_SIZE=$(getconf PAGESIZE)
+if [ "$PAGE_SIZE" != "4096" ]; then
+  echo "Unsupported host page size: $PAGE_SIZE. ReDroid requires 4096-byte pages." >&2
+  exit 20
+fi
+
+echo "Takarada host architecture: $ARCH"
+echo "Host page size: $PAGE_SIZE"
+
 apt-get update
 apt-get install -y ca-certificates curl docker.io android-tools-adb xvfb fluxbox x11vnc novnc websockify scrcpy python3 openssl linux-modules-extra-"$(uname -r)" || \
   apt-get install -y ca-certificates curl docker.io android-tools-adb xvfb fluxbox x11vnc novnc websockify scrcpy python3 openssl
@@ -17,10 +28,23 @@ systemctl enable --now docker
 
 mkdir -p "$PHONE_ROOT" "$PHONE_ROOT/android-data" "$PHONE_ROOT/run" "$PHONE_ROOT/apks"
 
-# ReDroid uses the host kernel. Binder is the only Android-specific kernel feature
-# we need here; this avoids a heavyweight nested Android emulator.
+# Modern ARM64 Ubuntu kernels use binderfs. ReDroid shares the host kernel,
+# so no nested virtualization/KVM is required.
 modprobe binder_linux devices="binder,hwbinder,vndbinder" 2>/dev/null || modprobe binder_linux
 printf '%s\n' binder_linux >/etc/modules-load.d/takarada-redroid.conf
+
+if grep -qw binder /proc/filesystems; then
+  mkdir -p /dev/binderfs
+  if ! mountpoint -q /dev/binderfs; then
+    mount -t binder binder /dev/binderfs
+  fi
+fi
+
+# Confirm at least one Binder device exists before Android starts.
+if [ ! -e /dev/binder ] && [ ! -e /dev/binderfs/binder ]; then
+  echo "Binder device is unavailable on this host kernel." >&2
+  exit 21
+fi
 
 if ! docker inspect takarada-redroid >/dev/null 2>&1; then
   docker run -d \
@@ -38,29 +62,37 @@ else
   docker start takarada-redroid >/dev/null || true
 fi
 
-for i in $(seq 1 90); do
+BOOTED=false
+for i in $(seq 1 120); do
   adb connect "$ADB_SERIAL" >/dev/null 2>&1 || true
   if adb -s "$ADB_SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' | grep -q '^1$'; then
+    BOOTED=true
     break
   fi
   sleep 2
 done
+
+if [ "$BOOTED" != "true" ]; then
+  echo "Android did not finish booting." >&2
+  docker logs --tail 200 takarada-redroid || true
+  exit 22
+fi
 
 adb -s "$ADB_SERIAL" shell wm size "${WIDTH}x${HEIGHT}" || true
 adb -s "$ADB_SERIAL" shell wm density "$DPI" || true
 adb -s "$ADB_SERIAL" shell settings put system screen_off_timeout 2147483647 || true
 adb -s "$ADB_SERIAL" shell svc power stayon true || true
 
-# Install Aurora Store from F-Droid so TikTok can be obtained from Google Play
-# without bundling or trusting a random third-party TikTok APK mirror.
+# Install Aurora Store from F-Droid so TikTok can be obtained through a Play-backed
+# client instead of bundling a random third-party TikTok APK mirror.
 AURORA_APK="$PHONE_ROOT/apks/AuroraStore-4.8.4.apk"
 if ! adb -s "$ADB_SERIAL" shell pm path com.aurora.store 2>/dev/null | grep -q package:; then
   curl -fL --retry 3 -o "$AURORA_APK" "https://f-droid.org/repo/com.aurora.store_76.apk"
   adb -s "$ADB_SERIAL" install -r "$AURORA_APK"
 fi
 
-# Install our tiny full-screen feed app. It is built from this repository and
-# contains no credentials; it only renders the feed URL supplied to it.
+# Install our tiny full-screen feed app. It contains no credentials; it only
+# renders the feed URL supplied to it.
 DISPLAY_APK="$PHONE_ROOT/apks/takarada-display.apk"
 curl -fL --retry 3 -o "$DISPLAY_APK" "https://raw.githubusercontent.com/RubysRealm/RubysRealm/takarada-virtual-phone/virtual-phone/prebuilt/takarada-display.apk"
 adb -s "$ADB_SERIAL" install -r "$DISPLAY_APK"
@@ -85,7 +117,7 @@ EOF
 chmod +x /usr/local/bin/takarada-show-feed
 
 if [ ! -f "$PHONE_ROOT/vnc.pass" ]; then
-  VNC_PASSWORD=$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | head -c 16)
+  VNC_PASSWORD=$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 20)
   x11vnc -storepasswd "$VNC_PASSWORD" "$PHONE_ROOT/vnc.pass" >/dev/null
   chmod 600 "$PHONE_ROOT/vnc.pass"
   printf '%s\n' "$VNC_PASSWORD" >"$PHONE_ROOT/vnc-password.txt"
@@ -135,14 +167,13 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-# Secure public access to noVNC through a Cloudflare Quick Tunnel. The URL is
-# random and HTTPS. VNC itself is additionally password protected.
-ARCH=$(dpkg --print-architecture)
+# Browser access stays free: Cloudflare Quick Tunnel publishes noVNC through a
+# random HTTPS URL while VNC itself remains password protected.
 if ! command -v cloudflared >/dev/null 2>&1; then
   case "$ARCH" in
     amd64) CF_ARCH=amd64 ;;
     arm64) CF_ARCH=arm64 ;;
-    *) CF_ARCH=amd64 ;;
+    *) echo "Unsupported cloudflared architecture: $ARCH" >&2; exit 23 ;;
   esac
   curl -fsSL -o /tmp/cloudflared.deb "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}.deb"
   dpkg -i /tmp/cloudflared.deb || apt-get -f install -y
@@ -170,8 +201,12 @@ cat >/usr/local/bin/takarada-phone-status <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 PHONE_ROOT=${PHONE_ROOT:-/opt/takarada-phone}
+echo '=== Host ==='
+uname -m || true
+getconf PAGESIZE || true
 echo '=== Android ==='
 adb -s 127.0.0.1:5555 shell getprop ro.build.version.release 2>/dev/null || true
+adb -s 127.0.0.1:5555 shell getprop ro.product.cpu.abi 2>/dev/null || true
 adb -s 127.0.0.1:5555 shell getprop sys.boot_completed 2>/dev/null || true
 echo '=== Aurora Store ==='
 adb -s 127.0.0.1:5555 shell pm path com.aurora.store 2>/dev/null || true
