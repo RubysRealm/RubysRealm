@@ -38,13 +38,11 @@ jobs:
             sudo chmod 666 /dev/kvm || true
           fi
 
-      - name: Install phone viewer
+      - name: Install screenshot helper
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y scrcpy xvfb fluxbox x11vnc novnc websockify curl
-          curl -fsSL -o /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-          sudo dpkg -i /tmp/cloudflared.deb || sudo apt-get -f install -y
+          sudo apt-get install -y python3-pil curl
 
       - name: Restore Android phone state
         uses: actions/cache@v4
@@ -65,5 +63,5 @@ jobs:
           profile: pixel_7_pro
           force-avd-creation: false
           disable-animations: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: bash virtual-phone/github-runner-session.sh
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -no-metrics
+          script: bash virtual-phone/github-phone-agent.sh
