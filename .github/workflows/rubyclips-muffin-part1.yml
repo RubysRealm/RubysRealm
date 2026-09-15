@@ -61,14 +61,23 @@ jobs:
           python -m pip install --quiet --upgrade yt-dlp
           npm init -y >/dev/null 2>&1
           npm install --silent puppeteer-core @tobyg74/tiktok-api-dl
-          sudo mkdir -p /usr/share/fonts/truetype/dejavu
           FONT_SRC="$(fc-match -f '%{file}\n' 'Arial:style=Bold' | head -1)"
           if [ -z "$FONT_SRC" ] || [ ! -f "$FONT_SRC" ]; then
             FONT_SRC="$(fc-match -f '%{file}\n' 'Helvetica:style=Bold' | head -1)"
           fi
           test -n "$FONT_SRC" && test -f "$FONT_SRC"
-          sudo ln -sf "$FONT_SRC" /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
-          echo "Using font: $FONT_SRC"
+          python - "$FONT_SRC" <<'PY'
+          import sys
+          from pathlib import Path
+          p=Path('rubyclips/muffin_story_build.py')
+          s=p.read_text()
+          old="FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'"
+          new=f"FONT = {sys.argv[1]!r}"
+          if old not in s:
+              raise SystemExit('Expected builder font setting not found')
+          p.write_text(s.replace(old,new,1))
+          print('Using font:', sys.argv[1])
+          PY
 
       - name: Resolve upcoming episodes
         if: steps.state.outputs.ready == 'true'
