@@ -87,10 +87,10 @@ filters.append(''.join(concat_inputs) + f'concat=n={len(chosen)}:v=1:a=1[vcat][a
 filters.append(
     f"[vcat]drawtext=fontfile={FONT}:textfile='{esc(WORK/'story-title.txt')}':"
     "fontcolor=white:fontsize=35:line_spacing=5:box=1:boxcolor=black@0.68:boxborderw=14:"
-    "x=(w-text_w)/2:y=125,"
+    "x=(w-text_w)/2:y=195,"
     f"drawtext=fontfile={FONT}:textfile='{esc(WORK/'part-label.txt')}':"
     "fontcolor=white:fontsize=31:box=1:boxcolor=black@0.68:boxborderw=11:"
-    "x=(w-text_w)/2:y=245[vout]"
+    "x=(w-text_w)/2:y=315[vout]"
 )
 
 final = OUT / f'muffindrama-{series_id}-r{restart_generation}-part-{part:02d}.mp4'
@@ -154,7 +154,7 @@ manifest = {
     'targetChannel': 'rubaradaclips',
     'titleBurnedIn': True,
     'partLabelBurnedIn': True,
-    'overlayLayoutVersion': 'story-title-lowered-v2',
+    'overlayLayoutVersion': 'story-title-lowered-v3',
     'concatPolicy': 'normalized-filter-concat-v2',
     'packingPolicy': 'max-whole-episodes-under-590s'
 }
