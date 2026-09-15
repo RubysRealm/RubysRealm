@@ -1,0 +1,101 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Takarada Webcam Rig</title>
+<style>
+html,body{margin:0;height:100%;background:#05060a;color:white;font-family:system-ui,-apple-system,Segoe UI,sans-serif;overflow:hidden}#wrap{height:100%;display:grid;place-items:center;background:radial-gradient(circle at 58% 42%,#24101b 0,#0a0b11 48%,#040508 100%)}canvas{width:min(100vw,177.78vh);height:min(56.25vw,100vh);display:block;box-shadow:0 0 60px #0009}.hint{position:fixed;left:12px;bottom:10px;font-size:11px;opacity:.5;letter-spacing:.04em;pointer-events:none}</style>
+</head><body><div id="wrap"><canvas id="c" width="960" height="540"></canvas></div><div class="hint">TAKARADA • ARTICULATED WEBCAM RIG • webcam-only proof</div>
+<script>
+'use strict';
+const c=document.getElementById('c'),ctx=c.getContext('2d');
+const W=c.width,H=c.height,TAU=Math.PI*2;
+const img=new Image();img.src='/takarada-avatar.jpg';
+let ready=false;img.onload=()=>ready=true;
+const lerp=(a,b,t)=>a+(b-a)*t,clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const smooth=(a,b,t)=>a+(b-a)*(1-Math.pow(1-t,3));
+function rr(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r)}
+function capsule(x1,y1,x2,y2,r,fill,stroke){ctx.save();ctx.lineCap='round';ctx.lineWidth=r*2;ctx.strokeStyle=fill;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();if(stroke){ctx.lineWidth=2;ctx.strokeStyle=stroke;ctx.stroke()}ctx.restore()}
+function ik(sx,sy,tx,ty,L1,L2,bend=1){let dx=tx-sx,dy=ty-sy,d=Math.hypot(dx,dy);d=clamp(d,Math.abs(L1-L2)+.001,L1+L2-.001);let a=Math.atan2(dy,dx),ca=(L1*L1+d*d-L2*L2)/(2*L1*d),off=Math.acos(clamp(ca,-1,1))*bend;let a1=a+off,ex=sx+Math.cos(a1)*L1,ey=sy+Math.sin(a1)*L1;return{ex,ey,a1,a2:Math.atan2(ty-ey,tx-ex)}}
+function texturedHead(x,y,w,h,rot,mouth,blink){
+ ctx.save();ctx.translate(x,y);ctx.rotate(rot);ctx.translate(-w/2,-h/2);
+ ctx.save();ctx.beginPath();ctx.ellipse(w*.5,h*.49,w*.47,h*.49,0,0,TAU);ctx.clip();
+ if(ready)ctx.drawImage(img,245,82,205,232,0,0,w,h);else{ctx.fillStyle='#cfa98f';ctx.fillRect(0,0,w,h)}
+ const shade=ctx.createLinearGradient(0,0,w,0);shade.addColorStop(0,'rgba(0,0,0,.20)');shade.addColorStop(.5,'rgba(0,0,0,0)');shade.addColorStop(1,'rgba(110,15,35,.14)');ctx.fillStyle=shade;ctx.fillRect(0,0,w,h);
+ // eyelids mapped from detected face landmarks
+ if(blink>.05){ctx.strokeStyle=`rgba(33,19,21,${.35+.5*blink})`;ctx.lineWidth=3.2+3*blink;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(w*.39,h*.43);ctx.lineTo(w*.48,h*.43);ctx.moveTo(w*.61,h*.46);ctx.lineTo(w*.70,h*.46);ctx.stroke()}
+ // actual lip region is not pasted separately; this is a small viseme shadow over the full face texture
+ if(mouth>.035){const mw=18+mouth*14,mh=2+mouth*9;ctx.fillStyle=`rgba(42,12,16,${.28+.5*mouth})`;ctx.beginPath();ctx.ellipse(w*.50,h*.744,mw,mh,0.05,0,TAU);ctx.fill();ctx.fillStyle=`rgba(210,121,126,${.18+.25*mouth})`;ctx.beginPath();ctx.ellipse(w*.50,h*.744,mw*.72,Math.max(1,mh*.22),0.05,0,TAU);ctx.fill()}
+ ctx.restore();
+ // soft jaw/chin shadow for depth
+ ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(w*.5,h*.53,w*.44,.18*Math.PI,.82*Math.PI);ctx.stroke();
+ ctx.restore();
+}
+function torso(x,y,scale,rot,breath){
+ const w=250*scale,h=(260+breath*8)*scale;ctx.save();ctx.translate(x,y);ctx.rotate(rot);ctx.translate(-w/2,-40*scale);
+ ctx.save();ctx.beginPath();ctx.moveTo(w*.18,0);ctx.quadraticCurveTo(w*.5,-30*scale,w*.82,0);ctx.lineTo(w*.98,h*.84);ctx.quadraticCurveTo(w*.5,h*1.04,w*.02,h*.84);ctx.closePath();ctx.clip();
+ if(ready)ctx.drawImage(img,180,265,330,325,0,-10*scale,w,h);else{ctx.fillStyle='#12131a';ctx.fillRect(0,0,w,h)}
+ let g=ctx.createLinearGradient(0,0,w,0);g.addColorStop(0,'rgba(0,0,0,.32)');g.addColorStop(.52,'rgba(0,0,0,.02)');g.addColorStop(1,'rgba(96,0,24,.23)');ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
+ ctx.restore();ctx.strokeStyle='rgba(236,28,72,.5)';ctx.lineWidth=3*scale;ctx.beginPath();ctx.moveTo(w*.30,14*scale);ctx.quadraticCurveTo(w*.5,55*scale,w*.70,14*scale);ctx.stroke();ctx.restore();
+}
+function hand(x,y,rot,side,typing=0){ctx.save();ctx.translate(x,y);ctx.rotate(rot);ctx.fillStyle='#c79d82';ctx.beginPath();ctx.ellipse(0,0,19,12,0,0,TAU);ctx.fill();ctx.fillStyle='#b78b73';for(let i=0;i<4;i++){const dy=(i-1.5)*4+typing*Math.sin(performance.now()/70+i)*1.8;ctx.beginPath();ctx.roundRect(side==='L'?5:-23,dy,18,3.2,2);ctx.fill()}ctx.restore()}
+function arm(sx,sy,targetX,targetY,side,activity,gesture){
+ const L1=92,L2=88,bend=side==='L'?1:-1;const r=ik(sx,sy,targetX,targetY,L1,L2,bend);
+ capsule(sx,sy,r.ex,r.ey,19,'#11131a','rgba(236,28,72,.38)');capsule(r.ex,r.ey,targetX,targetY,16,'#171922','rgba(236,28,72,.28)');
+ // red hoodie stripe
+ ctx.save();ctx.strokeStyle='rgba(214,29,65,.55)';ctx.lineWidth=4;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(sx,sy);ctx.lineTo(r.ex,r.ey);ctx.stroke();ctx.restore();
+ hand(targetX,targetY,side==='L'?-0.03:0.12,side,activity+gesture*.2);
+}
+const script=[
+ {t:6,text:'Thanks for the follow, Mason.',dur:4.3,kind:'follow'},
+ {t:18,text:'Ava, thank you for the rose. I appreciate you.',dur:5.1,kind:'gift'},
+ {t:31,text:'Yeah, this cave section is getting a lot darker. I like the lighting down here.',dur:6.2,kind:'game'},
+ {t:46,text:'That is a good question. We are still in the underground part of this build.',dur:6.2,kind:'chat'}
+];
+let epoch=performance.now(),lastCycle=-1,blink=0,nextBlink=1900+Math.random()*1800;
+function stateAt(sec){const cycle=sec%58;let speech=null;for(const s of script)if(cycle>=s.t&&cycle<s.t+s.dur)speech={...s,p:(cycle-s.t)/s.dur};return{cycle,speech}}
+function draw(ms){requestAnimationFrame(draw);const t=(ms-epoch)/1000,{cycle,speech}=stateAt(t);const speaking=!!speech;
+ if(cycle<.12&&lastCycle>50){/*loop reset*/}lastCycle=cycle;
+ if(ms>nextBlink){blink=1;nextBlink=ms+2200+Math.random()*3300}blink*=.76;
+ // room
+ const bg=ctx.createLinearGradient(0,0,W,H);bg.addColorStop(0,'#080a11');bg.addColorStop(.58,'#130b13');bg.addColorStop(1,'#05060a');ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+ const glow=ctx.createRadialGradient(175,180,10,175,180,300);glow.addColorStop(0,'rgba(135,25,52,.28)');glow.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=glow;ctx.fillRect(0,0,520,430);
+ // monitor + room practicals
+ ctx.fillStyle='#111521';rr(45,74,255,182,14);ctx.fill();ctx.fillStyle='#090b11';rr(57,86,231,158,9);ctx.fill();let mg=ctx.createLinearGradient(57,86,288,244);mg.addColorStop(0,'#251225');mg.addColorStop(.55,'#10243a');mg.addColorStop(1,'#1c0d18');ctx.fillStyle=mg;ctx.fill();ctx.fillStyle='rgba(255,255,255,.10)';for(let i=0;i<18;i++)ctx.fillRect(70+(i*31)%195,104+((i*47)%115),12,2);
+ ctx.fillStyle='rgba(236,28,72,.45)';ctx.fillRect(821,58,4,260);ctx.shadowBlur=28;ctx.shadowColor='#ef1747';ctx.fillRect(821,58,4,260);ctx.shadowBlur=0;
+ // chair
+ ctx.fillStyle='#0b0d13';ctx.beginPath();ctx.roundRect(415,115,305,365,90);ctx.fill();ctx.strokeStyle='rgba(213,30,66,.34)';ctx.lineWidth=5;ctx.stroke();ctx.fillStyle='#161822';ctx.beginPath();ctx.roundRect(442,145,250,255,70);ctx.fill();
+ // motion controller
+ const focus=Math.sin(t*.22)*.5+.5;const burst=Math.max(0,Math.sin(t*.65))*0.5;
+ let lean=.018*Math.sin(t*.34)+.008*Math.sin(t*.77+1.7);if(speaking)lean+=.012*Math.sin(t*1.9);
+ const torsoX=560+8*Math.sin(t*.19)+4*Math.sin(t*.49+2),torsoY=233+3*Math.sin(t*.31);const breath=(Math.sin(t*1.28)+1)/2;
+ // shadow behind person
+ ctx.save();ctx.globalAlpha=.28;ctx.fillStyle='#000';ctx.beginPath();ctx.ellipse(torsoX+4,455,155,36,0,0,TAU);ctx.fill();ctx.restore();
+ torso(torsoX,torsoY,1,lean,breath);
+ const shoulderY=torsoY+40,shoulderSpread=108;const sxL=torsoX-shoulderSpread,sxR=torsoX+shoulderSpread;
+ // hand targets: left keyboard / right mouse, with non-repeating layered motion
+ let typeIntensity=.55+.35*Math.sin(t*.37+1.1);if(cycle>37&&cycle<44)typeIntensity=.18; if(speaking)typeIntensity*=.55;
+ const lx=470+7*Math.sin(t*3.1)+4*Math.sin(t*5.7+1.4),ly=420+3*Math.sin(t*4.7+2.1);
+ const rx=666+13*Math.sin(t*.88)+5*Math.sin(t*2.4+1.8),ry=420+4*Math.sin(t*1.2+1.2);
+ const gesture=speaking?Math.sin(Math.PI*speech.p):0;
+ arm(sxL,shoulderY,lx-gesture*18,ly-gesture*8,'L',typeIntensity,gesture);
+ arm(sxR,shoulderY,rx+gesture*11,ry-gesture*24,'R',.35,gesture);
+ // neck
+ ctx.fillStyle='#b98f77';ctx.beginPath();ctx.roundRect(torsoX-25,171,50,66,18);ctx.fill();
+ // head natural movement
+ let headX=torsoX+4*Math.sin(t*.43)+2*Math.sin(t*1.11),headY=163+2.2*Math.sin(t*.51);let headR=.018*Math.sin(t*.31)+.012*Math.sin(t*.83+2.4);
+ // glances: monitor then chat side, eased rather than snapping
+ const glanceA=Math.max(0,1-Math.abs(cycle-12)/2.2),glanceB=Math.max(0,1-Math.abs(cycle-40)/2.5);headX-=glanceA*9;headX+=glanceB*10;headR-=glanceA*.025;headR+=glanceB*.022;
+ if(speaking){headY-=2*Math.sin(Math.PI*speech.p);headR+=.014*Math.sin(t*2.3)*Math.sin(Math.PI*speech.p)}
+ let mouth=0;if(speaking){const envelope=Math.sin(Math.PI*clamp(speech.p*1.15,0,1));mouth=clamp((.45+.28*Math.sin(t*11.6)+.18*Math.sin(t*18.9+1.4))*envelope,0,1)}
+ texturedHead(headX,headY,174,202,headR,mouth,blink);
+ // desk in foreground
+ ctx.fillStyle='#090b10';ctx.fillRect(0,437,W,103);ctx.fillStyle='#1b1d24';ctx.fillRect(0,437,W,9);ctx.fillStyle='#151822';rr(395,444,245,37,6);ctx.fill();ctx.strokeStyle='rgba(255,255,255,.09)';ctx.lineWidth=1;for(let i=0;i<13;i++){ctx.beginPath();ctx.moveTo(406+i*17,450);ctx.lineTo(406+i*17,474);ctx.stroke()}for(let j=0;j<3;j++){ctx.beginPath();ctx.moveTo(403,451+j*8);ctx.lineTo(632,451+j*8);ctx.stroke()}ctx.fillStyle='#1e2028';ctx.beginPath();ctx.ellipse(690,458,29,18,.05,0,TAU);ctx.fill();ctx.strokeStyle='rgba(236,28,72,.35)';ctx.stroke();
+ // microphone
+ ctx.strokeStyle='#282b35';ctx.lineWidth=8;ctx.beginPath();ctx.moveTo(790,478);ctx.lineTo(748,348);ctx.stroke();ctx.fillStyle='#101219';ctx.beginPath();ctx.ellipse(743,330,28,40,-.22,0,TAU);ctx.fill();ctx.strokeStyle='rgba(236,28,72,.35)';ctx.lineWidth=2;ctx.stroke();
+ // subtle live UI only
+ ctx.fillStyle='rgba(7,8,12,.72)';rr(20,18,165,40,20);ctx.fill();ctx.fillStyle='#f02652';ctx.beginPath();ctx.arc(43,38,6,0,TAU);ctx.fill();ctx.fillStyle='#fff';ctx.font='700 15px system-ui';ctx.fillText('TAKARADA  •  LIVE',58,43);
+ // caption for proof of dynamic speech
+ if(speaking){ctx.save();ctx.globalAlpha=clamp(Math.min(speech.p*6,(1-speech.p)*7),0,1);ctx.font='700 19px system-ui';const max=720;const words=speech.text.split(' '),lines=[];let line='';for(const word of words){let test=line?line+' '+word:word;if(ctx.measureText(test).width>max){lines.push(line);line=word}else line=test}if(line)lines.push(line);const boxH=28+lines.length*27;ctx.fillStyle='rgba(4,5,8,.82)';rr((W-max-34)/2,H-boxH-20,max+34,boxH,15);ctx.fill();ctx.fillStyle='#fff';ctx.textAlign='center';lines.forEach((ln,i)=>ctx.fillText(ln,W/2,H-boxH+12+i*27));ctx.textAlign='left';ctx.restore()}
+ // engineering indicator (not viewer-facing final UI)
+ ctx.font='600 11px ui-monospace,monospace';ctx.fillStyle='rgba(255,255,255,.34)';ctx.fillText(`rig: head/torso/2-bone IK arms/hands • state: ${speaking?'speaking':'gaming'}`,20,520);
+}
+requestAnimationFrame(draw);
+</script></body></html>
