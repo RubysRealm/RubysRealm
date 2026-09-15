@@ -1,0 +1,8 @@
+#cloud-config
+package_update: true
+package_upgrade: false
+runcmd:
+  - [ bash, -lc, "curl -fsSL https://raw.githubusercontent.com/RubysRealm/RubysRealm/takarada-virtual-phone/virtual-phone/bootstrap.sh -o /root/takarada-bootstrap.sh" ]
+  - [ bash, -lc, "chmod +x /root/takarada-bootstrap.sh" ]
+  - [ bash, -lc, "/root/takarada-bootstrap.sh > /var/log/takarada-bootstrap.log 2>&1" ]
+final_message: "Takarada virtual phone bootstrap finished. Run takarada-phone-status for access details."
