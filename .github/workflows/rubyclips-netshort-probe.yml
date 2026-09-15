@@ -1,0 +1,28 @@
+name: RubyClips NetShort probe
+on:
+  push:
+    paths:
+      - 'rubyclips/netshort_probe.trigger'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install probe dependency
+        run: npm install --silent puppeteer-core
+      - name: Probe Episode 40 media
+        run: node rubyclips/netshort_probe.cjs
+      - name: Save probe result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubyclips-netshort-probe
+          path: rubyclips/netshort_probe.json
+          if-no-files-found: warn
+          retention-days: 1
