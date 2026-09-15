@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   issues: write
 
@@ -42,7 +43,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pil curl
+          sudo apt-get install -y python3-pil curl unzip
 
       - name: Restore Android phone state
         uses: actions/cache@v4
