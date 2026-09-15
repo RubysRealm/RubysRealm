@@ -15,7 +15,7 @@ function screenshot(){if(shotBusy)return;shotBusy=true;const p=spawn('ffmpeg',['
 function startVideo(id){return new Promise((resolve)=>{
  currentId=id;startedAt=Date.now();pausedAt=0;totalPaused=0;lastReported='';
  console.log('Starting direct gameplay',id);
- const yargs=['--no-playlist','--no-warnings','--retries','20','--fragment-retries','20','--retry-sleep','fragment:2','--extractor-args','youtube:player_client=android_vr,web_safari','-f','18/best[ext=mp4][vcodec^=avc1][acodec!=none][height<=720]/best[ext=mp4][acodec!=none][height<=720]/best[height<=720]','-o','-',`https://www.youtube.com/watch?v=${id}`];
+ const yargs=['--no-playlist','--no-warnings','--retries','20','--fragment-retries','20','--retry-sleep','fragment:2','--extractor-args','youtube:player_client=android_vr;formats=missing_pot,duplicate','-f','18/best[ext=mp4][vcodec^=avc1][acodec!=none][height<=720]/best[ext=mp4][acodec!=none][height<=720]/best[height<=720]','-o','-',`https://www.youtube.com/watch?v=${id}`];
  dl=spawn('yt-dlp',yargs,{stdio:['ignore','pipe','pipe']});
  player=spawn('ffplay',['-hide_banner','-loglevel','warning','-autoexit','-an','-fs','-noborder','-i','pipe:0'],{stdio:['pipe','ignore','pipe'],env:{...process.env,SDL_AUDIODRIVER:'dummy'}});
  audioDec=spawn('ffmpeg',['-hide_banner','-loglevel','error','-i','pipe:0','-vn','-f','s16le','-ar','44100','-ac','2','pipe:1'],{stdio:['pipe','pipe','pipe']});
@@ -29,7 +29,7 @@ function startVideo(id){return new Promise((resolve)=>{
  setTimeout(()=>{if(currentId===id&&player&&!player.killed)report('playing').catch(()=>{});},9000);
  });}
 for(let i=0;i<60;i++){try{if((await fetch(local+'/api/state')).ok)break;}catch{}await pause(1000);}
-console.log('Cloud renderer: direct yt-dlp gameplay + PulseAudio original audio');
+console.log('Cloud renderer: direct yt-dlp gameplay + original audio');
 let lastPlaying=true;
 while(!stopping){
  try{
