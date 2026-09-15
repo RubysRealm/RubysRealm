@@ -2,7 +2,7 @@ name: RubyClips MuffinDrama hourly story
 
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '0 0,5,10,15,20 * * *'
   workflow_dispatch:
   push:
     paths:
@@ -35,13 +35,13 @@ jobs:
           python - <<'PY'
           import json, os
           s=json.load(open('rubyclips/muffin_state.json'))
-          ready=int(s['nextEpisode']) <= int(s['currentSeriesEpisodeCount'])
+          ready=bool(s.get('currentSeriesComplete')) or int(s.get('nextEpisode',1)) <= int(s.get('currentSeriesEpisodeCount',1))
           with open(os.environ['GITHUB_OUTPUT'],'a') as f:
               f.write(f"ready={'true' if ready else 'false'}\n")
-              f.write(f"next_episode={s['nextEpisode']}\n")
-              f.write(f"next_part={s['nextPart']}\n")
+              f.write(f"next_episode={s.get('nextEpisode',1)}\n")
+              f.write(f"next_part={s.get('nextPart',1)}\n")
               f.write(f"restart_generation={s.get('restartGeneration',0)}\n")
-          print(f"Story={s['currentSeriesTitle']} restart={s.get('restartGeneration')} next episode={s['nextEpisode']} next part={s['nextPart']} ready={ready}")
+          print(f"Story={s.get('currentSeriesTitle')} source={s.get('sourceProvider','legacy')} complete={s.get('currentSeriesComplete')} next episode={s.get('nextEpisode')} next part={s.get('nextPart')} ready={ready}")
           PY
 
       - uses: actions/setup-node@v4
@@ -61,7 +61,7 @@ jobs:
       - name: Resolve upcoming episodes
         if: steps.state.outputs.ready == 'true'
         run: |
-          echo 'Using MuffinDrama resolver only; unrelated alternate-story fallbacks are disabled.'
+          echo 'Resolving the next authorized Rubaradaclips story part.'
           node rubyclips/muffin_story_resolve_tikwm.cjs
 
       - name: Build and verify corrected part
@@ -84,7 +84,7 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$VIDEO" "$MANIFEST" --clobber
           else
-            gh release create "$TAG" "$VIDEO" "$MANIFEST" --title "RubyClips corrected story Part ${PART}" --notes "Normalized A/V concat, lowered title, dynamic story hashtag, idempotent publishing."
+            gh release create "$TAG" "$VIDEO" "$MANIFEST" --title "RubyClips story Part ${PART}" --notes "Authorized source, normalized A/V, Part X of Y overlay, idempotent publishing."
           fi
 
       - name: Check durable publish marker
@@ -112,7 +112,17 @@ jobs:
           URL='https://rubys-realm.vercel.app/api/rubyclips-post?health=1'
           for i in $(seq 1 90); do
             CODE="$(curl -sS -o /tmp/health.json -w '%{http_code}' "$URL" || true)"
-            if [ "$CODE" = '200' ] && grep -q 'existing-video-parts-v9-tiktok-idempotent' /tmp/health.json; then exit 0; fi
+            if [ "$CODE" = '200' ] && python - <<'PY'
+          import json
+          try:
+              d=json.load(open('/tmp/health.json'))
+              assert d.get('ok') is True
+              assert str(d.get('channelName','')).lstrip('@').lower() == 'rubaradaclips'
+              assert 'youtube-source' in str(d.get('version',''))
+          except Exception:
+              raise SystemExit(1)
+          PY
+            then exit 0; fi
             sleep 5
           done
           cat /tmp/health.json || true
@@ -164,9 +174,9 @@ jobs:
           s['lastPostedEpisodes']=episodes
           s['nextEpisode']=next_episode
           s['nextPart']=part+1
-          s['lastPackingPolicy']='max-whole-episodes-under-590s'
+          s['lastPackingPolicy']='max-whole-episodes-under-595s'
           s['concatPolicy']='normalized-filter-concat-v2'
-          s['overlayLayoutVersion']='story-title-lowered-v2'
+          s['overlayLayoutVersion']='story-title-lowered-v3'
           s['lastStoryHashtag']=info.get('storyHashtag')
           s['pipelineRevision']=info.get('pipelineRevision')
           s['lastLogicalPostKey']=info.get('logicalPostKey')
@@ -181,7 +191,7 @@ jobs:
           git config user.name 'rubyclips-publisher-bot'
           git config user.email 'actions@users.noreply.github.com'
           git add rubyclips/muffin_state.json
-          git diff --cached --quiet || git commit -m 'Advance idempotent MuffinDrama story queue [skip ci]'
+          git diff --cached --quiet || git commit -m 'Advance Rubaradaclips story queue [skip ci]'
           git push
 
       - name: Save diagnostics
