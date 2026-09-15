@@ -9,6 +9,8 @@ CHANNEL_VIDEOS = 'https://www.youtube.com/@muffindrama-uvu/videos'
 SOURCE_CHANNEL = '@muffindrama-uvu'
 CHUNK_SECONDS = 595.0
 HARD_MAX_SECONDS = 598.5
+YT_EXTRACTOR = ['--extractor-args','youtube:player_client=android_vr;formats=missing_pot,duplicate']
+YT_FORMAT = '18/best[ext=mp4][vcodec^=avc1][acodec!=none][height<=720]/best[ext=mp4][acodec!=none][height<=720]/best[height<=720]'
 
 
 def run(args, **kwargs):
@@ -52,7 +54,7 @@ def list_channel_videos():
 
 
 def detailed_video(video):
-    raw = output(['yt-dlp','--no-playlist','--skip-download','--dump-single-json',video['url']])
+    raw = output(['yt-dlp','--no-playlist','--skip-download','--dump-single-json',*YT_EXTRACTOR,video['url']])
     info = json.loads(raw)
     d = float(info.get('duration') or 0)
     title = str(info.get('title') or video['title']).strip()
@@ -118,16 +120,13 @@ raw = WORK / 'youtube-section-raw.mp4'
 out = WORK / f'ep{part}.mp4'
 section = f'*{start:.3f}-{end:.3f}'
 run([
-    'yt-dlp','--no-playlist','--no-progress','--retries','5','--fragment-retries','5',
-    '--download-sections', section,
-    '-f','bv*[height<=720]+ba/b[height<=720]/best[height<=720]/best',
+    'yt-dlp','--no-playlist','--no-progress','--no-warnings','--retries','20','--fragment-retries','20','--retry-sleep','fragment:2',
+    *YT_EXTRACTOR,'--download-sections',section,'-f',YT_FORMAT,
     '--merge-output-format','mp4','--remux-video','mp4','-o',str(raw),video_url
 ])
 if not raw.exists() or raw.stat().st_size < 500000:
     raise SystemExit('YouTube section download was unexpectedly small.')
 
-# Re-encode the downloaded section to an exact <=595 second source clip so the
-# existing normalized Rubaradaclips builder can safely add overlays and concat.
 run([
     'ffmpeg','-y','-hide_banner','-loglevel','error','-i',str(raw),'-t',f'{clip_len:.3f}',
     '-map','0:v:0','-map','0:a:0?',
