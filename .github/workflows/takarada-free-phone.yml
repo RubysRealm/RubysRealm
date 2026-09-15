@@ -1,0 +1,62 @@
+name: Takarada Free Virtual Phone
+
+on:
+  push:
+    branches: [takarada-virtual-phone]
+    paths:
+      - 'virtual-phone/github-runner-session.sh'
+      - '.github/workflows/takarada-free-phone.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: takarada-free-virtual-phone
+  cancel-in-progress: true
+
+jobs:
+  phone:
+    runs-on: ubuntu-latest
+    timeout-minutes: 335
+    env:
+      TAKARADA_FEED_URL: https://takarada-cloud-live.onrender.com/preview
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable KVM
+        shell: bash
+        run: |
+          if [ -e /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm || true
+            sudo chmod 666 /dev/kvm || true
+          fi
+
+      - name: Install phone viewer
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y scrcpy xvfb fluxbox x11vnc novnc websockify curl
+          curl -fsSL -o /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i /tmp/cloudflared.deb || sudo apt-get -f install -y
+
+      - name: Restore Android phone state
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: takarada-phone-${{ github.run_id }}
+          restore-keys: |
+            takarada-phone-
+
+      - name: Run Android virtual phone
+        uses: ReactiveCircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          force-avd-creation: false
+          disable-animations: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+          script: bash virtual-phone/github-runner-session.sh
