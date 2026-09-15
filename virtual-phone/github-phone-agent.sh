@@ -5,6 +5,8 @@ ADB=${ADB:-adb}
 SERIAL=${ANDROID_SERIAL:-emulator-5554}
 FEED_URL=${TAKARADA_FEED_URL:-https://takarada-cloud-live.onrender.com/preview}
 ROOT=/tmp/takarada-phone-agent
+APK_ARTIFACT_ID=10420064382
+APK_SHA256=e549269ce8a988b7faf62d342c90c7488ad270dd9efecb8d676a6e44c6d39a16
 mkdir -p "$ROOT"
 
 if [ -z "${GH_TOKEN:-}" ] || [ -z "${GITHUB_REPOSITORY:-}" ] || [ -z "${TRIGGER_ISSUE:-}" ]; then
@@ -18,8 +20,16 @@ $ADB -s "$SERIAL" shell wm density 320 || true
 $ADB -s "$SERIAL" shell settings put system screen_off_timeout 2147483647 || true
 $ADB -s "$SERIAL" shell svc power stayon true || true
 
-# Verified Takarada display app.
-$ADB -s "$SERIAL" install -r virtual-phone/prebuilt/takarada-display.apk
+# Download the exact APK produced by GitHub Actions instead of moving binary
+# bytes through the connector. Verify it byte-for-byte before installation.
+curl -fL --retry 3 \
+  -H "Authorization: Bearer $GH_TOKEN" \
+  -H 'Accept: application/vnd.github+json' \
+  -o "$ROOT/display-artifact.zip" \
+  "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$APK_ARTIFACT_ID/zip"
+unzip -jo "$ROOT/display-artifact.zip" 'app-debug.apk' -d "$ROOT"
+printf '%s  %s\n' "$APK_SHA256" "$ROOT/app-debug.apk" | sha256sum -c -
+$ADB -s "$SERIAL" install -r "$ROOT/app-debug.apk"
 
 # Session screenshot encryption key: only the matching private key outside the
 # runner can decrypt this key. Screenshots posted to the public issue remain opaque.
