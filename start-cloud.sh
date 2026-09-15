@@ -39,5 +39,7 @@ node bootstrap.js &
 NODE_PID=$!
 node renderer.js &
 RENDERER_PID=$!
-trap 'kill "$RENDERER_PID" "$NODE_PID" "$XVFB_PID" 2>/dev/null || true' TERM INT EXIT
+node tiktok-autolive.js &
+AUTOLIVE_PID=$!
+trap 'kill "$AUTOLIVE_PID" "$RENDERER_PID" "$NODE_PID" "$XVFB_PID" 2>/dev/null || true' TERM INT EXIT
 wait "$NODE_PID"
