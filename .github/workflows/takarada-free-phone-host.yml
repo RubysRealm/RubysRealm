@@ -5,9 +5,13 @@ on:
     types: [opened]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  issues: write
+
 concurrency:
   group: takarada-free-phone-host
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   phone:
@@ -16,6 +20,8 @@ jobs:
     timeout-minutes: 335
     env:
       TAKARADA_FEED_URL: https://takarada-cloud-live.onrender.com/preview
+      GH_TOKEN: ${{ github.token }}
+      TRIGGER_ISSUE: ${{ github.event.issue.number }}
     steps:
       - name: Checkout isolated Takarada phone branch
         uses: actions/checkout@v4
