@@ -18,7 +18,7 @@ jobs:
           python -m pip install --quiet --upgrade yt-dlp numpy
       - name: Download full story and posted Part 11
         run: |
-          yt-dlp --no-playlist -f hls-380 -o rubyclips/dm_full.mp4 'https://www.dailymotion.com/video/xb2tc0i'
+          yt-dlp --no-playlist -N 16 -f hls-380 -o rubyclips/dm_full.mp4 'https://www.dailymotion.com/video/xb2tc0i'
           curl -L --fail --retry 3 -o rubyclips/dm_part11.mp4 'https://github.com/RubysRealm/RubysRealm/releases/download/rubyclips-tt-7682993954661553173-r2-p11/muffindrama-7682993954661553173-r2-part-11.mp4'
       - name: Align continuity
         run: python rubyclips/dailymotion_align.py
