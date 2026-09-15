@@ -82,34 +82,35 @@ jobs:
       - name: Install authenticated Signal Forge YouTube session
         if: steps.state.outputs.ready == 'true'
         env:
+          YOUTUBE_COOKIES: ${{ secrets.RUBYCLIPS_YOUTUBE_COOKIES }}
           YOUTUBE_COOKIES_B64: ${{ secrets.RUBYCLIPS_YOUTUBE_COOKIES_B64 }}
         run: |
           set -euo pipefail
-          if [ -z "${YOUTUBE_COOKIES_B64:-}" ]; then
-            echo 'Missing required Actions secret RUBYCLIPS_YOUTUBE_COOKIES_B64.'
-            echo 'This workflow intentionally refuses to fall back to anonymous cloud YouTube acquisition.'
-            exit 1
-          fi
           COOKIE_FILE="$RUNNER_TEMP/rubyclips-youtube-cookies.txt"
           export COOKIE_FILE
           python - <<'PY'
           import base64, os
           from pathlib import Path
-          raw=os.environ['YOUTUBE_COOKIES_B64'].strip()
-          try:
-              data=base64.b64decode(raw, validate=True)
-          except Exception as e:
-              raise SystemExit(f'RUBYCLIPS_YOUTUBE_COOKIES_B64 is not valid base64: {e}')
-          try:
-              text=data.decode('utf-8')
-          except UnicodeDecodeError as e:
-              raise SystemExit(f'Decoded cookies are not UTF-8 text: {e}')
-          first=text.splitlines()[0].strip() if text.splitlines() else ''
+          text=os.environ.get('YOUTUBE_COOKIES','').strip()
+          if not text:
+              raw=os.environ.get('YOUTUBE_COOKIES_B64','').strip()
+              if not raw:
+                  raise SystemExit('Missing required Actions secret RUBYCLIPS_YOUTUBE_COOKIES (or legacy RUBYCLIPS_YOUTUBE_COOKIES_B64).')
+              try:
+                  data=base64.b64decode(raw, validate=True)
+              except Exception as e:
+                  raise SystemExit(f'RUBYCLIPS_YOUTUBE_COOKIES_B64 is not valid base64: {e}')
+              try:
+                  text=data.decode('utf-8')
+              except UnicodeDecodeError as e:
+                  raise SystemExit(f'Decoded cookies are not UTF-8 text: {e}')
+          lines=text.splitlines()
+          first=lines[0].strip() if lines else ''
           if first not in ('# Netscape HTTP Cookie File', '# HTTP Cookie File'):
-              raise SystemExit('Decoded cookies are not in Netscape cookie-file format.')
+              raise SystemExit('YouTube cookies are not in Netscape cookie-file format.')
           if 'youtube.com' not in text and '.youtube.com' not in text:
-              raise SystemExit('Decoded cookie file does not contain YouTube cookies.')
-          Path(os.environ['COOKIE_FILE']).write_text(text.replace('\r\n','\n'), encoding='utf-8')
+              raise SystemExit('Cookie file does not contain YouTube cookies.')
+          Path(os.environ['COOKIE_FILE']).write_text(text.replace('\r\n','\n')+'\n', encoding='utf-8')
           PY
           chmod 600 "$COOKIE_FILE"
           mkdir -p "$HOME/.config/yt-dlp"
