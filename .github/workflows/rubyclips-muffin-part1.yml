@@ -17,8 +17,8 @@ concurrency:
 
 jobs:
   build-and-publish:
-    runs-on: ubuntu-latest
-    timeout-minutes: 75
+    runs-on: macos-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,7 +32,7 @@ jobs:
       - name: Check story state
         id: state
         run: |
-          python - <<'PY'
+          python3 - <<'PY'
           import json, os
           s=json.load(open('rubyclips/muffin_state.json'))
           ready=bool(s.get('currentSeriesComplete')) or int(s.get('nextEpisode',1)) <= int(s.get('currentSeriesEpisodeCount',1))
@@ -44,6 +44,11 @@ jobs:
           print(f"Story={s.get('currentSeriesTitle')} source={s.get('sourceProvider','legacy')} complete={s.get('currentSeriesComplete')} next episode={s.get('nextEpisode')} next part={s.get('nextPart')} ready={ready}")
           PY
 
+      - uses: actions/setup-python@v5
+        if: steps.state.outputs.ready == 'true'
+        with:
+          python-version: '3.12'
+
       - uses: actions/setup-node@v4
         if: steps.state.outputs.ready == 'true'
         with:
@@ -52,11 +57,18 @@ jobs:
       - name: Install tools
         if: steps.state.outputs.ready == 'true'
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
+          command -v ffmpeg >/dev/null 2>&1 || brew install ffmpeg
           python -m pip install --quiet --upgrade yt-dlp
           npm init -y >/dev/null 2>&1
           npm install --silent puppeteer-core @tobyg74/tiktok-api-dl
+          sudo mkdir -p /usr/share/fonts/truetype/dejavu
+          FONT_SRC="$(fc-match -f '%{file}\n' 'Arial:style=Bold' | head -1)"
+          if [ -z "$FONT_SRC" ] || [ ! -f "$FONT_SRC" ]; then
+            FONT_SRC="$(fc-match -f '%{file}\n' 'Helvetica:style=Bold' | head -1)"
+          fi
+          test -n "$FONT_SRC" && test -f "$FONT_SRC"
+          sudo ln -sf "$FONT_SRC" /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
+          echo "Using font: $FONT_SRC"
 
       - name: Resolve upcoming episodes
         if: steps.state.outputs.ready == 'true'
