@@ -15,7 +15,7 @@ const mediaRoot=process.env.MEDIA_ROOT||"/tmp/takarada-media";fs.mkdirSync(media
 const videos=[["c6FAO3-zvhE","Lush Caves"],["AirXwBsNPDw","Rainy Riverside"],["wcIUiy_Ofcw","Ghibli Nostalgic"],["y8yMP36qHXA","Rainy Swamp"],["Zoq4ogt2wtU","Pine Forest House"],["Dy3VtjcHdCs","Rainy Cliff"],["ykHsq6yUNGg","Rainy Flower Forest"],["nUbDQ0wUESU","Medieval Farmhouse"],["snvLyjMcgh0","Rainy River"],["N6S53tOB1ss","Rainy Jungle Tree House"],["C_WaC-JmhFo","Rainy Mountain"],["eHSxedwXaM0","Rainy Cherry Grove"],["oCIpgdb2pM4","Rainy Mangrove Swamp"],["yTTutYKV1rk","Rainy Overgrown Laputa Part 1"],["2byiUUc0SnQ","Rainy Overgrown Laputa Part 2"],["UDRhiTUMVQY","Ghibli Nostalgic 1.20"],["wV9VatPiPf4","Rainy Spruce Island"],["LoeTtwvBD_k","Rainy Beach House"],["-DRRSTrLHTI","Rainy Greenhouse"],["bp-1X7sQ_2M","Rainy Cherry Lake"],["Ps0oA1nt3mw","Rainy Meadow"],["pW0iacBW1MU","Snowy Mountain"],["Az9X6YFzcBU","Christmas Snow Village"],["i9U-rUObowg","Rainy Mountain 1.21"],["IsXCRoImZ3c","Rainy Pale Garden"],["AepZzZS6j_U","Rainy Dark Forest"],["GFmBMg7-b44","Rainy Farmhouse"],["CIHsdaqCXwM","Rainy River Island"],["hYJY95sAeFc","Rainy Pale Cherry"],["O6yrzYkn2i8","Rainy Old Treehouse"]].map(([id,title])=>({id,title}));
 let index=0,playing=true,ffmpeg=null,tiktokConnected=false,recentChat=[],recentEvents=[];let tiktokConnection=null,tiktokConnecting=false;let cloudPlayerState={code:-999,label:"waiting",videoId:null,updatedAt:0};
 let broadcastWanted=false,broadcastStatus="stopped",broadcastError=null,broadcastStartedAt=null,lastChatReplyAt=0,recentFollower=null,recentGift=null;
-let speaking=false,speechQueue=[],currentSpeech=null,director=null,totalLikes=0;
+let speaking=false,speechQueue=[],currentSpeech=null,director=null,totalLikes=0,directorDemoLastRun=0;
 app.use(express.json());app.use((req,res,next)=>{res.setHeader("Referrer-Policy","strict-origin-when-cross-origin");next()});app.use(express.static("public"));
 function auth(req,res,next){const t=req.query.token||req.headers["x-control-token"];if(t!==CONTROL_TOKEN)return res.status(403).send("Bad control token");next()}
 function getRtmp(){const direct=(process.env.RTMP_URL||"").trim();if(direct)return direct;if(!RTMP_SERVER||!RTMP_STREAM_KEY)return"";return RTMP_SERVER.replace(/\/$/,"")+"/"+RTMP_STREAM_KEY.replace(/^\//,"")}
@@ -54,6 +54,19 @@ async function connectTikTok(){
 }
 setInterval(connectTikTok,60000).unref();
 app.get("/",(req,res)=>res.type("html").send('<meta name="viewport" content="width=device-width,initial-scale=1"><title>Takarada Control</title><body style="background:#090a0f;color:white;font:18px system-ui;padding:32px"><h1>Takarada Cloud Live</h1><p>Open your private control link to manage the stream.</p><a style="color:#ff5677" href="/preview">View layout preview</a></body>'));app.get("/stage",(req,res)=>res.sendFile(process.cwd()+"/public/stage.html"));app.get("/preview",(req,res)=>res.sendFile(process.cwd()+"/public/stage.html"));app.get("/control",auth,(req,res)=>res.sendFile(process.cwd()+"/public/control.html"));app.get("/api/state",(req,res)=>res.json(state()));app.get("/api/director",(req,res)=>res.json({ok:true,version:"takarada-director-1",player:cloudPlayerState,director:director.state(),speech:{speaking,current:currentSpeech,queued:speechQueue.length},tiktokConnected,totalLikes}));
+app.post("/api/director-demo/run",async(req,res)=>{
+ const now=Date.now();if(now-directorDemoLastRun<25000)return res.status(429).json({ok:false,message:"Demo is already running. Give it a few seconds."});directorDemoLastRun=now;
+ try{
+  const image=await fetch(`https://i.ytimg.com/vi/${cur().id}/maxresdefault.jpg`);if(image.ok)fs.writeFileSync("/tmp/cloud-frame.jpg",Buffer.from(await image.arrayBuffer()));
+  playbackTest=false;playing=true;cloudPlayerState={code:1,label:"playing",error:null,position:83,diagnostic:"director-demo",videoId:cur().id,updatedAt:Date.now()};await director.analyze();director.forceCommentary();io.emit("status",state());
+  setTimeout(()=>{recentFollower={user:"Mason",ts:Date.now()};addEvent("follow","Mason followed",{user:"Mason",demo:true})},3000).unref();
+  setTimeout(()=>{addChat("Ava","what part of the build are we at?");director.reply("Ava","what part of the build are we at?")},7000).unref();
+  setTimeout(()=>{recentGift={user:"Builder",gift:"Rose",ts:Date.now()};addEvent("gift","Builder sent Rose",{user:"Builder",gift:"Rose",demo:true})},11000).unref();
+  setTimeout(()=>{totalLikes+=250;director.onLike("Mason",250);io.emit("status",state())},15000).unref();
+  setTimeout(()=>{director.onShare("Ava");io.emit("status",state())},19000).unref();
+  res.json({ok:true,context:director.state().context});
+ }catch(e){res.status(500).json({ok:false,message:String(e.message||e).slice(0,200)})}
+});
 app.use("/media",express.static(mediaRoot));
 app.put("/api/test-media",auth,async(req,res)=>{
  const file=mediaRoot+"/playback-test.mp4",temp=file+".upload";let size=0;
