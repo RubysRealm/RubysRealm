@@ -14,7 +14,7 @@ apt-get install -y ca-certificates curl docker.io android-tools-adb xvfb fluxbox
   apt-get install -y ca-certificates curl docker.io android-tools-adb xvfb fluxbox x11vnc novnc websockify scrcpy python3 openssl
 systemctl enable --now docker
 
-mkdir -p "$PHONE_ROOT" "$PHONE_ROOT/android-data" "$PHONE_ROOT/run"
+mkdir -p "$PHONE_ROOT" "$PHONE_ROOT/android-data" "$PHONE_ROOT/run" "$PHONE_ROOT/apks"
 
 # ReDroid uses the host kernel. Binder is the only Android-specific kernel feature
 # we need here; this avoids a heavyweight nested Android emulator.
@@ -49,6 +49,23 @@ adb -s "$ADB_SERIAL" shell wm size "${WIDTH}x${HEIGHT}" || true
 adb -s "$ADB_SERIAL" shell wm density "$DPI" || true
 adb -s "$ADB_SERIAL" shell settings put system screen_off_timeout 2147483647 || true
 adb -s "$ADB_SERIAL" shell svc power stayon true || true
+
+# Install Aurora Store from F-Droid so TikTok can be obtained from Google Play
+# without bundling or trusting a random third-party TikTok APK mirror.
+AURORA_APK="$PHONE_ROOT/apks/AuroraStore-4.8.4.apk"
+if ! adb -s "$ADB_SERIAL" shell pm path com.aurora.store 2>/dev/null | grep -q package:; then
+  curl -fL --retry 3 -o "$AURORA_APK" "https://f-droid.org/repo/com.aurora.store_76.apk"
+  adb -s "$ADB_SERIAL" install -r "$AURORA_APK"
+fi
+
+cat >/usr/local/bin/takarada-install-apk <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ $# -ne 1 ]; then echo "Usage: takarada-install-apk /path/to/app.apk" >&2; exit 2; fi
+adb connect 127.0.0.1:5555 >/dev/null 2>&1 || true
+exec adb -s 127.0.0.1:5555 install -r "$1"
+EOF
+chmod +x /usr/local/bin/takarada-install-apk
 
 if [ ! -f "$PHONE_ROOT/vnc.pass" ]; then
   VNC_PASSWORD=$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | head -c 16)
@@ -139,6 +156,8 @@ PHONE_ROOT=${PHONE_ROOT:-/opt/takarada-phone}
 echo '=== Android ==='
 adb -s 127.0.0.1:5555 shell getprop ro.build.version.release 2>/dev/null || true
 adb -s 127.0.0.1:5555 shell getprop sys.boot_completed 2>/dev/null || true
+echo '=== Aurora Store ==='
+adb -s 127.0.0.1:5555 shell pm path com.aurora.store 2>/dev/null || true
 echo '=== UI ==='
 systemctl is-active takarada-phone-ui.service || true
 echo '=== Browser URL ==='
