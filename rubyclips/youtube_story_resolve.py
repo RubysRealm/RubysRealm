@@ -38,6 +38,9 @@ def commit_state(message):
 
 
 def list_channel_videos():
+    # Channel flat-playlist data is public and already contains the title, id and
+    # duration we need. Do not make a second per-video metadata request; YouTube
+    # can bot-challenge that request even while direct playback/download works.
     raw = output(['yt-dlp','--flat-playlist','--playlist-reverse','--dump-single-json',CHANNEL_VIDEOS])
     data = json.loads(raw)
     entries = data.get('entries') or []
@@ -45,22 +48,18 @@ def list_channel_videos():
     for e in entries:
         vid = str(e.get('id') or '').strip()
         title = str(e.get('title') or '').strip()
+        d = float(e.get('duration') or 0)
         if not vid or not title:
             continue
-        cleaned.append({'id': vid, 'title': title, 'url': f'https://www.youtube.com/watch?v={vid}'})
+        cleaned.append({
+            'id': vid,
+            'title': title,
+            'url': f'https://www.youtube.com/watch?v={vid}',
+            'duration': d,
+        })
     if not cleaned:
         raise SystemExit('No videos were returned from the MuffinDrama YouTube channel.')
     return cleaned
-
-
-def detailed_video(video):
-    raw = output(['yt-dlp','--no-playlist','--skip-download','--dump-single-json',*YT_EXTRACTOR,video['url']])
-    info = json.loads(raw)
-    d = float(info.get('duration') or 0)
-    title = str(info.get('title') or video['title']).strip()
-    if d <= 0:
-        raise SystemExit(f'Could not determine duration for {video["url"]}')
-    return {'id': video['id'], 'title': title, 'url': video['url'], 'duration': d}
 
 
 WORK.mkdir(parents=True, exist_ok=True)
@@ -74,10 +73,11 @@ provider = str(state.get('sourceProvider') or '').lower()
 if state.get('currentSeriesComplete') is True or provider != 'youtube':
     completed = {str(x) for x in state.get('completedSeriesIds', [])}
     videos = list_channel_videos()
-    next_video = next((v for v in videos if v['id'] not in completed), None)
-    if not next_video:
+    info = next((v for v in videos if v['id'] not in completed), None)
+    if not info:
         raise SystemExit('No uncompleted MuffinDrama YouTube stories remain.')
-    info = detailed_video(next_video)
+    if not (info['duration'] > 0):
+        raise SystemExit(f'Channel listing did not expose duration for {info["id"]}; refusing to guess Part X of Y.')
     total_parts = max(1, math.ceil(info['duration'] / CHUNK_SECONDS))
     state.update({
         'sourceProvider': 'youtube',
@@ -97,7 +97,7 @@ if state.get('currentSeriesComplete') is True or provider != 'youtube':
     })
     STATE.write_text(json.dumps(state, indent=2) + '\n')
     commit_state(f'Start MuffinDrama YouTube story {info["id"]} [skip ci]')
-    print(f'Selected YouTube story: {info["title"]} ({info["id"]}), {total_parts} parts.', flush=True)
+    print(f'Selected YouTube story: {info["title"]} ({info["id"]}), {info["duration"]:.2f}s, {total_parts} parts.', flush=True)
 
 if str(state.get('sourceProvider') or '').lower() != 'youtube':
     raise SystemExit('YouTube resolver called while state is not configured for YouTube.')
@@ -108,7 +108,7 @@ part = int(state['nextPart'])
 total_parts = int(state.get('storyTotalParts') or state['currentSeriesEpisodeCount'])
 source_duration = float(state.get('sourceDurationSeconds') or 0)
 if source_duration <= 0:
-    source_duration = detailed_video({'id': video_id, 'title': state['currentSeriesTitle'], 'url': video_url})['duration']
+    raise SystemExit('YouTube source duration is missing from state.')
 start = (part - 1) * CHUNK_SECONDS
 remaining = source_duration - start
 if remaining <= 1:
