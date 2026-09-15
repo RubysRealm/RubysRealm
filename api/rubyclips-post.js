@@ -12,7 +12,12 @@ const TIKTOK_STORY_CHANNEL = '@muffindrama_us';
 const MAX_AUTO_SECONDS = 599;
 const MIN_STORY_RESTART_GENERATION = 2;
 const REQUIRED_STORY_PIPELINE_REVISION = 'avsync-v3-idempotent';
-const PUBLISHER_VERSION = 'existing-video-parts-v9-tiktok-idempotent';
+const PUBLISHER_VERSION = 'existing-video-parts-v10-continuity-source';
+const CONTINUITY_SERIES_ID = '7682993954661553173';
+const CONTINUITY_RESTART = 2;
+const CONTINUITY_FIRST_PART = 12;
+const CONTINUITY_SOURCE_ID = 'xb2tc0i';
+const CONTINUITY_SOURCE_URL = 'https://www.dailymotion.com/video/xb2tc0i';
 
 function validateBase(m) {
   if (!m?.file || !String(m.file).endsWith('.mp4')) throw new Error('Blocked: missing MP4.');
@@ -39,7 +44,6 @@ function validateTikTokStory(m, tag) {
   validateBase(m);
   const index = Number(m?.segmentIndex || 0);
   if (!Number.isInteger(index) || index < 1) throw new Error('Blocked: invalid story part number.');
-  if (String(m?.sourceProvider || '').toLowerCase() !== 'tiktok') throw new Error('Blocked: TikTok story provider mismatch.');
   if (String(m?.sourceChannel || '').toLowerCase() !== TIKTOK_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: TikTok story channel mismatch.');
   if (String(m?.pipelineRevision || '') !== REQUIRED_STORY_PIPELINE_REVISION) throw new Error('Blocked: stale TikTok story pipeline revision.');
   const seriesId = String(m?.sourceSeriesId || '').trim();
@@ -48,10 +52,22 @@ function validateTikTokStory(m, tag) {
   if (!Number.isInteger(restart) || restart < MIN_STORY_RESTART_GENERATION) throw new Error('Blocked: stale TikTok story generation.');
   const expectedLogicalPostKey = `rubyclips:${seriesId}:r${restart}:p${index}`;
   if (String(m?.logicalPostKey || '') !== expectedLogicalPostKey) throw new Error('Blocked: invalid logical post key.');
+
+  const provider = String(m?.sourceProvider || '').toLowerCase();
   const ids = Array.isArray(m?.sourceVideoIds) ? m.sourceVideoIds.map(x => String(x).trim()) : [];
-  if (!ids.length || ids.some(id => !/^\d{10,25}$/.test(id))) throw new Error('Blocked: invalid TikTok episode ids.');
   const urls = Array.isArray(m?.sourceUrls) ? m.sourceUrls.map(String) : [];
-  if (!urls.length || urls.some(url => !url.includes('tiktok.com/'))) throw new Error('Blocked: invalid TikTok episode URLs.');
+  if (provider === 'tiktok') {
+    if (!ids.length || ids.some(id => !/^\d{10,25}$/.test(id))) throw new Error('Blocked: invalid TikTok episode ids.');
+    if (!urls.length || urls.some(url => !url.includes('tiktok.com/'))) throw new Error('Blocked: invalid TikTok episode URLs.');
+  } else if (provider === 'dailymotion') {
+    const scoped = seriesId === CONTINUITY_SERIES_ID && restart === CONTINUITY_RESTART && index >= CONTINUITY_FIRST_PART;
+    if (!scoped) throw new Error('Blocked: continuity source is not authorized for this story part.');
+    if (ids.length !== 1 || ids[0] !== CONTINUITY_SOURCE_ID) throw new Error('Blocked: invalid continuity source id.');
+    if (urls.length !== 1 || urls[0] !== CONTINUITY_SOURCE_URL) throw new Error('Blocked: invalid continuity source URL.');
+  } else {
+    throw new Error('Blocked: TikTok story provider mismatch.');
+  }
+
   const storyHashtag = String(m?.storyHashtag || '').trim();
   if (!/^#[A-Za-z0-9]+$/.test(storyHashtag) || !String(m.caption).includes(storyHashtag)) throw new Error('Blocked: missing story-title hashtag.');
   const expected = `rubyclips-tt-${seriesId}-r${restart}-p${index}`;
