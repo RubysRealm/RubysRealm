@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-import json, subprocess, pathlib, numpy as np
+import json, subprocess, pathlib, sys
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    subprocess.run([sys.executable, '-m', 'pip', 'install', '--quiet', 'numpy'], check=True)
+    import numpy as np
 
 FULL='rubyclips/dm_full.mp4'
 PART='rubyclips/dm_part11.mp4'
