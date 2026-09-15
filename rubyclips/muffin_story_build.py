@@ -14,10 +14,12 @@ PIPELINE_REVISION = 'avsync-v3-idempotent'
 
 OUT.mkdir(parents=True, exist_ok=True)
 state = json.loads(STATE.read_text())
+continuation_path = WORK / 'continuation.json'
+continuation = json.loads(continuation_path.read_text()) if continuation_path.exists() else {}
 eps = json.loads((WORK / 'episodes.json').read_text())
 next_ep = int(state['nextEpisode'])
 part = int(state['nextPart'])
-story_total_parts = int(state.get('storyTotalParts') or 0)
+story_total_parts = int(continuation.get('storyTotalParts') or state.get('storyTotalParts') or 0)
 restart_generation = int(state.get('restartGeneration', 2))
 series_id = str(state['currentSeriesId'])
 series_title = str(state['currentSeriesTitle']).strip()
@@ -63,9 +65,8 @@ title_text = '\n'.join(wrapped[:2]) if wrapped else series_title
 def esc(p):
     return p.as_posix().replace(':','\\:').replace("'","\\'")
 
-# Normalize every source episode independently before concatenation. This
-# intentionally avoids concat-demuxer stream copying because mixed source
-# timestamps/frame pacing can freeze video while audio continues.
+# Normalize every source clip independently before concatenation. This avoids
+# mixed source timestamps/frame pacing freezing video while audio continues.
 inputs = []
 filters = []
 concat_inputs = []
@@ -120,21 +121,25 @@ audio_duration = float(subprocess.check_output([
 if abs(video_duration - audio_duration) > 1.0 or abs(video_duration - duration) > 1.0:
     raise SystemExit(f'A/V duration mismatch: video={video_duration:.3f}s audio={audio_duration:.3f}s container={duration:.3f}s')
 
+source_provider = str(chosen[0].get('sourceProvider') or 'tiktok').lower()
+source_channel = str(chosen[0].get('sourceChannel') or '@muffindrama_us')
 ids = [str(e['videoId']) for e in chosen]
-if any(not x.isdigit() for x in ids):
-    raise SystemExit('Resolver returned a non-numeric TikTok video ID.')
+if source_provider == 'tiktok' and any(not x.isdigit() for x in ids):
+    raise SystemExit('TikTok resolver returned a non-numeric video ID.')
 urls = [str(e['sourceUrl']) for e in chosen]
 nums = [int(e['episode']) for e in chosen]
 story_hashtag = '#' + re.sub(r'[^A-Za-z0-9]+', '', series_title)
 if story_hashtag == '#':
     raise SystemExit('Could not build story hashtag from story title.')
 
+story_complete = bool(continuation.get('storyComplete')) if continuation else nums[-1] >= last_episode
+next_episode_after_part = int(continuation.get('nextEpisode') or (nums[-1] + 1))
 manifest = {
     'platform': 'rubyclips-tiktok-story-v1',
     'pipelineRevision': PIPELINE_REVISION,
     'logicalPostKey': logical_post_key,
-    'sourceProvider': 'tiktok',
-    'sourceChannel': '@muffindrama_us',
+    'sourceProvider': source_provider,
+    'sourceChannel': source_channel,
     'sourceSeriesId': series_id,
     'sourceSeriesTitle': series_title,
     'restartGeneration': restart_generation,
@@ -163,8 +168,8 @@ if story_total_parts >= part:
     'videoDuration': video_duration,
     'audioDuration': audio_duration,
     'episodes': nums,
-    'nextEpisode': nums[-1] + 1,
-    'storyComplete': nums[-1] >= last_episode,
+    'nextEpisode': next_episode_after_part,
+    'storyComplete': story_complete,
     'restartGeneration': restart_generation,
     'storyHashtag': story_hashtag,
     'pipelineRevision': PIPELINE_REVISION,
