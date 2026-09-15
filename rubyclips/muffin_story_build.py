@@ -17,10 +17,12 @@ state = json.loads(STATE.read_text())
 eps = json.loads((WORK / 'episodes.json').read_text())
 next_ep = int(state['nextEpisode'])
 part = int(state['nextPart'])
+story_total_parts = int(state.get('storyTotalParts') or 0)
 restart_generation = int(state.get('restartGeneration', 2))
 series_id = str(state['currentSeriesId'])
 series_title = str(state['currentSeriesTitle']).strip()
 logical_post_key = f'rubyclips:{series_id}:r{restart_generation}:p{part}'
+part_label = f'Part {part} of {story_total_parts}' if story_total_parts >= part else f'Part {part}'
 
 ordered = sorted((e for e in eps if int(e['episode']) >= next_ep), key=lambda e: int(e['episode']))
 if not ordered or int(ordered[0]['episode']) != next_ep:
@@ -56,7 +58,7 @@ if total > HARD_MAX_SECONDS:
 wrapped = textwrap.wrap(series_title, width=34, break_long_words=False, break_on_hyphens=False)
 title_text = '\n'.join(wrapped[:2]) if wrapped else series_title
 (WORK / 'story-title.txt').write_text(title_text, encoding='utf-8')
-(WORK / 'part-label.txt').write_text(f'Part {part}', encoding='utf-8')
+(WORK / 'part-label.txt').write_text(part_label, encoding='utf-8')
 
 def esc(p):
     return p.as_posix().replace(':','\\:').replace("'","\\'")
@@ -143,7 +145,7 @@ manifest = {
     'segmentDurationSeconds': round(duration, 3),
     'file': final.name,
     'storyHashtag': story_hashtag,
-    'caption': f'{series_title} — Part {part} {story_hashtag} #rubaradaclips #storytime #shortdrama',
+    'caption': f'{series_title} — {part_label} {story_hashtag} #rubaradaclips #storytime #shortdrama',
     'targetChannel': 'rubaradaclips',
     'titleBurnedIn': True,
     'partLabelBurnedIn': True,
@@ -151,9 +153,12 @@ manifest = {
     'concatPolicy': 'normalized-filter-concat-v2',
     'packingPolicy': 'max-whole-episodes-under-590s'
 }
+if story_total_parts >= part:
+    manifest['segmentTotal'] = story_total_parts
 (OUT / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 (OUT / 'part-info.json').write_text(json.dumps({
     'part': part,
+    'totalParts': story_total_parts or None,
     'duration': duration,
     'videoDuration': video_duration,
     'audioDuration': audio_duration,
