@@ -7,7 +7,7 @@ pulseaudio --system --daemonize=yes --disallow-exit --exit-idle-time=-1 --load="
 export PULSE_SERVER=unix:/tmp/pulse/native
 pactl set-default-sink takarada >/dev/null 2>&1 || true
 pactl set-default-source takarada.monitor >/dev/null 2>&1 || true
-node server.js &
+node bootstrap.js &
 NODE_PID=$!
 node renderer.js &
 RENDERER_PID=$!
