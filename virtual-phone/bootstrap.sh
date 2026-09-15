@@ -7,6 +7,7 @@ ADB_SERIAL=${ADB_SERIAL:-127.0.0.1:5555}
 WIDTH=${WIDTH:-720}
 HEIGHT=${HEIGHT:-1280}
 DPI=${DPI:-320}
+TAKARADA_FEED_URL=${TAKARADA_FEED_URL:-https://takarada-cloud-live.onrender.com/preview}
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
@@ -58,6 +59,12 @@ if ! adb -s "$ADB_SERIAL" shell pm path com.aurora.store 2>/dev/null | grep -q p
   adb -s "$ADB_SERIAL" install -r "$AURORA_APK"
 fi
 
+# Install our tiny full-screen feed app. It is built from this repository and
+# contains no credentials; it only renders the feed URL supplied to it.
+DISPLAY_APK="$PHONE_ROOT/apks/takarada-display.apk"
+curl -fL --retry 3 -o "$DISPLAY_APK" "https://raw.githubusercontent.com/RubysRealm/RubysRealm/takarada-virtual-phone/virtual-phone/prebuilt/takarada-display.apk"
+adb -s "$ADB_SERIAL" install -r "$DISPLAY_APK"
+
 cat >/usr/local/bin/takarada-install-apk <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -66,6 +73,16 @@ adb connect 127.0.0.1:5555 >/dev/null 2>&1 || true
 exec adb -s 127.0.0.1:5555 install -r "$1"
 EOF
 chmod +x /usr/local/bin/takarada-install-apk
+
+cat >/usr/local/bin/takarada-show-feed <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+URL=${1:-https://takarada-cloud-live.onrender.com/preview}
+adb connect 127.0.0.1:5555 >/dev/null 2>&1 || true
+adb -s 127.0.0.1:5555 shell am force-stop com.takarada.display || true
+exec adb -s 127.0.0.1:5555 shell am start -n com.takarada.display/.MainActivity --es url "$URL"
+EOF
+chmod +x /usr/local/bin/takarada-show-feed
 
 if [ ! -f "$PHONE_ROOT/vnc.pass" ]; then
   VNC_PASSWORD=$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | head -c 16)
@@ -158,6 +175,8 @@ adb -s 127.0.0.1:5555 shell getprop ro.build.version.release 2>/dev/null || true
 adb -s 127.0.0.1:5555 shell getprop sys.boot_completed 2>/dev/null || true
 echo '=== Aurora Store ==='
 adb -s 127.0.0.1:5555 shell pm path com.aurora.store 2>/dev/null || true
+echo '=== Takarada Display ==='
+adb -s 127.0.0.1:5555 shell pm path com.takarada.display 2>/dev/null || true
 echo '=== UI ==='
 systemctl is-active takarada-phone-ui.service || true
 echo '=== Browser URL ==='
@@ -170,6 +189,8 @@ chmod +x /usr/local/bin/takarada-phone-status
 systemctl daemon-reload
 systemctl enable --now takarada-phone-ui.service takarada-phone-tunnel.service
 sleep 5
+
+/usr/local/bin/takarada-show-feed "$TAKARADA_FEED_URL" >/dev/null 2>&1 || true
 
 echo
 echo 'Takarada virtual phone bootstrap complete.'
