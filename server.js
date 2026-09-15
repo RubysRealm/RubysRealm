@@ -9,6 +9,7 @@ const server=http.createServer(app);
 const io=new SocketIOServer(server,{cors:{origin:"*"}});
 const PORT=Number(process.env.PORT||10000);
 const CONTROL_TOKEN=process.env.CONTROL_TOKEN||"change-me";
+const DESKTOP_TOKEN=(process.env.DESKTOP_TOKEN||"").trim();
 const RTMP_SERVER=(process.env.RTMP_SERVER||"").trim();
 const RTMP_STREAM_KEY=(process.env.RTMP_STREAM_KEY||"").trim();
 const mediaSources=JSON.parse(process.env.MEDIA_SOURCES||"{}");
@@ -17,12 +18,14 @@ let index=0,playing=true,ffmpeg=null;
 let cloudPlayerState={code:-999,label:"waiting",videoId:null,position:0,updatedAt:0};
 let broadcastWanted=false,broadcastStatus="stopped",broadcastError=null,broadcastStartedAt=null;
 
-app.use(express.json());
+app.use(express.json({limit:"64kb"}));
 app.use(express.static("public"));
 function auth(req,res,next){const t=req.query.token||req.headers["x-control-token"];if(t!==CONTROL_TOKEN)return res.status(403).send("Bad control token");next();}
+function desktopAuth(req,res,next){const t=req.query.token||req.headers["x-desktop-token"];if(!DESKTOP_TOKEN||t!==DESKTOP_TOKEN)return res.status(403).send("Bad desktop token");next();}
+function desktopCommand(args){const p=spawn("xdotool",args,{env:{...process.env,DISPLAY:":99"},stdio:"ignore"});p.on("error",()=>{});}
 function getRtmp(){const direct=(process.env.RTMP_URL||"").trim();if(direct)return direct;if(!RTMP_SERVER||!RTMP_STREAM_KEY)return"";return RTMP_SERVER.replace(/\/$/,"")+"/"+RTMP_STREAM_KEY.replace(/^\//,"");}
 function cur(){const v=videos[index];return {...v,sourceUrl:mediaSources[v.id]||null};}
-function state(){const current=cur();return{version:"gameplay-only-1",gameplayOnly:true,index,count:videos.length,playing,current,next:videos[(index+1)%videos.length],cloudPlayerState,broadcasting:!!ffmpeg,broadcastWanted,broadcastStatus,broadcastError,broadcastStartedAt,rtmpConfigured:!!getRtmp(),mediaReady:!!current.sourceUrl||cloudPlayerState.label==="playing",playbackTest:false,audioMode:"original-gameplay"};}
+function state(){const current=cur();return{version:"gameplay-only-1",gameplayOnly:true,index,count:videos.length,playing,current,next:videos[(index+1)%videos.length],cloudPlayerState,broadcasting:!!ffmpeg,broadcastWanted,broadcastStatus,broadcastError,broadcastStartedAt,rtmpConfigured:!!getRtmp(),mediaReady:!!current.sourceUrl||cloudPlayerState.label==="playing",playbackTest:false,audioMode:"original-gameplay",loginMode:process.env.LOGIN_MODE==="true"};}
 function nextVideo(d=1){index=(index+d+videos.length)%videos.length;playing=true;cloudPlayerState={code:-999,label:"loading",videoId:cur().id,position:0,updatedAt:Date.now()};io.emit("queue",state());}
 function safeBroadcastError(value,rtmp){return String(value||"").replaceAll(rtmp,"[TikTok destination]").replace(/rtmps?:\/\/\S+/gi,"[TikTok destination]").slice(-600);}
 function scheduleBroadcastRetry(){if(!broadcastWanted)return;setTimeout(()=>{if(broadcastWanted&&!ffmpeg)startBroadcast(true);},12000).unref();}
@@ -46,6 +49,11 @@ app.get("/",(req,res)=>res.type("html").send('<meta name="viewport" content="wid
 app.get("/stage",(req,res)=>res.sendFile(process.cwd()+"/public/stage.html"));
 app.get("/preview",(req,res)=>res.sendFile(process.cwd()+"/public/stage.html"));
 app.get("/control",auth,(req,res)=>res.sendFile(process.cwd()+"/public/control.html"));
+app.get("/desktop",desktopAuth,(req,res)=>res.sendFile(process.cwd()+"/public/desktop.html"));
+app.get("/api/desktop-frame",desktopAuth,(req,res)=>{res.setHeader("Cache-Control","no-store, max-age=0");if(!fs.existsSync("/tmp/cloud-frame.jpg"))return res.status(503).send("Cloud desktop frame not ready");res.sendFile("/tmp/cloud-frame.jpg");});
+app.post("/api/desktop-click",desktopAuth,(req,res)=>{const x=Math.max(0,Math.min(Number(process.env.STREAM_WIDTH||720)-1,Math.round(Number(req.body?.x)||0)));const y=Math.max(0,Math.min(Number(process.env.STREAM_HEIGHT||1280)-1,Math.round(Number(req.body?.y)||0)));desktopCommand(["mousemove",String(x),String(y),"click","1"]);res.json({ok:true,x,y});});
+app.post("/api/desktop-key",desktopAuth,(req,res)=>{const allowed=new Set(["Return","Tab","Escape","BackSpace","Up","Down","Left","Right","space","ctrl+l"]);const key=String(req.body?.key||"");if(!allowed.has(key))return res.status(400).json({ok:false});desktopCommand(["key",key]);res.json({ok:true});});
+app.post("/api/desktop-type",desktopAuth,(req,res)=>{const text=String(req.body?.text||"").slice(0,300);desktopCommand(["type","--delay","25","--clearmodifiers",text]);res.json({ok:true});});
 app.get("/api/state",(req,res)=>res.json(state()));
 app.post("/api/player-state",auth,(req,res)=>{if(req.body?.renderer==="cloud"){cloudPlayerState={code:Number(req.body.code),label:String(req.body.label||"unknown"),error:req.body.error||null,position:Number(req.body.position||0),duration:Number(req.body.duration||0),volume:Number(req.body.volume??1),muted:!!req.body.muted,videoId:req.body.videoId||null,updatedAt:Date.now()};if(cloudPlayerState.error)console.log("cloud player error",cloudPlayerState.error);}res.json({ok:true});});
 app.post("/api/action/:action",auth,(req,res)=>{const a=req.params.action;let r={ok:true,message:"OK"};if(a==="next")nextVideo(1);else if(a==="prev")nextVideo(-1);else if(a==="play"){playing=true;io.emit("playback",{playing});r.message="Gameplay playing";}else if(a==="pause"){playing=false;io.emit("playback",{playing});r.message="Gameplay paused";}else if(a==="start")r=startBroadcast();else if(a==="stop")r=stopBroadcast();else if(a==="test-on"||a==="test-off"||a==="reaction-test")r={ok:false,message:"Facecam/voice test mode is disabled. This build is gameplay-only."};else return res.status(404).json({ok:false,message:"Unknown action"});res.json({...r,state:state()});});
