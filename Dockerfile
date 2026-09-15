@@ -5,6 +5,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg xvfb xdo
     && apt-get install -y /tmp/google-chrome.deb \
     && rm -f /tmp/google-chrome.deb \
     && rm -rf /var/lib/apt/lists/*
+RUN curl -L --fail https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
+    && chmod +x /usr/local/bin/yt-dlp
 WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev
