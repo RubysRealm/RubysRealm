@@ -20,6 +20,58 @@ const CONTINUITY_RESTART = 2;
 const CONTINUITY_FIRST_PART = 12;
 const CONTINUITY_SOURCE_ID = 'xb2tc0i';
 const CONTINUITY_SOURCE_URL = 'https://www.dailymotion.com/video/xb2tc0i';
+const COBALT_API = 'https://rubyclips-cobalt-3.onrender.com/';
+const CURRENT_YOUTUBE_STORY_ID = '5-bO9NAhWbI';
+
+async function probeCurrentYouTubeSource() {
+  const sourceUrl = `https://www.youtube.com/watch?v=${CURRENT_YOUTUBE_STORY_ID}`;
+  const response = await fetch(COBALT_API, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      url: sourceUrl,
+      videoQuality: '720',
+      youtubeVideoCodec: 'h264',
+      downloadMode: 'auto',
+      alwaysProxy: true
+    }),
+    redirect: 'follow',
+    cache: 'no-store'
+  });
+  const text = await response.text();
+  let resolved = null;
+  try { resolved = JSON.parse(text); } catch { resolved = { raw: text.slice(0, 2000) }; }
+
+  let media = null;
+  const direct = String(resolved?.url || '');
+  if (response.ok && ['tunnel', 'redirect'].includes(String(resolved?.status || '')) && /^https?:\/\//i.test(direct)) {
+    try {
+      const sample = await fetch(direct, {
+        headers: { Range: 'bytes=0-262143' },
+        redirect: 'follow',
+        cache: 'no-store'
+      });
+      const bytes = new Uint8Array(await sample.arrayBuffer());
+      media = {
+        ok: sample.ok || sample.status === 206,
+        status: sample.status,
+        contentType: sample.headers.get('content-type'),
+        contentRange: sample.headers.get('content-range'),
+        sampleBytes: bytes.byteLength
+      };
+    } catch (error) {
+      media = { ok: false, error: String(error?.message || error) };
+    }
+  }
+
+  return {
+    ok: response.ok && ['tunnel', 'redirect'].includes(String(resolved?.status || '')) && media?.ok === true,
+    resolveStatus: response.status,
+    resolved,
+    media,
+    sourceVideoId: CURRENT_YOUTUBE_STORY_ID
+  };
+}
 
 function validateBase(m) {
   if (!m?.file || !String(m.file).endsWith('.mp4')) throw new Error('Blocked: missing MP4.');
@@ -122,6 +174,15 @@ export default async function handler(req, res) {
 
   if (String(req.query?.health || '') === '1') {
     return res.status(200).json({ ok: true, version: PUBLISHER_VERSION, channelName: RUBYCLIPS_CHANNEL });
+  }
+
+  if (String(req.query?.sourceProbe || '') === '1') {
+    try {
+      const result = await probeCurrentYouTubeSource();
+      return res.status(result.ok ? 200 : 502).json(result);
+    } catch (error) {
+      return res.status(502).json({ ok: false, error: String(error?.message || error), sourceVideoId: CURRENT_YOUTUBE_STORY_ID });
+    }
   }
 
   try {
