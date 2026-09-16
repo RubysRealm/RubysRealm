@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "scripts": {"start":"node phone-headless.js"},
+  "scripts": {
+    "postinstall": "bash setup-phone.sh",
+    "start": "node phone-headless.js"
+  },
   "dependencies": {
     "express": "^5.1.0",
     "playwright-core": "^1.55.0",
