@@ -15,19 +15,46 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25.x'
-      - name: Bootstrap anonymous TikTok browser cookies
+      - name: Inspect MuffinDrama public posts for story metadata
         run: |
-          npm install --silent puppeteer
-          node rubyclips/tiktok_cookie_bootstrap.cjs
-      - name: Probe known MuffinDrama short-drama episode
-        run: |
-          go run github.com/hatienl0i2612/tiktok-crawler/cmd/tiktok_crawler@v1.1.7 -cookies-file /tmp/tiktok.cookies -json 'https://www.tiktok.com/shortdrama/episode/7682993954661553173/1'
-      - name: Probe known later episode
-        run: |
-          go run github.com/hatienl0i2612/tiktok-crawler/cmd/tiktok_crawler@v1.1.7 -cookies-file /tmp/tiktok.cookies -json 'https://www.tiktok.com/shortdrama/episode/7682993954661553173/39'
-      - name: Probe MuffinDrama profile
-        run: |
-          go run github.com/hatienl0i2612/tiktok-crawler/cmd/tiktok_crawler@v1.1.7 -cookies-file /tmp/tiktok.cookies -json 'https://www.tiktok.com/@muffindrama_us'
+          npm install --silent @tobyg74/tiktok-api-dl
+          cat > /tmp/posts.cjs <<'JS'
+          const Tiktok=require('@tobyg74/tiktok-api-dl');
+          const seen=new Set();
+          function collect(obj,path='',out=[]){
+            if(obj==null) return out;
+            if(typeof obj==='string'){
+              if(/shortdrama|drama|series|episode|playlist/i.test(path+' '+obj) || /\/video\/\d{10,25}/.test(obj)) out.push([path,obj.slice(0,700)]);
+              return out;
+            }
+            if(typeof obj!=='object') return out;
+            if(seen.has(obj)) return out; seen.add(obj);
+            for(const [k,v] of Object.entries(obj)){
+              const p=path?`${path}.${k}`:k;
+              if(/drama|series|episode|playlist|anchor|desc|title|id$/i.test(k) && (typeof v==='string'||typeof v==='number')) out.push([p,String(v).slice(0,700)]);
+              collect(v,p,out);
+            }
+            return out;
+          }
+          (async()=>{
+            const r=await Tiktok.GetUserPosts('muffindrama_us',{postLimit:100});
+            console.log('TOP_KEYS',Object.keys(r||{}));
+            console.log('STATUS',r?.status||r?.message||'');
+            const data=r?.result||r?.data||r;
+            const arr=Array.isArray(data)?data:(data?.posts||data?.itemList||data?.videos||data?.items||[]);
+            console.log('POST_COUNT',Array.isArray(arr)?arr.length:'unknown');
+            if(Array.isArray(arr)){
+              for(let i=0;i<arr.length;i++){
+                seen.clear();
+                const x=arr[i];
+                const id=x?.id||x?.aweme_id||x?.awemeId||x?.video_id||x?.video?.id||'';
+                const desc=x?.desc||x?.title||x?.description||'';
+                const meta=collect(x).slice(0,120);
+                console.log('POST',i,JSON.stringify({id,desc:String(desc).slice(0,500),meta}));
+              }
+            } else {
+              seen.clear(); console.log('RAW_META',JSON.stringify(collect(data).slice(0,800)));
+            }
+          })().catch(e=>{console.error('ERR',e?.stack||e);process.exit(1)});
+          JS
+          node /tmp/posts.cjs
