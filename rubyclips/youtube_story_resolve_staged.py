@@ -10,6 +10,7 @@ STATE = BASE / 'muffin_state.json'
 OWNER = 'RubysRealm'
 REPO = 'RubysRealm'
 HARD_MAX_SECONDS = 598.5
+RENDER_SOURCE = 'https://rubyclips-phone-host.onrender.com/source'
 
 
 def output(args):
@@ -34,15 +35,26 @@ if source_duration <= 0:
 
 asset = f'source-part-{part:02d}.mp4'
 tag = f'rubyclips-source-{video_id}'
-url = f'https://github.com/{OWNER}/{REPO}/releases/download/{quote(tag)}/{quote(asset)}'
+release_url = f'https://github.com/{OWNER}/{REPO}/releases/download/{quote(tag)}/{quote(asset)}'
+render_url = f'{RENDER_SOURCE}/{quote(asset)}'
 raw = WORK / f'staged-source-{part:02d}.mp4'
 out = WORK / f'ep{part}.mp4'
 raw.unlink(missing_ok=True)
 out.unlink(missing_ok=True)
 
-print(f'Trying staged authenticated source: {tag}/{asset}', flush=True)
-proc = subprocess.run(['curl', '-fL', '--retry', '3', '--connect-timeout', '15', '-o', str(raw), url])
-if proc.returncode != 0 or not raw.exists() or raw.stat().st_size < 500000:
+source_strategy = None
+for label, url in [
+    ('render-auth-bridge', render_url),
+    ('staged-auth-browser', release_url),
+]:
+    raw.unlink(missing_ok=True)
+    print(f'Trying authenticated source ({label}): {url}', flush=True)
+    proc = subprocess.run(['curl', '-fL', '--retry', '3', '--connect-timeout', '15', '--max-time', '180', '-o', str(raw), url])
+    if proc.returncode == 0 and raw.exists() and raw.stat().st_size >= 500000:
+        source_strategy = label
+        break
+
+if source_strategy is None:
     raise SystemExit(3)
 
 expected_start = (part - 1) * 595.0
@@ -59,7 +71,7 @@ subprocess.run([
 ], check=True)
 actual = duration(out)
 if actual < 5 or actual > HARD_MAX_SECONDS or out.stat().st_size < 500000:
-    raise SystemExit(f'Staged source produced invalid part duration: {actual:.3f}s')
+    raise SystemExit(f'Authenticated source produced invalid part duration: {actual:.3f}s')
 
 video_url = str(state.get('youtubeSourceUrl') or f'https://www.youtube.com/watch?v={video_id}')
 item = {
@@ -67,7 +79,7 @@ item = {
     'sourceUrl': video_url,
     'shortDramaUrl': video_url,
     'videoId': video_id,
-    'sourceHint': 'authorized-muffindrama-youtube:staged-auth-browser',
+    'sourceHint': f'authorized-muffindrama-youtube:{source_strategy}',
     'sourceProvider': 'youtube',
     'sourceChannel': state.get('sourceChannel') or '@muffindrama-uvu',
     'file': str(out),
@@ -86,6 +98,6 @@ story_complete = part >= total_parts
     'fullDurationSeconds': round(source_duration, 3),
     'storyComplete': story_complete,
     'nextEpisode': total_parts + 1 if story_complete else part + 1,
-    'sourceStrategy': 'staged-auth-browser',
+    'sourceStrategy': source_strategy,
 }, indent=2) + '\n')
-print(json.dumps({'ok': True, 'videoId': video_id, 'part': part, 'totalParts': total_parts, 'duration': actual, 'sourceStrategy': 'staged-auth-browser'}, indent=2))
+print(json.dumps({'ok': True, 'videoId': video_id, 'part': part, 'totalParts': total_parts, 'duration': actual, 'sourceStrategy': source_strategy}, indent=2))
