@@ -6,7 +6,10 @@ const currentSeriesId = String(state.currentSeriesId || '');
 const nextPart = Number(state.nextPart || 0);
 const provider = String(state.sourceProvider || '').toLowerCase();
 
-if (state.currentSeriesComplete === true || provider === 'youtube') {
+if (provider === 'dailymotion-muffindrama-mirror') {
+  console.log('Using reachable long-form transport for the selected MuffinDrama story.');
+  execFileSync('python', ['rubyclips/muffin_story_resolve_fullsource.py'], { stdio: 'inherit' });
+} else if (provider === 'youtube') {
   console.log('Using the MuffinDrama YouTube channel as the Rubaradaclips story source.');
   const cobalt = spawnSync('python', ['rubyclips/youtube_story_resolve_cobalt.py'], { stdio: 'inherit' });
   if (cobalt.status === 0) {
