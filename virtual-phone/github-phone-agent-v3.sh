@@ -16,6 +16,21 @@ post_comment_v3() {
   gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$TRIGGER_ISSUE/comments" -f body="$body" >/dev/null
 }
 
+verify_and_publish() {
+  local url=$1
+  local provider=$2
+  local attempt=${3:-1}
+  for _ in $(seq 1 20); do
+    if curl -fsS --max-time 12 "$url/" >/dev/null 2>&1; then
+      post_comment_v3 "TAKARADA_REMOTE_URL|$url"
+      post_comment_v3 "TAKARADA_REMOTE_STATUS|verified_public|provider=$provider|attempt=$attempt"
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
 start_secure_remote_handshake() {
   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$ROOT/remote_private.pem" >/dev/null 2>&1
   openssl pkey -in "$ROOT/remote_private.pem" -pubout -out "$ROOT/remote_public.pem" >/dev/null 2>&1
@@ -65,42 +80,56 @@ start_secure_remote_handshake() {
       exit 0
     fi
 
-    curl -fsSL --retry 4 --retry-all-errors \
-      -o "$ROOT/cloudflared" \
-      https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 || {
-        post_comment_v3 'TAKARADA_REMOTE_ERROR|cloudflared_download_failed'; exit 0; }
-    chmod +x "$ROOT/cloudflared"
+    # Primary: Cloudflare Quick Tunnel. Verify from the runner before publishing.
+    if curl -fsSL --retry 4 --retry-all-errors -o "$ROOT/cloudflared" \
+      https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64; then
+      chmod +x "$ROOT/cloudflared"
+      for attempt in 1 2 3; do
+        if [ -f "$ROOT/cloudflared.pid" ]; then
+          pid=$(cat "$ROOT/cloudflared.pid" 2>/dev/null || true)
+          [ -n "$pid" ] && kill "$pid" >/dev/null 2>&1 || true
+        fi
+        : > "$ROOT/cloudflared.log"
+        "$ROOT/cloudflared" tunnel --protocol http2 --url http://127.0.0.1:8765 --no-autoupdate >"$ROOT/cloudflared.log" 2>&1 &
+        echo $! > "$ROOT/cloudflared.pid"
 
-    for attempt in 1 2 3; do
-      if [ -f "$ROOT/cloudflared.pid" ]; then
-        pid=$(cat "$ROOT/cloudflared.pid" 2>/dev/null || true)
-        [ -n "$pid" ] && kill "$pid" >/dev/null 2>&1 || true
-      fi
-      : > "$ROOT/cloudflared.log"
-      "$ROOT/cloudflared" tunnel --protocol http2 --url http://127.0.0.1:8765 --no-autoupdate >"$ROOT/cloudflared.log" 2>&1 &
-      echo $! > "$ROOT/cloudflared.pid"
+        url=''
+        for _ in $(seq 1 45); do
+          url=$(grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' "$ROOT/cloudflared.log" 2>/dev/null | head -1 || true)
+          [ -n "$url" ] && break
+          sleep 1
+        done
+        if [ -n "$url" ] && verify_and_publish "$url" cloudflare "$attempt"; then
+          exit 0
+        fi
+        post_comment_v3 "TAKARADA_REMOTE_STATUS|retrying_tunnel|provider=cloudflare|attempt=$attempt"
+      done
+    else
+      post_comment_v3 'TAKARADA_REMOTE_STATUS|cloudflare_download_failed'
+    fi
+
+    # Fallback: localhost.run reverse SSH tunnel. This keeps the same password-protected controller.
+    if command -v ssh >/dev/null 2>&1; then
+      : > "$ROOT/localhost-run.log"
+      ssh -T \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o ServerAliveInterval=30 \
+        -o ExitOnForwardFailure=yes \
+        -R 80:127.0.0.1:8765 nokey@localhost.run >"$ROOT/localhost-run.log" 2>&1 &
+      echo $! > "$ROOT/localhost-run.pid"
 
       url=''
       for _ in $(seq 1 60); do
-        url=$(grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' "$ROOT/cloudflared.log" 2>/dev/null | head -1 || true)
+        url=$(grep -Eo 'https://[A-Za-z0-9.-]+' "$ROOT/localhost-run.log" 2>/dev/null | grep -Ev 'localhost.run/?$' | head -1 || true)
         [ -n "$url" ] && break
         sleep 1
       done
-
-      if [ -n "$url" ]; then
-        for _ in $(seq 1 20); do
-          if curl -fsS --max-time 12 "$url/" >/dev/null 2>&1; then
-            post_comment_v3 "TAKARADA_REMOTE_URL|$url"
-            post_comment_v3 "TAKARADA_REMOTE_STATUS|verified_public|attempt=$attempt"
-            exit 0
-          fi
-          sleep 2
-        done
+      if [ -n "$url" ] && verify_and_publish "$url" localhost-run 1; then
+        exit 0
       fi
-
-      post_comment_v3 "TAKARADA_REMOTE_STATUS|retrying_tunnel|attempt=$attempt"
-      sleep 2
-    done
+      post_comment_v3 'TAKARADA_REMOTE_STATUS|fallback_tunnel_failed|provider=localhost-run'
+    fi
 
     post_comment_v3 'TAKARADA_REMOTE_ERROR|public_tunnel_unreachable'
   ) &
