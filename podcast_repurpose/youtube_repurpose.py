@@ -35,6 +35,61 @@ def youtube_metadata(url):
     raise RuntimeError(f"YouTube source metadata failed after retries: {last_error}")
 
 
+def youtube_segment_plan(duration, chapters):
+    """Preserve normal chronology while guaranteeing every YouTube part stays under MAX_PART."""
+    duration = float(duration)
+    if duration <= base.MAX_PART:
+        return [(0.0, duration)]
+
+    boundaries = {0.0, duration}
+    for c in chapters or []:
+        try:
+            s = float(c.get("start_time"))
+        except (TypeError, ValueError):
+            continue
+        if 0 < s < duration:
+            boundaries.add(s)
+    boundaries = sorted(boundaries)
+
+    out = []
+    start = 0.0
+    while duration - start > base.MAX_PART:
+        remaining = duration - start
+
+        # The shared TikTok planner can absorb a small tail into the previous
+        # part, which is fine there but can create a >180s YouTube Short.
+        # When only two Shorts remain, split the remainder evenly instead.
+        if remaining <= 2 * base.MAX_PART:
+            end = start + (remaining / 2.0)
+        else:
+            lo = start + base.MIN_PART
+            hi = min(start + base.MAX_PART, duration)
+            candidates = [b for b in boundaries if lo <= b <= hi]
+            if candidates:
+                ideal = start + base.TARGET
+                end = min(candidates, key=lambda b: abs(b - ideal))
+            else:
+                end = min(start + base.TARGET, hi)
+
+        if end <= start:
+            raise RuntimeError("YouTube segment planner failed to advance")
+        if end - start > base.MAX_PART + 0.01:
+            raise RuntimeError("YouTube segment planner exceeded maximum part length")
+        out.append((start, end))
+        start = end
+
+    if duration - start > 1.0:
+        out.append((start, duration))
+
+    for s, e in out:
+        part_len = e - s
+        if part_len > base.MAX_PART + 0.01:
+            raise RuntimeError(f"YouTube part exceeds configured maximum: {part_len:.1f}s")
+        if part_len < 30:
+            raise RuntimeError(f"YouTube part is too short: {part_len:.1f}s")
+    return out
+
+
 def youtube_download_source(url):
     """Use several Dailymotion-safe format paths so rendition changes cannot stall YouTube."""
     for p in base.WORK.glob("source.*"):
@@ -125,6 +180,7 @@ def render_part(source, title, index, total, start, end, dest):
 
 
 base.metadata = youtube_metadata
+base.segment_plan = youtube_segment_plan
 base.download_source = youtube_download_source
 base.render_part = render_part
 base.main()
