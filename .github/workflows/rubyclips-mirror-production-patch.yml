@@ -1,4 +1,4 @@
-name: Rubaradaclips mirror production patch
+name: Rubaradaclips mirror publisher patch
 on:
   push:
     paths:
@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Patch publisher and queue workflow
+      - name: Patch publisher validation
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -56,24 +56,9 @@ jobs:
           if marker not in s: raise SystemExit('publisher provider branch not found')
           s=s.replace(marker,insert,1)
           p.write_text(s)
-          w=Path('.github/workflows/rubyclips-muffin-part1.yml')
-          s=w.read_text()
-          old="          ready=bool(s.get('currentSeriesComplete')) or int(s.get('nextEpisode',1)) <= int(s.get('currentSeriesEpisodeCount',1))"
-          new='\n'.join([
-              "          provider=str(s.get('sourceProvider','')).lower()",
-              "          complete=bool(s.get('currentSeriesComplete'))",
-              "          ready=False if (provider == 'dailymotion-muffindrama-mirror' and complete) else (complete or int(s.get('nextEpisode',1)) <= int(s.get('currentSeriesEpisodeCount',1)))",
-          ])
-          if old not in s: raise SystemExit('workflow ready line not found')
-          s=s.replace(old,new,1)
-          old2="          info=json.load(open('rubyclips/muffin_output/part-info.json'))\n          if int(s.get('restartGeneration',0)) != int(info.get('restartGeneration',-1)):"
-          new2="          info=json.load(open('rubyclips/muffin_output/part-info.json'))\n          total=info.get('totalParts')\n          if total:\n              s['currentSeriesEpisodeCount']=int(total)\n              s['storyTotalParts']=int(total)\n          if int(s.get('restartGeneration',0)) != int(info.get('restartGeneration',-1)):"
-          if old2 not in s: raise SystemExit('workflow state advancement block not found')
-          s=s.replace(old2,new2,1)
-          w.write_text(s)
           PY
           git config user.name 'rubyclips-publisher-bot'
           git config user.email 'actions@users.noreply.github.com'
-          git add api/rubyclips-post.js .github/workflows/rubyclips-muffin-part1.yml
-          git commit -m 'Enable authorized MuffinDrama mirror story transport'
+          git add api/rubyclips-post.js
+          git commit -m 'Enable authorized MuffinDrama mirror publisher transport'
           git push
