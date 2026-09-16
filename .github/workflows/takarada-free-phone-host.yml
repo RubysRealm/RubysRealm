@@ -45,24 +45,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3-pil curl unzip zbar-tools
 
-      - name: Restore Android phone state
+      - name: Restore Android 35 phone state
         uses: actions/cache@v4
         with:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: takarada-phone-${{ github.run_id }}
+          key: takarada-phone-api35-${{ github.run_id }}
           restore-keys: |
-            takarada-phone-
+            takarada-phone-api35-
 
       - name: Run Android virtual phone
         uses: ReactiveCircus/android-emulator-runner@v2
         with:
-          api-level: 34
+          api-level: 35
           target: google_apis
           arch: x86_64
           profile: pixel_7_pro
           force-avd-creation: false
           disable-animations: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -no-metrics
+          emulator-options: -no-snapshot-load -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -no-metrics
           script: bash virtual-phone/github-phone-agent.sh
