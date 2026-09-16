@@ -1,8 +1,10 @@
 name: Takarada TikTok Official Download Probe
 
 on:
-  issues:
-    types: [opened]
+  push:
+    branches: [main]
+    paths:
+      - 'takarada-probe-trigger.txt'
   workflow_dispatch:
 
 permissions:
@@ -10,12 +12,11 @@ permissions:
 
 jobs:
   probe:
-    if: github.event_name != 'issues' || github.event.issue.title == 'PROBE_TIKTOK_OFFICIAL_DOWNLOAD'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
-      ISSUE: ${{ github.event.issue.number }}
+      ISSUE: 36
     steps:
       - name: Extract official Android download targets
         shell: bash
@@ -25,7 +26,6 @@ jobs:
           google-chrome --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --user-agent="$UA" --virtual-time-budget=12000 --dump-dom 'https://www.tiktok.com/download' > /tmp/tiktok-download.html 2>/tmp/chrome.err || true
           python3 - <<'PY' > /tmp/result.txt
 from html.parser import HTMLParser
-from urllib.parse import unquote
 class P(HTMLParser):
     def __init__(self):
         super().__init__(); self.links=[]; self.cur=None; self.txt=[]
@@ -49,11 +49,10 @@ for text,href in p.links:
         print(f'TEXT={text[:180]}\nHREF={href[:1800]}\n---')
 print('HTML_BYTES=',len(open('/tmp/tiktok-download.html','rb').read()))
 PY
-          # Also extract raw APK-looking and TikTok distribution URLs from rendered HTML/JS attributes.
           python3 - <<'PY' >> /tmp/result.txt
 import re,html
 s=open('/tmp/tiktok-download.html',errors='ignore').read()
-urls=re.findall(r'https?[^\"\'<> ]+',s)
+urls=re.findall(r"https?[^\"'<> ]+",s)
 seen=set()
 for u in urls:
     u=html.unescape(u).replace('\\u002F','/').replace('\\/','/')
