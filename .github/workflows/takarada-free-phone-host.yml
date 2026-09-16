@@ -10,13 +10,12 @@ permissions:
   contents: write
   issues: write
 
-concurrency:
-  group: takarada-free-phone-host
-  cancel-in-progress: true
-
 jobs:
   phone:
     if: github.event_name != 'issues' || github.event.issue.title == 'START_TAKARADA_FREE_PHONE'
+    concurrency:
+      group: takarada-free-phone-host
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 335
     env:
@@ -65,4 +64,4 @@ jobs:
           force-avd-creation: false
           disable-animations: false
           emulator-options: -no-snapshot-load -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -no-metrics
-          script: bash virtual-phone/github-phone-agent.sh
+          script: bash virtual-phone/github-phone-agent-v2.sh
