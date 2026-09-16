@@ -1,0 +1,36 @@
+name: Rubaradaclips remove cookie gate
+
+on:
+  push:
+    paths:
+      - 'rubyclips/remove_cookie_gate.trigger'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Remove obsolete mandatory YouTube cookie gate
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/rubyclips-muffin-part1.yml')
+          s=p.read_text()
+          a="      - name: Install authenticated Signal Forge YouTube session\n"
+          b="      - name: Resolve upcoming episodes\n"
+          if a not in s or b not in s:
+              raise SystemExit('cookie gate anchors not found')
+          before, rest=s.split(a,1)
+          _, after=rest.split(b,1)
+          p.write_text(before+b+after)
+          PY
+          git config user.name 'rubyclips-maintenance-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/workflows/rubyclips-muffin-part1.yml
+          git commit -m 'Remove obsolete Rubaradaclips cookie gate'
+          git push
