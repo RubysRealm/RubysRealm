@@ -1,0 +1,26 @@
+name: Rubaradaclips TikTok crawler probe
+on:
+  push:
+    paths:
+      - '.github/workflows/rubyclips-tiktok-crawler-probe.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: Probe known MuffinDrama short-drama episode
+        run: |
+          go run github.com/hatienl0i2612/tiktok-crawler/cmd/tiktok_crawler@v1.1.7 -json 'https://www.tiktok.com/shortdrama/episode/7682993954661553173/1'
+      - name: Probe known later episode
+        run: |
+          go run github.com/hatienl0i2612/tiktok-crawler/cmd/tiktok_crawler@v1.1.7 -json 'https://www.tiktok.com/shortdrama/episode/7682993954661553173/39'
+      - name: Probe MuffinDrama profile
+        run: |
+          go run github.com/hatienl0i2612/tiktok-crawler/cmd/tiktok_crawler@v1.1.7 -json 'https://www.tiktok.com/@muffindrama_us'
