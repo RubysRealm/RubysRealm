@@ -39,11 +39,11 @@ jobs:
             sudo chmod 666 /dev/kvm || true
           fi
 
-      - name: Install screenshot helper
+      - name: Install phone helpers
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pil curl unzip
+          sudo apt-get install -y python3-pil curl unzip zbar-tools
 
       - name: Restore Android phone state
         uses: actions/cache@v4
