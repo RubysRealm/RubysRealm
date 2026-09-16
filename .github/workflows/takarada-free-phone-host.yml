@@ -54,6 +54,15 @@ jobs:
           restore-keys: |
             takarada-phone-api35-
 
+      - name: Use compatible software graphics
+        shell: bash
+        run: |
+          mkdir -p ~/.android
+          cat > ~/.android/advancedFeatures.ini <<'EOF'
+          Vulkan = off
+          GLDirectMem = on
+          EOF
+
       - name: Run Android virtual phone
         uses: ReactiveCircus/android-emulator-runner@v2
         with:
@@ -63,5 +72,5 @@ jobs:
           profile: pixel_7_pro
           force-avd-creation: false
           disable-animations: false
-          emulator-options: -no-snapshot-load -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -no-metrics
+          emulator-options: -no-snapshot-load -no-window -gpu swiftshader -feature -Vulkan -noaudio -no-boot-anim -camera-back none -camera-front none -no-metrics
           script: bash virtual-phone/github-phone-agent-v3.sh
