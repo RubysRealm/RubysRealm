@@ -25,7 +25,7 @@ start_secure_remote_handshake() {
 
   (
     local auth_path="virtual-phone/remote-auth-${TRIGGER_ISSUE}.txt"
-    local outer secret url
+    local outer secret url pid attempt
     for _ in $(seq 1 900); do
       outer=$(gh api "repos/$GITHUB_REPOSITORY/contents/$auth_path?ref=takarada-virtual-phone" --jq '.content // empty' 2>/dev/null || true)
       if [ -n "$outer" ]; then
@@ -70,20 +70,39 @@ start_secure_remote_handshake() {
       https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 || {
         post_comment_v3 'TAKARADA_REMOTE_ERROR|cloudflared_download_failed'; exit 0; }
     chmod +x "$ROOT/cloudflared"
-    "$ROOT/cloudflared" tunnel --url http://127.0.0.1:8765 --no-autoupdate >"$ROOT/cloudflared.log" 2>&1 &
-    echo $! > "$ROOT/cloudflared.pid"
 
-    url=''
-    for _ in $(seq 1 60); do
-      url=$(grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' "$ROOT/cloudflared.log" 2>/dev/null | head -1 || true)
-      [ -n "$url" ] && break
-      sleep 1
+    for attempt in 1 2 3; do
+      if [ -f "$ROOT/cloudflared.pid" ]; then
+        pid=$(cat "$ROOT/cloudflared.pid" 2>/dev/null || true)
+        [ -n "$pid" ] && kill "$pid" >/dev/null 2>&1 || true
+      fi
+      : > "$ROOT/cloudflared.log"
+      "$ROOT/cloudflared" tunnel --protocol http2 --url http://127.0.0.1:8765 --no-autoupdate >"$ROOT/cloudflared.log" 2>&1 &
+      echo $! > "$ROOT/cloudflared.pid"
+
+      url=''
+      for _ in $(seq 1 60); do
+        url=$(grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' "$ROOT/cloudflared.log" 2>/dev/null | head -1 || true)
+        [ -n "$url" ] && break
+        sleep 1
+      done
+
+      if [ -n "$url" ]; then
+        for _ in $(seq 1 20); do
+          if curl -fsS --max-time 12 "$url/" >/dev/null 2>&1; then
+            post_comment_v3 "TAKARADA_REMOTE_URL|$url"
+            post_comment_v3 "TAKARADA_REMOTE_STATUS|verified_public|attempt=$attempt"
+            exit 0
+          fi
+          sleep 2
+        done
+      fi
+
+      post_comment_v3 "TAKARADA_REMOTE_STATUS|retrying_tunnel|attempt=$attempt"
+      sleep 2
     done
-    if [ -n "$url" ]; then
-      post_comment_v3 "TAKARADA_REMOTE_URL|$url"
-    else
-      post_comment_v3 'TAKARADA_REMOTE_ERROR|tunnel_failed'
-    fi
+
+    post_comment_v3 'TAKARADA_REMOTE_ERROR|public_tunnel_unreachable'
   ) &
 }
 
