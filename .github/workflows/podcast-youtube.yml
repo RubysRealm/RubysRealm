@@ -68,7 +68,8 @@ jobs:
           VIDEO="$(find podcast_repurpose/output -maxdepth 1 -name '*.mp4' -print -quit)"
           test -n "$VIDEO"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists; reusing it for duplicate-safe retry."
+            echo "Release $TAG already exists; refreshing its assets for this retry."
+            gh release upload "$TAG" "$VIDEO" "$MANIFEST#manifest.json" --clobber
           else
             gh release create "$TAG" "$VIDEO" "$MANIFEST#manifest.json" \
               --title "Ruby's Realm YouTube Short ${GITHUB_RUN_NUMBER}" \
