@@ -16,64 +16,58 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
           p=Path('api/rubyclips-post.js')
           s=p.read_text()
           s=s.replace("const PUBLISHER_VERSION = 'existing-video-parts-v11-youtube-source';", "const PUBLISHER_VERSION = 'existing-video-parts-v12-youtube-source-mirror';")
-          old="""  if (provider === 'youtube') {
-            if (!/^[A-Za-z0-9_-]{11}$/.test(seriesId)) throw new Error('Blocked: invalid YouTube story id.');
-            if (sourceChannel !== YOUTUBE_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: YouTube story channel mismatch.');
-          } else {
-            if (!/^\\d{10,25}$/.test(seriesId)) throw new Error('Blocked: invalid TikTok series id.');
-            if (sourceChannel !== TIKTOK_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: TikTok story channel mismatch.');
-          }
-"""
-          new="""  if (provider === 'youtube') {
-            if (!/^[A-Za-z0-9_-]{11}$/.test(seriesId)) throw new Error('Blocked: invalid YouTube story id.');
-            if (sourceChannel !== YOUTUBE_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: YouTube story channel mismatch.');
-          } else if (provider === 'dailymotion-muffindrama-mirror') {
-            if (!/^[A-Za-z0-9_-]{6,25}$/.test(seriesId)) throw new Error('Blocked: invalid mirror-backed story id.');
-            if (sourceChannel !== TIKTOK_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: mirror-backed MuffinDrama channel mismatch.');
-          } else {
-            if (!/^\\d{10,25}$/.test(seriesId)) throw new Error('Blocked: invalid TikTok series id.');
-            if (sourceChannel !== TIKTOK_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: TikTok story channel mismatch.');
-          }
-"""
+          old='\n'.join([
+              "  if (provider === 'youtube') {",
+              "    if (!/^[A-Za-z0-9_-]{11}$/.test(seriesId)) throw new Error('Blocked: invalid YouTube story id.');",
+              "    if (sourceChannel !== YOUTUBE_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: YouTube story channel mismatch.');",
+              "  } else {",
+              "    if (!/^\\d{10,25}$/.test(seriesId)) throw new Error('Blocked: invalid TikTok series id.');",
+              "    if (sourceChannel !== TIKTOK_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: TikTok story channel mismatch.');",
+              "  }",
+          ])
+          new='\n'.join([
+              "  if (provider === 'youtube') {",
+              "    if (!/^[A-Za-z0-9_-]{11}$/.test(seriesId)) throw new Error('Blocked: invalid YouTube story id.');",
+              "    if (sourceChannel !== YOUTUBE_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: YouTube story channel mismatch.');",
+              "  } else if (provider === 'dailymotion-muffindrama-mirror') {",
+              "    if (!/^[A-Za-z0-9_-]{6,25}$/.test(seriesId)) throw new Error('Blocked: invalid mirror-backed story id.');",
+              "    if (sourceChannel !== TIKTOK_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: mirror-backed MuffinDrama channel mismatch.');",
+              "  } else {",
+              "    if (!/^\\d{10,25}$/.test(seriesId)) throw new Error('Blocked: invalid TikTok series id.');",
+              "    if (sourceChannel !== TIKTOK_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: TikTok story channel mismatch.');",
+              "  }",
+          ])
           if old not in s: raise SystemExit('publisher series validation block not found')
           s=s.replace(old,new,1)
-          marker="""  } else if (provider === 'dailymotion') {
-            const scoped = seriesId === CONTINUITY_SERIES_ID && restart === CONTINUITY_RESTART && index >= CONTINUITY_FIRST_PART;
-"""
-          insert="""  } else if (provider === 'dailymotion-muffindrama-mirror') {
-            if (ids.length !== 1 || ids.some(id => !/^[A-Za-z0-9_-]{4,32}$/.test(id))) throw new Error('Blocked: invalid mirror source id.');
-            if (urls.length !== 1 || urls.some(url => !/^https:\\/\\/(?:www\\.)?dailymotion\\.com\\/video\\/[A-Za-z0-9_-]+(?:[/?#].*)?$/i.test(url))) throw new Error('Blocked: invalid mirror source URL.');
-          } else if (provider === 'dailymotion') {
-            const scoped = seriesId === CONTINUITY_SERIES_ID && restart === CONTINUITY_RESTART && index >= CONTINUITY_FIRST_PART;
-"""
+          marker='\n'.join([
+              "  } else if (provider === 'dailymotion') {",
+              "    const scoped = seriesId === CONTINUITY_SERIES_ID && restart === CONTINUITY_RESTART && index >= CONTINUITY_FIRST_PART;",
+          ])
+          insert='\n'.join([
+              "  } else if (provider === 'dailymotion-muffindrama-mirror') {",
+              "    if (ids.length !== 1 || ids.some(id => !/^[A-Za-z0-9_-]{4,32}$/.test(id))) throw new Error('Blocked: invalid mirror source id.');",
+              "    if (urls.length !== 1 || urls.some(url => !/^https:\\/\\/(?:www\\.)?dailymotion\\.com\\/video\\/[A-Za-z0-9_-]+(?:[/?#].*)?$/i.test(url))) throw new Error('Blocked: invalid mirror source URL.');",
+              "  } else if (provider === 'dailymotion') {",
+              "    const scoped = seriesId === CONTINUITY_SERIES_ID && restart === CONTINUITY_RESTART && index >= CONTINUITY_FIRST_PART;",
+          ])
           if marker not in s: raise SystemExit('publisher provider branch not found')
           s=s.replace(marker,insert,1)
           p.write_text(s)
-
           w=Path('.github/workflows/rubyclips-muffin-part1.yml')
           s=w.read_text()
-          old="""          ready=bool(s.get('currentSeriesComplete')) or int(s.get('nextEpisode',1)) <= int(s.get('currentSeriesEpisodeCount',1))
-"""
-          new="""          provider=str(s.get('sourceProvider','')).lower()
-          complete=bool(s.get('currentSeriesComplete'))
-          ready=False if (provider == 'dailymotion-muffindrama-mirror' and complete) else (complete or int(s.get('nextEpisode',1)) <= int(s.get('currentSeriesEpisodeCount',1)))
-"""
+          old="          ready=bool(s.get('currentSeriesComplete')) or int(s.get('nextEpisode',1)) <= int(s.get('currentSeriesEpisodeCount',1))"
+          new='\n'.join([
+              "          provider=str(s.get('sourceProvider','')).lower()",
+              "          complete=bool(s.get('currentSeriesComplete'))",
+              "          ready=False if (provider == 'dailymotion-muffindrama-mirror' and complete) else (complete or int(s.get('nextEpisode',1)) <= int(s.get('currentSeriesEpisodeCount',1)))",
+          ])
           if old not in s: raise SystemExit('workflow ready line not found')
           s=s.replace(old,new,1)
-          old2="""          info=json.load(open('rubyclips/muffin_output/part-info.json'))
-          if int(s.get('restartGeneration',0)) != int(info.get('restartGeneration',-1)):
-"""
-          new2="""          info=json.load(open('rubyclips/muffin_output/part-info.json'))
-          total=info.get('totalParts')
-          if total:
-              s['currentSeriesEpisodeCount']=int(total)
-              s['storyTotalParts']=int(total)
-          if int(s.get('restartGeneration',0)) != int(info.get('restartGeneration',-1)):
-"""
+          old2="          info=json.load(open('rubyclips/muffin_output/part-info.json'))\n          if int(s.get('restartGeneration',0)) != int(info.get('restartGeneration',-1)):"
+          new2="          info=json.load(open('rubyclips/muffin_output/part-info.json'))\n          total=info.get('totalParts')\n          if total:\n              s['currentSeriesEpisodeCount']=int(total)\n              s['storyTotalParts']=int(total)\n          if int(s.get('restartGeneration',0)) != int(info.get('restartGeneration',-1)):"
           if old2 not in s: raise SystemExit('workflow state advancement block not found')
           s=s.replace(old2,new2,1)
           w.write_text(s)
