@@ -2,11 +2,11 @@ name: Takarada Free Phone Host
 
 on:
   issues:
-    types: [opened]
+    types: [opened, reopened]
   workflow_dispatch:
 
 permissions:
-  actions: read
+  actions: write
   contents: write
   issues: write
 
@@ -21,7 +21,7 @@ jobs:
     env:
       TAKARADA_FEED_URL: https://takarada-cloud-live.onrender.com/preview
       GH_TOKEN: ${{ github.token }}
-      TRIGGER_ISSUE: ${{ github.event.issue.number }}
+      TRIGGER_ISSUE: ${{ github.event.issue.number || '39' }}
     steps:
       - name: Checkout isolated Takarada phone branch
         uses: actions/checkout@v4
