@@ -1,0 +1,71 @@
+name: Rubaradaclips Invidious Source Probe
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    if: github.event_name == 'workflow_dispatch' || (github.actor == 'RubysRealm' && github.event.issue.title == 'START_RUBYCLIPS_INVIDIOUS_PROBE')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe trusted public Invidious APIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          VIDEO_ID="$(python -c "import json; print(json.load(open('rubyclips/muffin_state.json'))['currentSeriesId'])")"
+          python - "$VIDEO_ID" <<'PY' > /tmp/result.json
+          import json, sys, urllib.request
+          vid=sys.argv[1]
+          bases=[
+            'https://inv.nadeko.net',
+            'https://invidious.nerdvpn.de',
+            'https://yt.chocolatemoo53.com',
+            'https://invidious.tiekoetter.com',
+            'https://invidious.f5.si',
+          ]
+          rows=[]
+          for base in bases:
+              url=f'{base}/api/v1/videos/{vid}'
+              try:
+                  req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0','Accept':'application/json'})
+                  with urllib.request.urlopen(req,timeout=20) as r:
+                      raw=r.read(12_000_000)
+                  d=json.loads(raw)
+                  adaptive=d.get('adaptiveFormats') or []
+                  formats=d.get('formatStreams') or []
+                  rows.append({
+                      'base':base,'ok':bool(adaptive or formats),'title':d.get('title'),
+                      'duration':d.get('lengthSeconds'),'adaptive':len(adaptive),'formatStreams':len(formats),
+                      'dash':bool(d.get('dashUrl')),'hls':bool(d.get('hlsUrl')),
+                  })
+              except Exception as e:
+                  rows.append({'base':base,'ok':False,'error':str(e)[:200]})
+          print(json.dumps({'videoId':vid,'results':rows},indent=2))
+          PY
+          cat /tmp/result.json
+          if [ -n "${ISSUE:-}" ]; then
+            BODY="$(python - <<'PY'
+          import json
+          d=json.load(open('/tmp/result.json'))
+          lines=['RUBYCLIPS_INVIDIOUS_PROBE',f"Video: {d['videoId']}"]
+          for r in d['results']:
+              if r.get('ok'):
+                  lines.append(f"OK {r['base']} | title={r.get('title')} | duration={r.get('duration')} | adaptive={r.get('adaptive')} muxed={r.get('formatStreams')} dash={r.get('dash')} hls={r.get('hls')}")
+              else:
+                  lines.append(f"FAIL {r['base']} | {r.get('error')}")
+          print('\n'.join(lines))
+          PY
+            )"
+            gh issue comment "$ISSUE" --body "$BODY"
+          fi
