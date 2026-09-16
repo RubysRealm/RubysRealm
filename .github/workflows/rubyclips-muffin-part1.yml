@@ -79,55 +79,6 @@ jobs:
           print('Using font:', sys.argv[1])
           PY
 
-      - name: Install authenticated Signal Forge YouTube session
-        if: steps.state.outputs.ready == 'true'
-        env:
-          YOUTUBE_COOKIES: ${{ secrets.RUBYCLIPS_YOUTUBE_COOKIES }}
-          YOUTUBE_COOKIES_B64: ${{ secrets.RUBYCLIPS_YOUTUBE_COOKIES_B64 }}
-        run: |
-          set -euo pipefail
-          COOKIE_FILE="$RUNNER_TEMP/rubyclips-youtube-cookies.txt"
-          export COOKIE_FILE
-          python - <<'PY'
-          import base64, os
-          from pathlib import Path
-          text=os.environ.get('YOUTUBE_COOKIES','').strip()
-          if not text:
-              raw=os.environ.get('YOUTUBE_COOKIES_B64','').strip()
-              if not raw:
-                  raise SystemExit('Missing required Actions secret RUBYCLIPS_YOUTUBE_COOKIES (or legacy RUBYCLIPS_YOUTUBE_COOKIES_B64).')
-              try:
-                  data=base64.b64decode(raw, validate=True)
-              except Exception as e:
-                  raise SystemExit(f'RUBYCLIPS_YOUTUBE_COOKIES_B64 is not valid base64: {e}')
-              try:
-                  text=data.decode('utf-8')
-              except UnicodeDecodeError as e:
-                  raise SystemExit(f'Decoded cookies are not UTF-8 text: {e}')
-          lines=text.splitlines()
-          first=lines[0].strip() if lines else ''
-          if first not in ('# Netscape HTTP Cookie File', '# HTTP Cookie File'):
-              raise SystemExit('YouTube cookies are not in Netscape cookie-file format.')
-          if 'youtube.com' not in text and '.youtube.com' not in text:
-              raise SystemExit('Cookie file does not contain YouTube cookies.')
-          Path(os.environ['COOKIE_FILE']).write_text(text.replace('\r\n','\n')+'\n', encoding='utf-8')
-          PY
-          chmod 600 "$COOKIE_FILE"
-          mkdir -p "$HOME/.config/yt-dlp"
-          printf '%s\n' "--cookies $COOKIE_FILE" "--sleep-requests 1" > "$HOME/.config/yt-dlp/config"
-          echo "RUBYCLIPS_YOUTUBE_COOKIE_FILE=$COOKIE_FILE" >> "$GITHUB_ENV"
-          echo 'Authenticated YouTube cookie session installed for yt-dlp.'
-
-      - name: Verify authenticated YouTube source access
-        if: steps.state.outputs.ready == 'true'
-        run: |
-          set -euo pipefail
-          VIDEO_URL="$(python -c "import json; s=json.load(open('rubyclips/muffin_state.json')); print(s.get('youtubeSourceUrl') or ('https://www.youtube.com/watch?v=' + str(s['currentSeriesId'])))")"
-          FOUND="$(yt-dlp --no-playlist --skip-download --no-warnings --print '%(id)s' "$VIDEO_URL" | tail -1)"
-          EXPECTED="$(python -c "import json; print(json.load(open('rubyclips/muffin_state.json'))['currentSeriesId'])")"
-          test "$FOUND" = "$EXPECTED"
-          echo "Authenticated source preflight succeeded for video $FOUND."
-
       - name: Resolve upcoming episodes
         if: steps.state.outputs.ready == 'true'
         run: |
