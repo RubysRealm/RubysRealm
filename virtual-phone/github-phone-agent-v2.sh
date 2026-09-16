@@ -28,7 +28,6 @@ $ADB -s "$SERIAL" shell wm density 320 || true
 $ADB -s "$SERIAL" shell settings put system screen_off_timeout 2147483647 || true
 $ADB -s "$SERIAL" shell svc power stayon true || true
 
-# Install the known-good Takarada display artifact.
 curl -fsSL --retry 3 \
   -H "Authorization: Bearer $GH_TOKEN" \
   -H 'Accept: application/vnd.github+json' \
@@ -38,8 +37,6 @@ unzip -jo "$ROOT/display.zip" 'app-debug.apk' -d "$ROOT" >/dev/null
 printf '%s  %s\n' "$DISPLAY_SHA256" "$ROOT/app-debug.apk" | sha256sum -c -
 $ADB -s "$SERIAL" install -r "$ROOT/app-debug.apk" >/dev/null
 
-# Per-session key for screenshots/QR payloads. Only the matching private key held
-# outside the runner can decrypt these comments.
 SESSION_KEY_HEX=$(openssl rand -hex 32)
 KEY_CIPHER=$(printf '%s' "$SESSION_KEY_HEX" | openssl pkeyutl -encrypt -pubin -inkey virtual-phone/phone_access_public.pem -pkeyopt rsa_padding_mode:oaep | base64 -w0)
 post_comment "TAKARADA_PHONE_READY_V2|KEY_RSA_OAEP|$KEY_CIPHER|RUN_ID|${GITHUB_RUN_ID:-unknown}"
@@ -105,7 +102,7 @@ report_state() {
 }
 
 install_tiktok() {
-  local apk="$ROOT/tiktok.apk" bt apksigner aapt signer package actual_sha out
+  local apk="$ROOT/tiktok.apk" bt apksigner aapt signer package actual_sha out cert_out
   post_comment 'TAKARADA_STATUS|tiktok_download_started|source=verified_mirror'
   if ! curl -fL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 30 --max-time 1500 \
       -A 'Mozilla/5.0 (Linux; Android 15; Pixel 7 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Mobile Safari/537.36' \
@@ -125,17 +122,33 @@ install_tiktok() {
     post_comment "TAKARADA_AGENT_ERROR|tiktok_apk_signature_invalid|sha256=$actual_sha"
     return 1
   fi
-  signer=$("$apksigner" verify --print-certs "$apk" 2>/dev/null | awk -F': ' '/Signer #1 certificate SHA-256 digest/ {print tolower($2); exit}')
+  cert_out=$("$apksigner" verify --verbose --print-certs "$apk" 2>&1 || true)
+  signer=$(printf '%s\n' "$cert_out" \
+    | sed -nE 's/.*certificate SHA-256 digest:[[:space:]]*([0-9A-Fa-f:]+).*/\1/ip' \
+    | head -1 \
+    | tr -d ':' \
+    | tr '[:upper:]' '[:lower:]')
+  if [ -z "$signer" ]; then
+    signer=$(printf '%s\n' "$cert_out" \
+      | grep -Eio '[0-9a-f]{64}' \
+      | head -1 \
+      | tr '[:upper:]' '[:lower:]' || true)
+  fi
   package=$("$aapt" dump badging "$apk" 2>/dev/null | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -1)
   if [ "$package" != "$TIKTOK_PACKAGE" ]; then
     post_comment "TAKARADA_AGENT_ERROR|tiktok_package_mismatch|got=$package|sha256=$actual_sha"
+    return 1
+  fi
+  if [ -z "$signer" ]; then
+    safe_cert=$(printf '%s' "$cert_out" | tr '\n' ' ' | tr -cd '[:alnum:] #:=._,-' | cut -c1-900)
+    post_comment "TAKARADA_AGENT_ERROR|tiktok_signer_unreadable|sha256=$actual_sha|apksigner=$safe_cert"
     return 1
   fi
   if [ "$signer" != "$TIKTOK_CERT_SHA256" ]; then
     post_comment "TAKARADA_AGENT_ERROR|tiktok_signer_mismatch|got=$signer|sha256=$actual_sha"
     return 1
   fi
-  post_comment "TAKARADA_STATUS|tiktok_identity_verified|package=$package|sha256=$actual_sha"
+  post_comment "TAKARADA_STATUS|tiktok_identity_verified|package=$package|cert=$signer|sha256=$actual_sha"
   if ! out=$($ADB -s "$SERIAL" install -r "$apk" 2>&1); then
     out=$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-700)
     post_comment "TAKARADA_AGENT_ERROR|tiktok_install_failed|$out"
@@ -145,7 +158,6 @@ install_tiktok() {
   return 0
 }
 
-# Initialize the feed app once, then install and launch standard TikTok.
 $ADB -s "$SERIAL" shell am start -n com.takarada.display/.MainActivity --es url "$FEED_URL" >/dev/null 2>&1 || true
 sleep 2
 $ADB -s "$SERIAL" shell input keyevent KEYCODE_HOME || true
