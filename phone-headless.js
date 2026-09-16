@@ -18,6 +18,8 @@ const STATUS = path.join(SOURCE_DIR, 'status.json');
 const FULL = path.join(SOURCE_DIR, 'full.mp4');
 const CHROME = process.env.CHROME_PATH || path.resolve('.chrome/opt/google/chrome/google-chrome');
 const YTDLP = process.env.YTDLP_PATH || path.resolve('yt-dlp');
+const TV_URL = 'https://www.youtube.com/tv';
+const TV_UA = 'Mozilla/5.0 (SMART-TV; LINUX; Tizen 7.0) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/2.2 Chrome/94.0.4606.31 TV Safari/537.36';
 
 fs.mkdirSync(PROFILE, { recursive: true });
 fs.mkdirSync(SOURCE_DIR, { recursive: true });
@@ -61,23 +63,58 @@ function run(cmd, args) {
   });
 }
 
-async function signedInToGoogle() {
-  if (!context || !page) return false;
+async function hasGoogleAuthCookies() {
+  if (!context) return false;
   try {
     const cookies = await context.cookies(['https://www.youtube.com/', 'https://accounts.google.com/']);
-    const authNames = new Set(['SID','SAPISID','__Secure-1PSID','__Secure-3PSID','__Secure-1PAPISID','__Secure-3PAPISID']);
-    const hasAuthCookie = cookies.some(c => authNames.has(c.name) && c.value);
-    const avatar = await page.locator('#avatar-btn, ytd-topbar-menu-button-renderer #avatar-btn').first().isVisible({ timeout: 500 }).catch(() => false);
-    return hasAuthCookie || avatar;
-  } catch {
-    return false;
+    const names = new Set(['SID','SAPISID','__Secure-1PSID','__Secure-3PSID','__Secure-1PAPISID','__Secure-3PAPISID']);
+    return cookies.some(c => names.has(c.name) && c.value);
+  } catch { return false; }
+}
+
+async function clickVisibleText(regex) {
+  const loc = page.getByText(regex).first();
+  if (!await loc.count()) return false;
+  if (!await loc.isVisible({ timeout: 1500 }).catch(() => false)) return false;
+  await loc.click({ timeout: 5000 }).catch(() => {});
+  return true;
+}
+
+async function prepareTvQr() {
+  setStatus({ stage: 'opening_youtube_tv', signedIn: false, downloading: false, error: null });
+  await page.goto(TV_URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
+  await page.waitForTimeout(7000);
+
+  let body = await page.locator('body').innerText().catch(() => '');
+  console.log('YouTube TV initial:', body.slice(0, 900).replace(/\s+/g, ' '));
+
+  // YouTube Leanback normally exposes a Sign in action. Click it directly when possible.
+  let clicked = await clickVisibleText(/^Sign in$/i);
+  if (!clicked) clicked = await clickVisibleText(/sign in/i);
+  if (!clicked) {
+    // TV UI fallback: open the left rail and move toward the account/sign-in item.
+    await page.keyboard.press('ArrowLeft').catch(() => {});
+    await page.waitForTimeout(800);
+    for (let i = 0; i < 7; i++) {
+      body = await page.locator('body').innerText().catch(() => '');
+      if (/sign in/i.test(body)) break;
+      await page.keyboard.press('ArrowUp').catch(() => {});
+      await page.waitForTimeout(250);
+    }
+    await page.keyboard.press('Enter').catch(() => {});
   }
+
+  await page.waitForTimeout(3500);
+  await clickVisibleText(/sign in with (your )?phone/i);
+  await page.waitForTimeout(5000);
+  body = await page.locator('body').innerText().catch(() => '');
+  console.log('YouTube TV QR stage:', body.slice(0, 1200).replace(/\s+/g, ' '));
+  setStatus({ stage: 'scan_youtube_qr', signedIn: false, downloading: false, error: null });
 }
 
 async function acquire() {
   setStatus({ stage: 'login_confirmed', signedIn: true, downloading: false, error: null });
 
-  // Free Chrome memory before starting yt-dlp/ffmpeg on the 512 MB free instance.
   if (context) {
     await context.close().catch(() => {});
     context = null;
@@ -100,9 +137,7 @@ async function acquire() {
     .map(x => path.join(SOURCE_DIR, x));
   if (!files.length) throw new Error('No downloaded source file was created');
   const src = files.sort((a,b) => fs.statSync(b).size - fs.statSync(a).size)[0];
-  if (src !== FULL) {
-    await run(ffmpegPath, ['-y','-hide_banner','-loglevel','error','-i',src,'-c','copy','-movflags','+faststart',FULL]);
-  }
+  if (src !== FULL) await run(ffmpegPath, ['-y','-hide_banner','-loglevel','error','-i',src,'-c','copy','-movflags','+faststart',FULL]);
   if (!fs.existsSync(FULL) || fs.statSync(FULL).size < 1000000) throw new Error('Downloaded source is unexpectedly small');
 
   setStatus({ stage: 'splitting_source', signedIn: true, downloading: true });
@@ -114,10 +149,7 @@ async function acquire() {
     if (!(fs.existsSync(out) && fs.statSync(out).size > 250000)) {
       const tmp = out + '.tmp.mp4';
       try { fs.unlinkSync(tmp); } catch {}
-      await run(ffmpegPath, [
-        '-y','-hide_banner','-loglevel','error','-ss',String(start),'-i',FULL,'-t',String(len),
-        '-map','0:v:0','-map','0:a:0?','-c','copy','-avoid_negative_ts','make_zero','-movflags','+faststart',tmp
-      ]);
+      await run(ffmpegPath, ['-y','-hide_banner','-loglevel','error','-ss',String(start),'-i',FULL,'-t',String(len),'-map','0:v:0','-map','0:a:0?','-c','copy','-avoid_negative_ts','make_zero','-movflags','+faststart',tmp]);
       fs.renameSync(tmp, out);
     }
     setStatus({ stage: `part_${part}_ready`, signedIn: true, downloading: true });
@@ -149,7 +181,7 @@ app.get('/desktop', auth, (req,res) => res.sendFile(path.resolve('public/desktop
 app.get('/api/desktop-frame', auth, async (req,res) => {
   if (!page) return res.status(503).send('Browser is not available; check source status.');
   try {
-    const b = await page.screenshot({ type: 'jpeg', quality: 46 });
+    const b = await page.screenshot({ type: 'jpeg', quality: 68 });
     res.setHeader('Content-Type','image/jpeg');
     res.setHeader('Cache-Control','no-store');
     res.end(b);
@@ -157,34 +189,24 @@ app.get('/api/desktop-frame', auth, async (req,res) => {
 });
 app.post('/api/desktop-click', auth, async (req,res) => {
   if (!page) return res.status(503).json({ok:false,error:'browser unavailable'});
-  try {
-    await page.mouse.click(Math.max(0,Math.min(719,Number(req.body?.x)||0)),Math.max(0,Math.min(1279,Number(req.body?.y)||0)));
-    res.json({ok:true});
-  } catch(e){res.status(500).json({ok:false,error:e.message});}
-});
-app.post('/api/desktop-type', auth, async (req,res) => {
-  if (!page) return res.status(503).json({ok:false,error:'browser unavailable'});
-  try { await page.keyboard.type(String(req.body?.text||'').slice(0,500),{delay:15}); res.json({ok:true}); }
+  try { await page.mouse.click(Math.max(0,Math.min(1279,Number(req.body?.x)||0)),Math.max(0,Math.min(719,Number(req.body?.y)||0))); res.json({ok:true}); }
   catch(e){res.status(500).json({ok:false,error:e.message});}
 });
 app.post('/api/desktop-key', auth, async (req,res) => {
   if (!page) return res.status(503).json({ok:false,error:'browser unavailable'});
-  const m={Return:'Enter',Tab:'Tab',Escape:'Escape',BackSpace:'Backspace',Up:'ArrowUp',Down:'ArrowDown',Left:'ArrowLeft',Right:'ArrowRight',space:'Space','ctrl+l':'Control+L'};
-  const k=m[String(req.body?.key||'')];
-  if(!k) return res.status(400).json({ok:false});
+  const m={Return:'Enter',Tab:'Tab',Escape:'Escape',BackSpace:'Backspace',Up:'ArrowUp',Down:'ArrowDown',Left:'ArrowLeft',Right:'ArrowRight',space:'Space'};
+  const k=m[String(req.body?.key||'')]; if(!k)return res.status(400).json({ok:false});
   try { await page.keyboard.press(k); res.json({ok:true}); } catch(e){res.status(500).json({ok:false,error:e.message});}
 });
 app.get('/api/state',(req,res)=>res.json(getStatus()));
+app.get('/healthz',(req,res)=>res.json({ok:true,service:'rubyclips-youtube-phone',browser:!!page,stage:getStatus().stage}));
 app.get('/source/:name',(req,res)=>{
   const n=path.basename(String(req.params.name||''));
   if(!/^source-part-\d{2}\.mp4$/.test(n)&&n!=='source-manifest.json')return res.status(404).end();
-  const f=path.join(SOURCE_DIR,n);
-  if(!fs.existsSync(f))return res.status(404).end();
-  res.setHeader('Cache-Control','no-store');
-  res.sendFile(f);
+  const f=path.join(SOURCE_DIR,n); if(!fs.existsSync(f))return res.status(404).end();
+  res.setHeader('Cache-Control','no-store'); res.sendFile(f);
 });
-app.get('/healthz',(req,res)=>res.json({ok:true,service:'rubyclips-youtube-phone',browser:!!page,stage:getStatus().stage}));
-app.listen(PORT,'0.0.0.0',()=>console.log(`Rubradaclips YouTube phone listening on ${PORT}`));
+app.listen(PORT,'0.0.0.0',()=>console.log(`Rubradaclips YouTube QR host listening on ${PORT}`));
 
 async function boot() {
   setStatus({stage:'starting_browser',signedIn:false,downloading:false,error:null});
@@ -192,28 +214,25 @@ async function boot() {
     context = await chromium.launchPersistentContext(PROFILE, {
       headless: true,
       executablePath: CHROME,
-      viewport: { width: 720, height: 1280 },
+      userAgent: TV_UA,
+      viewport: { width: 1280, height: 720 },
       args: [
         '--no-sandbox','--disable-dev-shm-usage','--password-store=basic','--no-first-run','--no-default-browser-check',
-        '--disable-features=TranslateUI','--disable-blink-features=AutomationControlled','--disable-background-networking',
-        '--disable-component-update','--disable-sync','--disable-extensions','--disable-renderer-backgrounding','--renderer-process-limit=1'
+        '--disable-features=TranslateUI','--disable-background-networking','--disable-component-update','--disable-sync',
+        '--disable-extensions','--disable-renderer-backgrounding','--renderer-process-limit=1'
       ]
     });
     page = context.pages()[0] || await context.newPage();
-    await page.goto(VIDEO_URL,{waitUntil:'domcontentloaded',timeout:90000}).catch(e=>console.log('initial navigation:',e.message));
-    setStatus({stage:'waiting_for_login',signedIn:false,downloading:false,error:null});
+    await prepareTvQr();
 
     const timer = setInterval(async()=>{
       if(acquisitionStarted || getStatus().stage==='ready') return;
-      if(!(await signedInToGoogle())) return;
+      if(!(await hasGoogleAuthCookies())) return;
       acquisitionStarted = true;
       clearInterval(timer);
       try { await acquire(); }
-      catch(e) {
-        console.error(e);
-        setStatus({stage:'error',signedIn:true,downloading:false,error:String(e?.message||e)});
-      }
-    },12000);
+      catch(e) { console.error(e); setStatus({stage:'error',signedIn:true,downloading:false,error:String(e?.message||e)}); }
+    },15000);
     timer.unref();
   } catch(e) {
     console.error('browser startup failed',e);
