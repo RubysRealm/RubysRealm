@@ -1,0 +1,73 @@
+name: Rubaradaclips Cobalt Live Probe
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    if: github.event_name == 'workflow_dispatch' || (github.actor == 'RubysRealm' && github.event.issue.title == 'START_RUBYCLIPS_COBALT_PROBE')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE: ${{ github.event.issue.number }}
+      API: https://rubyclips-cobalt-3.onrender.com/
+      VIDEO: https://www.youtube.com/watch?v=5-bO9NAhWbI
+    steps:
+      - name: Check API root
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 8 --retry-all-errors --retry-delay 4 "$API" -o /tmp/root.json
+          cat /tmp/root.json
+
+      - name: Resolve exact video
+        shell: bash
+        run: |
+          set -euo pipefail
+          CODE="$(curl -sS --retry 3 --retry-all-errors -o /tmp/resolve.json -w '%{http_code}' \
+            -H 'Accept: application/json' \
+            -H 'Content-Type: application/json' \
+            -X POST "$API" \
+            --data "{\"url\":\"$VIDEO\",\"videoQuality\":\"720\",\"youtubeVideoCodec\":\"h264\",\"downloadMode\":\"auto\",\"alwaysProxy\":true}")"
+          echo "HTTP=$CODE"
+          cat /tmp/resolve.json
+          test "$CODE" = '200'
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/resolve.json'))
+          assert d.get('status') in ('tunnel','redirect'), d
+          assert str(d.get('url') or '').startswith('http'), d
+          open('/tmp/media-url','w').write(d['url'])
+          PY
+
+      - name: Verify returned media bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="$(cat /tmp/media-url)"
+          curl -fL --retry 3 --retry-all-errors --max-time 90 \
+            -H 'Range: bytes=0-1048575' "$URL" -o /tmp/sample.bin
+          SIZE="$(wc -c < /tmp/sample.bin | tr -d ' ')"
+          echo "sample_bytes=$SIZE"
+          test "$SIZE" -ge 100000
+          file /tmp/sample.bin || true
+
+      - name: Report
+        if: always()
+        shell: bash
+        run: |
+          ROOT="$(cat /tmp/root.json 2>/dev/null | head -c 1200 || true)"
+          RES="$(cat /tmp/resolve.json 2>/dev/null | head -c 3000 || true)"
+          if [ -f /tmp/sample.bin ]; then SIZE="$(wc -c < /tmp/sample.bin | tr -d ' ')"; else SIZE=0; fi
+          BODY="RUBYCLIPS_COBALT_PROBE
+root: $ROOT
+resolve: $RES
+sample_bytes: $SIZE"
+          if [ -n "${ISSUE:-}" ]; then gh issue comment "$ISSUE" --body "$BODY"; fi
