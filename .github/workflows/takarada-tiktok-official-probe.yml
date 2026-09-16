@@ -1,0 +1,71 @@
+name: Takarada TikTok Official Download Probe
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  probe:
+    if: github.event_name != 'issues' || github.event.issue.title == 'PROBE_TIKTOK_OFFICIAL_DOWNLOAD'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - name: Extract official Android download targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          UA='Mozilla/5.0 (Linux; Android 15; Pixel 7 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36'
+          google-chrome --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --user-agent="$UA" --virtual-time-budget=12000 --dump-dom 'https://www.tiktok.com/download' > /tmp/tiktok-download.html 2>/tmp/chrome.err || true
+          python3 - <<'PY' > /tmp/result.txt
+from html.parser import HTMLParser
+from urllib.parse import unquote
+class P(HTMLParser):
+    def __init__(self):
+        super().__init__(); self.links=[]; self.cur=None; self.txt=[]
+    def handle_starttag(self, tag, attrs):
+        d=dict(attrs)
+        if tag=='a' and d.get('href'):
+            self.cur=d['href']; self.txt=[]
+    def handle_data(self, data):
+        if self.cur is not None: self.txt.append(data)
+    def handle_endtag(self, tag):
+        if tag=='a' and self.cur is not None:
+            self.links.append((' '.join(''.join(self.txt).split()), self.cur)); self.cur=None; self.txt=[]
+p=P(); p.feed(open('/tmp/tiktok-download.html',errors='ignore').read())
+seen=set()
+for text,href in p.links:
+    key=(text,href)
+    if key in seen: continue
+    seen.add(key)
+    h=href.lower(); t=text.lower()
+    if any(x in h or x in t for x in ['apk','download','google','onelink','android','musically','snssdk']):
+        print(f'TEXT={text[:180]}\nHREF={href[:1800]}\n---')
+print('HTML_BYTES=',len(open('/tmp/tiktok-download.html','rb').read()))
+PY
+          # Also extract raw APK-looking and TikTok distribution URLs from rendered HTML/JS attributes.
+          python3 - <<'PY' >> /tmp/result.txt
+import re,html
+s=open('/tmp/tiktok-download.html',errors='ignore').read()
+urls=re.findall(r'https?[^\"\'<> ]+',s)
+seen=set()
+for u in urls:
+    u=html.unescape(u).replace('\\u002F','/').replace('\\/','/')
+    if u in seen: continue
+    seen.add(u)
+    l=u.lower()
+    if '.apk' in l or 'onelink.me' in l or ('download' in l and ('tiktok' in l or 'byte' in l)):
+        print('RAW=',u[:2000])
+PY
+          BODY=$(python3 - <<'PY'
+p=open('/tmp/result.txt',errors='ignore').read()
+print('TAKARADA_OFFICIAL_DOWNLOAD_PROBE\n```\n'+p[:55000]+'\n```')
+PY
+)
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${ISSUE}/comments" -f body="$BODY" >/dev/null
