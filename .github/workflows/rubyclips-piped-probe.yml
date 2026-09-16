@@ -1,0 +1,73 @@
+name: Rubaradaclips Piped Source Probe
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    if: github.event_name == 'workflow_dispatch' || (github.actor == 'RubysRealm' && github.event.issue.title == 'START_RUBYCLIPS_PIPED_PROBE')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe public YouTube proxy APIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          VIDEO_ID="$(python -c "import json; print(json.load(open('rubyclips/muffin_state.json'))['currentSeriesId'])")"
+          python - "$VIDEO_ID" <<'PY' > /tmp/result.json
+          import json, sys, urllib.request, urllib.error
+          vid=sys.argv[1]
+          bases=[
+            'https://pipedapi.kavin.rocks',
+            'https://pipedapi.leptons.xyz',
+            'https://pipedapi.nosebs.ru',
+            'https://piped-api.privacy.com.de',
+            'https://pipedapi.adminforge.de',
+            'https://api.piped.yt',
+            'https://pipedapi.drgns.space',
+            'https://pipedapi.owo.si',
+            'https://pipedapi.ducks.party',
+            'https://api.piped.private.coffee',
+            'https://pipedapi.darkness.services',
+          ]
+          rows=[]
+          for base in bases:
+              url=f'{base}/streams/{vid}'
+              try:
+                  req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0'})
+                  with urllib.request.urlopen(req,timeout=15) as r:
+                      raw=r.read(8_000_000)
+                  d=json.loads(raw)
+                  vs=d.get('videoStreams') or []
+                  aus=d.get('audioStreams') or []
+                  rows.append({'base':base,'ok':bool(vs or aus),'title':d.get('title'),'duration':d.get('duration'),'videoStreams':len(vs),'audioStreams':len(aus),'hls':bool(d.get('hls'))})
+              except Exception as e:
+                  rows.append({'base':base,'ok':False,'error':str(e)[:180]})
+          print(json.dumps({'videoId':vid,'results':rows},indent=2))
+          PY
+          cat /tmp/result.json
+          if [ -n "${ISSUE:-}" ]; then
+            BODY="$(python - <<'PY'
+          import json
+          d=json.load(open('/tmp/result.json'))
+          lines=['RUBYCLIPS_PIPED_PROBE',f"Video: {d['videoId']}"]
+          for r in d['results']:
+              if r.get('ok'):
+                  lines.append(f"OK {r['base']} | title={r.get('title')} | duration={r.get('duration')} | video={r.get('videoStreams')} audio={r.get('audioStreams')} hls={r.get('hls')}")
+              else:
+                  lines.append(f"FAIL {r['base']} | {r.get('error')}")
+          print('\n'.join(lines))
+          PY
+            )"
+            gh issue comment "$ISSUE" --body "$BODY"
+          fi
