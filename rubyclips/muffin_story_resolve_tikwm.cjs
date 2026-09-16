@@ -8,15 +8,20 @@ const provider = String(state.sourceProvider || '').toLowerCase();
 
 if (state.currentSeriesComplete === true || provider === 'youtube') {
   console.log('Using the MuffinDrama YouTube channel as the Rubaradaclips story source.');
-  const staged = spawnSync('python', ['rubyclips/youtube_story_resolve_staged.py'], { stdio: 'inherit' });
-  if (staged.status === 0) {
-    console.log('Using staged authenticated MuffinDrama source part.');
+  const cobalt = spawnSync('python', ['rubyclips/youtube_story_resolve_cobalt.py'], { stdio: 'inherit' });
+  if (cobalt.status === 0) {
+    console.log('Using Cobalt trusted-session MuffinDrama source part.');
   } else {
-    console.log('No staged authenticated part was available; trying direct YouTube paths.');
-    const fresh = spawnSync('python', ['rubyclips/youtube_story_resolve_websafari.py'], { stdio: 'inherit' });
-    if (fresh.status !== 0) {
-      console.log('tv+web_safari path was unavailable; falling back to the existing EJS/PO-token resolver.');
-      execFileSync('python', ['rubyclips/youtube_story_resolve.py'], { stdio: 'inherit' });
+    const staged = spawnSync('python', ['rubyclips/youtube_story_resolve_staged.py'], { stdio: 'inherit' });
+    if (staged.status === 0) {
+      console.log('Using staged authenticated MuffinDrama source part.');
+    } else {
+      console.log('Cobalt and staged source were unavailable; trying direct YouTube paths.');
+      const fresh = spawnSync('python', ['rubyclips/youtube_story_resolve_websafari.py'], { stdio: 'inherit' });
+      if (fresh.status !== 0) {
+        console.log('tv+web_safari path was unavailable; falling back to the existing EJS/PO-token resolver.');
+        execFileSync('python', ['rubyclips/youtube_story_resolve.py'], { stdio: 'inherit' });
+      }
     }
   }
 } else if (currentSeriesId === '7682993954661553173' && nextPart >= 12) {
