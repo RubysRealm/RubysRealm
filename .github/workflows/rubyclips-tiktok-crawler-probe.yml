@@ -18,7 +18,7 @@ jobs:
       - name: Inspect MuffinDrama public posts for story metadata
         run: |
           npm install --silent @tobyg74/tiktok-api-dl
-          cat > /tmp/posts.cjs <<'JS'
+          cat > posts.cjs <<'JS'
           const Tiktok=require('@tobyg74/tiktok-api-dl');
           const seen=new Set();
           function collect(obj,path='',out=[]){
@@ -57,4 +57,4 @@ jobs:
             }
           })().catch(e=>{console.error('ERR',e?.stack||e);process.exit(1)});
           JS
-          node /tmp/posts.cjs
+          node posts.cjs
