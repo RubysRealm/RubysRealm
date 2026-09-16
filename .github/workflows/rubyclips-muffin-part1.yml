@@ -35,7 +35,9 @@ jobs:
           python3 - <<'PY'
           import json, os
           s=json.load(open('rubyclips/muffin_state.json'))
-          ready=bool(s.get('currentSeriesComplete')) or int(s.get('nextEpisode',1)) <= int(s.get('currentSeriesEpisodeCount',1))
+          provider=str(s.get('sourceProvider','')).lower()
+          complete=bool(s.get('currentSeriesComplete'))
+          ready=False if (provider == 'dailymotion-muffindrama-mirror' and complete) else (complete or int(s.get('nextEpisode',1)) <= int(s.get('currentSeriesEpisodeCount',1)))
           with open(os.environ['GITHUB_OUTPUT'],'a') as f:
               f.write(f"ready={'true' if ready else 'false'}\n")
               f.write(f"next_episode={s.get('nextEpisode',1)}\n")
@@ -180,6 +182,10 @@ jobs:
           p=Path('rubyclips/muffin_state.json')
           s=json.loads(p.read_text())
           info=json.load(open('rubyclips/muffin_output/part-info.json'))
+          total=info.get('totalParts')
+          if total:
+              s['currentSeriesEpisodeCount']=int(total)
+              s['storyTotalParts']=int(total)
           if int(s.get('restartGeneration',0)) != int(info.get('restartGeneration',-1)):
               raise SystemExit('Refusing to advance stale restart generation')
           part=int(info['part'])
