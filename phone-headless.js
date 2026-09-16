@@ -63,13 +63,29 @@ function run(cmd, args) {
   });
 }
 
-async function hasGoogleAuthCookies() {
-  if (!context) return false;
+async function qrApprovalDetected() {
+  if (!context || !page) return false;
   try {
-    const cookies = await context.cookies(['https://www.youtube.com/', 'https://accounts.google.com/']);
-    const names = new Set(['SID','SAPISID','__Secure-1PSID','__Secure-3PSID','__Secure-1PAPISID','__Secure-3PAPISID']);
-    return cookies.some(c => names.has(c.name) && c.value);
-  } catch { return false; }
+    const body = (await page.locator('body').innerText({ timeout: 2500 }).catch(() => '')).replace(/\s+/g, ' ').trim();
+    const pending = /scan qr code|yt\.be\/activate|enter the code|sign in with (your )?phone/i.test(body);
+    const signedInUi = /\bhome\b|subscriptions|library|\byou\b|your videos|watch history/i.test(body);
+    const cookies = await context.cookies(['https://www.youtube.com/', 'https://accounts.google.com/']).catch(() => []);
+    const cookieNames = [...new Set(cookies.map(c => c.name))].sort();
+    const normalAuthNames = new Set(['SID','SAPISID','__Secure-1PSID','__Secure-3PSID','__Secure-1PAPISID','__Secure-3PAPISID']);
+    const hasNormalAuth = cookies.some(c => normalAuthNames.has(c.name) && c.value);
+    if (!pending && (signedInUi || hasNormalAuth)) {
+      let localKeys = [];
+      try { localKeys = await page.evaluate(() => Object.keys(localStorage)); } catch {}
+      console.log('YouTube TV approval detected. URL:', page.url());
+      console.log('YouTube cookie names:', cookieNames.join(', '));
+      console.log('YouTube localStorage keys:', localKeys.join(', '));
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.log('QR approval check:', String(e?.message || e).slice(0, 300));
+    return false;
+  }
 }
 
 async function clickVisibleText(regex) {
@@ -88,11 +104,9 @@ async function prepareTvQr() {
   let body = await page.locator('body').innerText().catch(() => '');
   console.log('YouTube TV initial:', body.slice(0, 900).replace(/\s+/g, ' '));
 
-  // YouTube Leanback normally exposes a Sign in action. Click it directly when possible.
   let clicked = await clickVisibleText(/^Sign in$/i);
   if (!clicked) clicked = await clickVisibleText(/sign in/i);
   if (!clicked) {
-    // TV UI fallback: open the left rail and move toward the account/sign-in item.
     await page.keyboard.press('ArrowLeft').catch(() => {});
     await page.waitForTimeout(800);
     for (let i = 0; i < 7; i++) {
@@ -112,20 +126,63 @@ async function prepareTvQr() {
   setStatus({ stage: 'scan_youtube_qr', signedIn: false, downloading: false, error: null });
 }
 
+function sourcePartPath(part) {
+  return path.join(SOURCE_DIR, `source-part-${String(part).padStart(2, '0')}.mp4`);
+}
+
+async function downloadPartOneFirst() {
+  const finalOut = sourcePartPath(1);
+  if (fs.existsSync(finalOut) && fs.statSync(finalOut).size > 250000) return;
+  const template = path.join(SOURCE_DIR, 'part1-fast.%(ext)s');
+  setStatus({ stage: 'downloading_part_1', signedIn: true, downloading: true });
+  await run(YTDLP, [
+    '--ffmpeg-location', ffmpegPath,
+    '--cookies-from-browser', `chrome+basictext:${PROFILE}`,
+    '--extractor-args', 'youtube:player_client=web,tv',
+    '--no-playlist', '--retries', '20', '--fragment-retries', '20', '--concurrent-fragments', '2',
+    '--download-sections', `*0-${SEGMENT_SECONDS}`,
+    '-f', 'bv*[height<=720][vcodec^=avc1]+ba[acodec^=mp4a]/b[height<=720][ext=mp4]/bv*[height<=720]+ba/b[height<=720]',
+    '--merge-output-format', 'mp4', '--remux-video', 'mp4',
+    '-o', template, VIDEO_URL
+  ]);
+  const candidates = fs.readdirSync(SOURCE_DIR)
+    .filter(x => /^part1-fast\.(mp4|mkv|webm|mov)$/i.test(x))
+    .map(x => path.join(SOURCE_DIR, x))
+    .sort((a,b) => fs.statSync(b).size - fs.statSync(a).size);
+  if (!candidates.length) throw new Error('Fast Part 1 download did not create a media file');
+  const src = candidates[0];
+  if (src !== finalOut) {
+    if (/\.mp4$/i.test(src)) fs.renameSync(src, finalOut);
+    else {
+      await run(ffmpegPath, ['-y','-hide_banner','-loglevel','error','-i',src,'-c','copy','-movflags','+faststart',finalOut]);
+      try { fs.unlinkSync(src); } catch {}
+    }
+  }
+  if (!fs.existsSync(finalOut) || fs.statSync(finalOut).size < 250000) throw new Error('Fast Part 1 file is unexpectedly small');
+  setStatus({ stage: 'part_1_ready', signedIn: true, downloading: true });
+  console.log('Rubradaclips source Part 1 ready:', fs.statSync(finalOut).size, 'bytes');
+}
+
 async function acquire() {
   setStatus({ stage: 'login_confirmed', signedIn: true, downloading: false, error: null });
 
+  // Give the TV app a moment to persist its authorized session before closing Chrome.
+  await page?.waitForTimeout(2500).catch(() => {});
   if (context) {
     await context.close().catch(() => {});
     context = null;
     page = null;
-    await new Promise(r => setTimeout(r, 1500));
+    await new Promise(r => setTimeout(r, 1200));
   }
 
-  setStatus({ stage: 'downloading_source', signedIn: true, downloading: true });
+  // Prepare the first TikTok part immediately instead of waiting for the entire 106-minute source.
+  await downloadPartOneFirst();
+
+  setStatus({ stage: 'downloading_full_source', signedIn: true, downloading: true });
   await run(YTDLP, [
     '--ffmpeg-location', ffmpegPath,
     '--cookies-from-browser', `chrome+basictext:${PROFILE}`,
+    '--extractor-args', 'youtube:player_client=web,tv',
     '--no-playlist', '--retries', '20', '--fragment-retries', '20', '--concurrent-fragments', '2',
     '-f', 'bv*[height<=720][vcodec^=avc1]+ba[acodec^=mp4a]/b[height<=720][ext=mp4]/bv*[height<=720]+ba/b[height<=720]',
     '--merge-output-format', 'mp4', '--remux-video', 'mp4',
@@ -141,8 +198,8 @@ async function acquire() {
   if (!fs.existsSync(FULL) || fs.statSync(FULL).size < 1000000) throw new Error('Downloaded source is unexpectedly small');
 
   setStatus({ stage: 'splitting_source', signedIn: true, downloading: true });
-  for (let part = 1; part <= TOTAL_PARTS; part++) {
-    const out = path.join(SOURCE_DIR, `source-part-${String(part).padStart(2, '0')}.mp4`);
+  for (let part = 2; part <= TOTAL_PARTS; part++) {
+    const out = sourcePartPath(part);
     const start = (part - 1) * SEGMENT_SECONDS;
     const len = Math.min(SEGMENT_SECONDS, Math.max(0, SOURCE_DURATION - start));
     if (len <= 0.5) break;
@@ -156,11 +213,23 @@ async function acquire() {
   }
 
   fs.writeFileSync(path.join(SOURCE_DIR, 'source-manifest.json'), JSON.stringify({
-    sourceProvider: 'youtube-auth-browser', sourceChannel: '@muffindrama-uvu', videoId: VIDEO_ID,
+    sourceProvider: 'youtube-tv-qr-auth', sourceChannel: '@muffindrama-uvu', videoId: VIDEO_ID,
     sourceUrl: VIDEO_URL, durationSeconds: SOURCE_DURATION, totalParts: TOTAL_PARTS,
     segmentSeconds: SEGMENT_SECONDS, sessionExported: false, createdAt: new Date().toISOString()
   }, null, 2));
   setStatus({ stage: 'ready', signedIn: true, downloading: false, error: null });
+}
+
+async function startAcquisition(reason = 'automatic') {
+  if (acquisitionStarted || getStatus().stage === 'ready') return false;
+  acquisitionStarted = true;
+  console.log('Starting Rubradaclips acquisition:', reason);
+  acquire().catch(e => {
+    console.error('Rubradaclips acquisition failed:', e);
+    setStatus({ stage: 'error', signedIn: true, downloading: false, error: String(e?.message || e) });
+    acquisitionStarted = false;
+  });
+  return true;
 }
 
 const app = express();
@@ -179,7 +248,7 @@ app.get('/', (req,res) => {
 });
 app.get('/desktop', auth, (req,res) => res.sendFile(path.resolve('public/desktop.html')));
 app.get('/api/desktop-frame', auth, async (req,res) => {
-  if (!page) return res.status(503).send('Browser is not available; check source status.');
+  if (!page) return res.status(503).send('Browser is no longer needed; check source status.');
   try {
     const b = await page.screenshot({ type: 'jpeg', quality: 68 });
     res.setHeader('Content-Type','image/jpeg');
@@ -197,6 +266,12 @@ app.post('/api/desktop-key', auth, async (req,res) => {
   const m={Return:'Enter',Tab:'Tab',Escape:'Escape',BackSpace:'Backspace',Up:'ArrowUp',Down:'ArrowDown',Left:'ArrowLeft',Right:'ArrowRight',space:'Space'};
   const k=m[String(req.body?.key||'')]; if(!k)return res.status(400).json({ok:false});
   try { await page.keyboard.press(k); res.json({ok:true}); } catch(e){res.status(500).json({ok:false,error:e.message});}
+});
+app.get('/api/continue-after-qr', auth, async (req,res) => {
+  const approved = await qrApprovalDetected();
+  if (!approved) return res.status(409).json({ok:false,approved:false,stage:getStatus().stage});
+  const started = await startAcquisition('manual-confirmed-tv-approval');
+  res.json({ok:true,approved:true,started,stage:getStatus().stage});
 });
 app.get('/api/state',(req,res)=>res.json(getStatus()));
 app.get('/healthz',(req,res)=>res.json({ok:true,service:'rubyclips-youtube-phone',browser:!!page,stage:getStatus().stage}));
@@ -225,14 +300,17 @@ async function boot() {
     page = context.pages()[0] || await context.newPage();
     await prepareTvQr();
 
+    let checking = false;
     const timer = setInterval(async()=>{
-      if(acquisitionStarted || getStatus().stage==='ready') return;
-      if(!(await hasGoogleAuthCookies())) return;
-      acquisitionStarted = true;
-      clearInterval(timer);
-      try { await acquire(); }
-      catch(e) { console.error(e); setStatus({stage:'error',signedIn:true,downloading:false,error:String(e?.message||e)}); }
-    },15000);
+      if (checking || acquisitionStarted || getStatus().stage === 'ready') return;
+      checking = true;
+      try {
+        if (await qrApprovalDetected()) {
+          clearInterval(timer);
+          await startAcquisition('youtube-tv-qr-approved');
+        }
+      } finally { checking = false; }
+    },4000);
     timer.unref();
   } catch(e) {
     console.error('browser startup failed',e);
