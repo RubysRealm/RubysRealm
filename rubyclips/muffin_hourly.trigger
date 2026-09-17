@@ -1,4 +1,4 @@
-reason=continuation-part2-builder-unblocked
-retry=12
+reason=continuation-part2-direct-builder-fix
+retry=13
 generation=6
-triggered_at_utc=2026-09-17T18:00:00Z
+triggered_at_utc=2026-09-17T19:41:00Z
