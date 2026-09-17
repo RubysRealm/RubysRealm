@@ -1,2 +1,3 @@
-reason=force-road-through-fire-part1-repost-with-cover-and-framing
-retry=6
+reason=force-road-through-fire-part1-wide-frame-correction
+retry=7
+generation=4
