@@ -1,2 +1,2 @@
-reason=manual-retry-part1-after-publisher-revision-fix
-retry=4
+reason=production-part1-publisher-contract-fix
+retry=5
