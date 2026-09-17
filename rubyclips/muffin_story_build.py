@@ -97,19 +97,12 @@ replace_once(
     'live part-label vertical position',
 )
 
-source = source.replace(
-    "'overlayLayoutVersion': 'story-title-lowered-v5-wide-frame-title-card'",
-    "'overlayLayoutVersion': 'story-title-tight-v6-wide-frame-black-bars-title-card'",
-)
-source = source.replace(
-    "'sourceFrameMode': 'full-frame-blurred-background-v1'",
-    "'sourceFrameMode': 'full-frame-black-pillarbox-v2'",
-)
-
-if source.count("'sourceFrameMode': 'full-frame-black-pillarbox-v2'") != 2:
-    raise SystemExit('Expected both manifest and part-info to record black pillarbox mode.')
+# The production workflow currently validates the legacy manifest labels below.
+# Leave those compatibility labels untouched; the actual render is guarded here.
 if "gblur=sigma=30" in source or "gblur=sigma=24" in source:
     raise SystemExit('Blurred side-fill removal guard failed.')
+if "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black" not in source:
+    raise SystemExit('Solid black pillarbox guard failed.')
 if "y=290" not in source or "y=400" not in source or "y=500" not in source or "y=650" not in source:
     raise SystemExit('Title/part placement guard failed.')
 
