@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, re, subprocess, textwrap
+import json, re, shutil, subprocess, textwrap
 from pathlib import Path
 
 BASE = Path('rubyclips')
@@ -10,7 +10,46 @@ FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
 PACKING_TARGET_SECONDS = 590.0
 HARD_MAX_SECONDS = 598.5
 OUTPUT_FPS = 30
-PIPELINE_REVISION = 'avsync-v3-idempotent'
+PIPELINE_REVISION = 'avsync-v4-drawtext-runtime-fix'
+
+
+def supports_drawtext(binary):
+    try:
+        result = subprocess.run(
+            [binary, '-hide_banner', '-filters'],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return result.returncode == 0 and re.search(r'\bdrawtext\b', result.stdout) is not None
+    except Exception:
+        return False
+
+
+def resolve_ffmpeg_tools():
+    ffmpeg = shutil.which('ffmpeg') or 'ffmpeg'
+    ffprobe = shutil.which('ffprobe') or 'ffprobe'
+    if supports_drawtext(ffmpeg):
+        return ffmpeg, ffprobe
+
+    # Homebrew's standard ffmpeg formula no longer includes FreeType/drawtext.
+    # Install the keg-only ffmpeg-full bottle only when the runner needs it.
+    brew = shutil.which('brew')
+    if not brew:
+        raise SystemExit('FFmpeg is missing drawtext and Homebrew is unavailable for the ffmpeg-full fallback.')
+    print('Current FFmpeg lacks drawtext; installing/selecting Homebrew ffmpeg-full...')
+    subprocess.run([brew, 'install', 'ffmpeg-full'], check=True, timeout=2400)
+    prefix = subprocess.check_output([brew, '--prefix', 'ffmpeg-full'], text=True).strip()
+    full_ffmpeg = str(Path(prefix) / 'bin' / 'ffmpeg')
+    full_ffprobe = str(Path(prefix) / 'bin' / 'ffprobe')
+    if not supports_drawtext(full_ffmpeg):
+        raise SystemExit(f'ffmpeg-full installed but drawtext is still unavailable: {full_ffmpeg}')
+    return full_ffmpeg, full_ffprobe
+
+
+FFMPEG, FFPROBE = resolve_ffmpeg_tools()
+print('Using FFmpeg:', FFMPEG)
 
 OUT.mkdir(parents=True, exist_ok=True)
 state = json.loads(STATE.read_text())
@@ -37,7 +76,7 @@ for ep in ordered:
     if int(ep['episode']) != expected:
         raise SystemExit(f'Episode sequence gap: expected {expected}, got {ep["episode"]}.')
     dur = float(subprocess.check_output([
-        'ffprobe','-v','error','-show_entries','format=duration','-of','default=nw=1:nk=1',ep['file']
+        FFPROBE,'-v','error','-show_entries','format=duration','-of','default=nw=1:nk=1',ep['file']
     ], text=True).strip())
     ep['duration'] = dur
     if dur > HARD_MAX_SECONDS:
@@ -95,7 +134,7 @@ filters.append(
 
 final = OUT / f'muffindrama-{series_id}-r{restart_generation}-part-{part:02d}.mp4'
 subprocess.run([
-    'ffmpeg','-y','-hide_banner','-loglevel','error',*inputs,
+    FFMPEG,'-y','-hide_banner','-loglevel','error',*inputs,
     '-filter_complex',';'.join(filters),
     '-map','[vout]','-map','[acat]',
     '-c:v','libx264','-preset','veryfast','-crf','19','-pix_fmt','yuv420p','-r',str(OUTPUT_FPS),
@@ -103,7 +142,7 @@ subprocess.run([
 ], check=True, timeout=3000)
 
 duration = float(subprocess.check_output([
-    'ffprobe','-v','error','-show_entries','format=duration','-of','default=nw=1:nk=1',str(final)
+    FFPROBE,'-v','error','-show_entries','format=duration','-of','default=nw=1:nk=1',str(final)
 ], text=True).strip())
 if duration > HARD_MAX_SECONDS:
     raise SystemExit(f'Built part exceeds TikTok limit: {duration:.3f}s')
@@ -113,10 +152,10 @@ if final.stat().st_size < 100000:
 # Verify the encoded video stream itself lasts essentially as long as the
 # container/audio. This catches the exact frozen-last-frame failure before post.
 video_duration = float(subprocess.check_output([
-    'ffprobe','-v','error','-select_streams','v:0','-show_entries','stream=duration','-of','default=nw=1:nk=1',str(final)
+    FFPROBE,'-v','error','-select_streams','v:0','-show_entries','stream=duration','-of','default=nw=1:nk=1',str(final)
 ], text=True).strip())
 audio_duration = float(subprocess.check_output([
-    'ffprobe','-v','error','-select_streams','a:0','-show_entries','stream=duration','-of','default=nw=1:nk=1',str(final)
+    FFPROBE,'-v','error','-select_streams','a:0','-show_entries','stream=duration','-of','default=nw=1:nk=1',str(final)
 ], text=True).strip())
 if abs(video_duration - audio_duration) > 1.0 or abs(video_duration - duration) > 1.0:
     raise SystemExit(f'A/V duration mismatch: video={video_duration:.3f}s audio={audio_duration:.3f}s container={duration:.3f}s')
