@@ -11,6 +11,10 @@ PACKING_TARGET_SECONDS = 590.0
 HARD_MAX_SECONDS = 598.5
 OUTPUT_FPS = 30
 PIPELINE_REVISION = 'avsync-v3-idempotent'
+CONTENT_WIDTH = 1048
+CONTENT_HEIGHT = 1862
+COVER_SECONDS = 1.25
+THUMBNAIL_OFFSET_MS = 1000
 
 
 def supports_drawtext(binary):
@@ -101,35 +105,78 @@ title_text = '\n'.join(wrapped[:2]) if wrapped else series_title
 (WORK / 'story-title.txt').write_text(title_text, encoding='utf-8')
 (WORK / 'part-label.txt').write_text(part_label, encoding='utf-8')
 
+
 def esc(p):
     return p.as_posix().replace(':','\\:').replace("'","\\'")
 
+
+# Build a short, clean cover segment from the artwork supplied by the source.
+# Buffer selects the TikTok thumbnail at 1000 ms, so a 1.25 s opening cover
+# makes the profile-grid preview use the story artwork without a separate image.
+cover_candidates = sorted(p for p in WORK.glob('story-cover.*') if p.is_file())
+cover_intro = None
+if cover_candidates:
+    cover_source = cover_candidates[0]
+    cover_intro = WORK / 'story-cover-intro.mp4'
+    cover_filter = (
+        '[0:v]split=2[coverbgsrc][coverfgsrc];'
+        '[coverbgsrc]scale=1080:1920:force_original_aspect_ratio=increase,'
+        'crop=1080:1920,gblur=sigma=24[coverbg];'
+        f'[coverfgsrc]scale={CONTENT_WIDTH}:{CONTENT_HEIGHT}:force_original_aspect_ratio=decrease[coverfg];'
+        '[coverbg][coverfg]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p[vcover]'
+    )
+    subprocess.run([
+        FFMPEG,'-y','-hide_banner','-loglevel','error',
+        '-loop','1','-framerate',str(OUTPUT_FPS),'-i',str(cover_source),
+        '-f','lavfi','-i','anullsrc=channel_layout=stereo:sample_rate=48000',
+        '-filter_complex',cover_filter,
+        '-map','[vcover]','-map','1:a:0','-t',str(COVER_SECONDS),
+        '-c:v','libx264','-preset','veryfast','-crf','19','-pix_fmt','yuv420p','-r',str(OUTPUT_FPS),
+        '-c:a','aac','-b:a','160k','-ar','48000','-movflags','+faststart','-shortest',str(cover_intro)
+    ], check=True, timeout=300)
+    if cover_intro.stat().st_size < 50000:
+        raise SystemExit('Built story cover intro is unexpectedly small.')
+    print('Embedded source story artwork for TikTok preview:', cover_source)
+
 # Normalize every source clip independently before concatenation. This avoids
 # mixed source timestamps/frame pacing freezing video while audio continues.
+# Source video is intentionally inset by about 3% instead of filling the full
+# 1080x1920 canvas, preserving a little more of the original source framing.
+render_clips = []
+if cover_intro:
+    render_clips.append({'file': str(cover_intro), 'cover': True})
+render_clips.extend({'file': ep['file'], 'cover': False} for ep in chosen)
+
 inputs = []
 filters = []
 concat_inputs = []
-for i, ep in enumerate(chosen):
-    inputs += ['-i', ep['file']]
+for i, clip in enumerate(render_clips):
+    inputs += ['-i', clip['file']]
+    if clip['cover']:
+        video_chain = 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black'
+    else:
+        video_chain = (
+            f'scale={CONTENT_WIDTH}:{CONTENT_HEIGHT}:force_original_aspect_ratio=decrease,'
+            'pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black'
+        )
     filters.append(
         f'[{i}:v]fps={OUTPUT_FPS},settb=AVTB,setpts=PTS-STARTPTS,'
-        'scale=1080:1920:force_original_aspect_ratio=decrease,'
-        'pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1,format=yuv420p'
-        f'[v{i}]'
+        f'{video_chain},setsar=1,format=yuv420p[v{i}]'
     )
     filters.append(
         f'[{i}:a]aresample=48000:async=1:first_pts=0,asetpts=PTS-STARTPTS[a{i}]'
     )
     concat_inputs.append(f'[v{i}][a{i}]')
 
-filters.append(''.join(concat_inputs) + f'concat=n={len(chosen)}:v=1:a=1[vcat][acat]')
+filters.append(''.join(concat_inputs) + f'concat=n={len(render_clips)}:v=1:a=1[vcat][acat]')
+overlay_enable = f":enable='gte(t,{COVER_SECONDS})'" if cover_intro else ''
 filters.append(
     f"[vcat]drawtext=fontfile={FONT}:textfile='{esc(WORK/'story-title.txt')}':"
     "fontcolor=white:fontsize=35:line_spacing=5:box=1:boxcolor=black@0.68:boxborderw=14:"
-    "x=(w-text_w)/2:y=195,"
+    f"x=(w-text_w)/2:y=195{overlay_enable},"
     f"drawtext=fontfile={FONT}:textfile='{esc(WORK/'part-label.txt')}':"
     "fontcolor=white:fontsize=31:box=1:boxcolor=black@0.68:boxborderw=11:"
-    "x=(w-text_w)/2:y=315[vout]"
+    f"x=(w-text_w)/2:y=315{overlay_enable}[vout]"
 )
 
 final = OUT / f'muffindrama-{series_id}-r{restart_generation}-part-{part:02d}.mp4'
@@ -195,8 +242,14 @@ manifest = {
     'partLabelBurnedIn': True,
     'overlayLayoutVersion': 'story-title-lowered-v3',
     'concatPolicy': 'normalized-filter-concat-v2',
-    'packingPolicy': 'max-whole-episodes-under-590s'
+    'packingPolicy': 'max-whole-episodes-under-590s',
+    'sourceFrameInsetPercent': 3,
+    'coverArtEmbedded': bool(cover_intro),
+    'coverDurationSeconds': COVER_SECONDS if cover_intro else 0,
+    'thumbnailOffsetMs': THUMBNAIL_OFFSET_MS if cover_intro else 1000
 }
+if continuation.get('sourceThumbnailUrl'):
+    manifest['sourceThumbnailUrl'] = continuation['sourceThumbnailUrl']
 if story_total_parts >= part:
     manifest['segmentTotal'] = story_total_parts
 (OUT / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
@@ -212,6 +265,9 @@ if story_total_parts >= part:
     'restartGeneration': restart_generation,
     'storyHashtag': story_hashtag,
     'pipelineRevision': PIPELINE_REVISION,
-    'logicalPostKey': logical_post_key
+    'logicalPostKey': logical_post_key,
+    'sourceFrameInsetPercent': 3,
+    'coverArtEmbedded': bool(cover_intro),
+    'thumbnailOffsetMs': THUMBNAIL_OFFSET_MS if cover_intro else 1000
 }, indent=2) + '\n')
 print(json.dumps(manifest, indent=2))
