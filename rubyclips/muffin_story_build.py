@@ -10,7 +10,7 @@ FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
 PACKING_TARGET_SECONDS = 590.0
 HARD_MAX_SECONDS = 598.5
 OUTPUT_FPS = 30
-PIPELINE_REVISION = 'avsync-v4-drawtext-runtime-fix'
+PIPELINE_REVISION = 'avsync-v3-idempotent'
 
 
 def supports_drawtext(binary):
