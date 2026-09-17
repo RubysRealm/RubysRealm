@@ -171,6 +171,55 @@ jobs:
         if: steps.state.outputs.ready == 'true' && steps.publish_marker.outputs.already == 'true'
         run: cp /tmp/post.json rubyclips/muffin_output/publish.json
 
+      - name: Confirm Buffer sent part to TikTok
+        if: steps.state.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          POST_ID="$(python -c "import json; print(json.load(open('rubyclips/muffin_output/publish.json'))['postId'])")"
+          URL="https://rubys-realm.vercel.app/api/buffer-status?post_id=${POST_ID}"
+          for i in $(seq 1 120); do
+            CODE="$(curl -sS --max-time 30 -o /tmp/buffer-status.json -w '%{http_code}' "$URL" || true)"
+            if [ "$CODE" = '200' ]; then
+              RC=0
+              python - <<'PY' || RC=$?
+          import json
+          d=json.load(open('/tmp/buffer-status.json'))
+          if d.get('ok') is not True:
+              raise SystemExit(1)
+          p=d.get('post') or {}
+          channel=p.get('channel') or {}
+          if str(channel.get('id','')) != '6a9f6ff1cd8b9c702c2897e1':
+              raise SystemExit(2)
+          err=p.get('error')
+          if err:
+              print('Buffer/TikTok error:', err)
+              raise SystemExit(2)
+          status=str(p.get('status','')).lower()
+          print('Buffer status:', status)
+          if status != 'sent':
+              raise SystemExit(1)
+          link=str(p.get('externalLink') or '')
+          sent_at=str(p.get('sentAt') or '')
+          if not sent_at or 'tiktok.com/@rubaradaclips/video/' not in link:
+              print('Sent status missing TikTok confirmation:', p)
+              raise SystemExit(2)
+          print('Confirmed TikTok send:', link, sent_at)
+          PY
+              if [ "$RC" -eq 0 ]; then
+                cp /tmp/buffer-status.json rubyclips/muffin_output/sent-status.json
+                exit 0
+              fi
+              if [ "$RC" -eq 2 ]; then
+                cat /tmp/buffer-status.json
+                exit 1
+              fi
+            fi
+            sleep 15
+          done
+          echo 'Timed out waiting for Buffer to confirm the TikTok send.'
+          cat /tmp/buffer-status.json || true
+          exit 1
+
       - name: Advance story state exactly once
         if: steps.state.outputs.ready == 'true'
         run: |
@@ -230,6 +279,7 @@ jobs:
             rubyclips/muffin_output/manifest.json
             rubyclips/muffin_output/part-info.json
             rubyclips/muffin_output/publish.json
+            rubyclips/muffin_output/sent-status.json
             rubyclips/muffin_work/episodes.json
             rubyclips/muffin_work/selected.json
           if-no-files-found: warn
