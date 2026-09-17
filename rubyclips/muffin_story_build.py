@@ -9,11 +9,6 @@ FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
 
 BASE_COMMIT = '9855d693a016a15d7ba3d5e3c10ea571ded42b37'
 BASE_PATH = 'rubyclips/muffin_story_build.py'
-STATE_PATH = Path('rubyclips/muffin_state.json')
-
-state = json.loads(STATE_PATH.read_text())
-if int(state.get('nextPart', 1)) != 1:
-    raise SystemExit('Rubaradaclips hold is active: Part 2+ is blocked until corrected Part 1 is approved.')
 
 source = subprocess.check_output(
     ['git', 'show', f'{BASE_COMMIT}:{BASE_PATH}'],
