@@ -1,0 +1,184 @@
+name: Immediate corrected Road Through Fire Part 1
+
+on:
+  push:
+    paths:
+      - 'rubyclips/immediate_r5p1.trigger'
+
+permissions:
+  contents: write
+
+jobs:
+  corrected-part1:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync latest production code and guard target
+        run: |
+          git fetch origin main
+          git reset --hard origin/main
+          python3 - <<'PY'
+          import json
+          s=json.load(open('rubyclips/muffin_state.json'))
+          assert s.get('currentSeriesId') == 'road-through-fire', s
+          assert int(s.get('restartGeneration',0)) == 5, s
+          assert int(s.get('nextPart',0)) == 1, s
+          assert int(s.get('nextEpisode',0)) == 1, s
+          print('Generation 5 Part 1 target confirmed.')
+          PY
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install rendering tools
+        run: |
+          command -v ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+          python -m pip install --quiet --upgrade yt-dlp
+          npm init -y >/dev/null 2>&1
+          npm install --silent puppeteer-core @tobyg74/tiktok-api-dl
+          FONT_SRC="$(fc-match -f '%{file}\n' 'Arial:style=Bold' | head -1)"
+          if [ -z "$FONT_SRC" ] || [ ! -f "$FONT_SRC" ]; then
+            FONT_SRC="$(fc-match -f '%{file}\n' 'Helvetica:style=Bold' | head -1)"
+          fi
+          test -n "$FONT_SRC" && test -f "$FONT_SRC"
+          python - "$FONT_SRC" <<'PY'
+          import sys
+          from pathlib import Path
+          p=Path('rubyclips/muffin_story_build.py')
+          s=p.read_text()
+          old="FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'"
+          new=f"FONT = {sys.argv[1]!r}"
+          assert old in s
+          p.write_text(s.replace(old,new,1))
+          PY
+
+      - name: Resolve exact Part 1 source
+        run: node rubyclips/muffin_story_resolve_tikwm.cjs
+
+      - name: Build corrected wide-frame titled Part 1
+        run: python rubyclips/muffin_story_build.py
+
+      - name: Verify all three user-visible corrections
+        run: |
+          python - <<'PY'
+          import json
+          m=json.load(open('rubyclips/muffin_output/manifest.json'))
+          assert m['sourceSeriesId'] == 'road-through-fire'
+          assert int(m['restartGeneration']) == 5
+          assert int(m['segmentIndex']) == 1
+          assert float(m.get('sourceFrameInsetPercent',0)) >= 15
+          assert m.get('sourceFrameMode') == 'full-frame-blurred-background-v1'
+          assert m.get('coverArtEmbedded') is True
+          assert m.get('coverTitleBurnedIn') is True
+          assert float(m.get('coverDurationSeconds',0)) >= 2.0
+          assert int(m.get('thumbnailOffsetMs',0)) == 1000
+          assert m.get('overlayLayoutVersion') == 'story-title-lowered-v5-wide-frame-title-card'
+          print(json.dumps({k:m.get(k) for k in ['overlayLayoutVersion','sourceFrameInsetPercent','sourceFrameMode','coverArtEmbedded','coverTitleBurnedIn','coverDurationSeconds','thumbnailOffsetMs']}, indent=2))
+          PY
+
+      - name: Publish generation 5 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG='rubyclips-tt-road-through-fire-r5-p1'
+          VIDEO_NAME="$(python -c "import json; print(json.load(open('rubyclips/muffin_output/manifest.json'))['file'])")"
+          VIDEO="rubyclips/muffin_output/${VIDEO_NAME}"
+          MANIFEST='rubyclips/muffin_output/manifest.json'
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$VIDEO" "$MANIFEST" --clobber
+          else
+            gh release create "$TAG" "$VIDEO" "$MANIFEST" --title 'RubyClips Road Through Fire corrected Part 1' --notes 'Generation 5: wider full-frame presentation, lower labels, titled preview card.'
+          fi
+
+      - name: Send corrected Part 1 to Buffer exactly once
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG='rubyclips-tt-road-through-fire-r5-p1'
+          URL="https://rubys-realm.vercel.app/api/rubyclips-post?tag=${TAG}"
+          CODE="$(curl -sS --max-time 120 -o /tmp/post.json -w '%{http_code}' "$URL" || true)"
+          cat /tmp/post.json
+          test "$CODE" = '200'
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/post.json'))
+          assert d.get('ok') is True
+          assert d.get('postId')
+          assert str(d.get('channelName','')).lstrip('@').lower() == 'rubaradaclips'
+          assert d.get('logicalPostKey') == 'rubyclips:road-through-fire:r5:p1'
+          PY
+          cp /tmp/post.json rubyclips/muffin_output/publish.json
+          cp /tmp/post.json /tmp/publish.json
+          gh release upload "$TAG" /tmp/publish.json --clobber
+
+      - name: Require actual TikTok send and link
+        run: |
+          set -euo pipefail
+          POST_ID="$(python -c "import json; print(json.load(open('/tmp/post.json'))['postId'])")"
+          URL="https://rubys-realm.vercel.app/api/buffer-status?post_id=${POST_ID}"
+          for i in $(seq 1 120); do
+            CODE="$(curl -sS --max-time 30 -o /tmp/sent.json -w '%{http_code}' "$URL" || true)"
+            if [ "$CODE" = '200' ]; then
+              RC=0
+              python - <<'PY' || RC=$?
+          import json
+          d=json.load(open('/tmp/sent.json'))
+          p=d.get('post') or {}
+          if d.get('ok') is not True: raise SystemExit(1)
+          if str((p.get('channel') or {}).get('id','')) != '6a9f6ff1cd8b9c702c2897e1': raise SystemExit(2)
+          if p.get('error'): raise SystemExit(2)
+          if str(p.get('status','')).lower() != 'sent': raise SystemExit(1)
+          link=str(p.get('externalLink') or '')
+          if not p.get('sentAt') or 'tiktok.com/@rubaradaclips/video/' not in link: raise SystemExit(2)
+          print('LIVE:', link)
+          PY
+              if [ "$RC" -eq 0 ]; then exit 0; fi
+              if [ "$RC" -eq 2 ]; then cat /tmp/sent.json; exit 1; fi
+            fi
+            sleep 15
+          done
+          echo 'Corrected Part 1 never reached sent status.'
+          cat /tmp/sent.json || true
+          exit 1
+
+      - name: Advance to Part 2 only after corrected Part 1 is live
+        run: |
+          git fetch origin main
+          git reset --hard origin/main
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('rubyclips/muffin_state.json')
+          s=json.loads(p.read_text())
+          assert s.get('currentSeriesId') == 'road-through-fire'
+          assert int(s.get('restartGeneration',0)) == 5
+          if int(s.get('nextPart',0)) == 2 and int(s.get('nextEpisode',0)) == 2:
+              print('State already advanced to Part 2; no duplicate advance.')
+              raise SystemExit(0)
+          assert int(s.get('nextPart',0)) == 1 and int(s.get('nextEpisode',0)) == 1, s
+          s['lastPostedPart']=1
+          s['lastPostedEpisodes']=[1]
+          s['nextEpisode']=2
+          s['nextPart']=2
+          s['overlayLayoutVersion']='story-title-lowered-v5-wide-frame-title-card'
+          s['lastStoryHashtag']='#TheRoadThroughFire'
+          s['lastLogicalPostKey']='rubyclips:road-through-fire:r5:p1'
+          s['restartReason']='generation 5 corrected Part 1 confirmed live before continuation'
+          p.write_text(json.dumps(s,indent=2)+'\n')
+          PY
+          git config user.name 'rubyclips-publisher-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add rubyclips/muffin_state.json
+          git diff --cached --quiet || git commit -m 'Confirm corrected Road Through Fire Part 1 live [skip ci]'
+          git push
