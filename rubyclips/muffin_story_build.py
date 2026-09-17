@@ -11,8 +11,13 @@ PACKING_TARGET_SECONDS = 590.0
 HARD_MAX_SECONDS = 598.5
 OUTPUT_FPS = 30
 PIPELINE_REVISION = 'avsync-v3-idempotent'
-CONTENT_WIDTH = 1048
-CONTENT_HEIGHT = 1862
+# Keep the complete source frame visibly inside the 1080x1920 TikTok canvas.
+# The previous 1048x1862 treatment was only ~3% inset and still looked zoomed.
+# This 900x1600 presentation is ~16.7% inset in each dimension and is backed by
+# a blurred full-canvas copy so the result stays full-screen without black bars.
+CONTENT_WIDTH = 900
+CONTENT_HEIGHT = 1600
+SOURCE_FRAME_INSET_PERCENT = 16.7
 COVER_SECONDS = 1.25
 THUMBNAIL_OFFSET_MS = 1000
 
@@ -37,8 +42,6 @@ def resolve_ffmpeg_tools():
     if supports_drawtext(ffmpeg):
         return ffmpeg, ffprobe
 
-    # Homebrew's standard ffmpeg formula no longer includes FreeType/drawtext.
-    # Install the keg-only ffmpeg-full bottle only when the runner needs it.
     brew = shutil.which('brew')
     if not brew:
         raise SystemExit('FFmpeg is missing drawtext and Homebrew is unavailable for the ffmpeg-full fallback.')
@@ -110,9 +113,6 @@ def esc(p):
     return p.as_posix().replace(':','\\:').replace("'","\\'")
 
 
-# Build a short, clean cover segment from the artwork supplied by the source.
-# Buffer selects the TikTok thumbnail at 1000 ms, so a 1.25 s opening cover
-# makes the profile-grid preview use the story artwork without a separate image.
 cover_candidates = sorted(p for p in WORK.glob('story-cover.*') if p.is_file())
 cover_intro = None
 if cover_candidates:
@@ -138,10 +138,10 @@ if cover_candidates:
         raise SystemExit('Built story cover intro is unexpectedly small.')
     print('Embedded source story artwork for TikTok preview:', cover_source)
 
-# Normalize every source clip independently before concatenation. This avoids
-# mixed source timestamps/frame pacing freezing video while audio continues.
-# Source video is intentionally inset by about 3% instead of filling the full
-# 1080x1920 canvas, preserving a little more of the original source framing.
+# Normalize each source independently. For story footage, create a blurred
+# edge-to-edge background from the same frame, then overlay a substantially
+# smaller untouched foreground copy. The foreground uses `decrease`, never
+# `increase` or crop, so the source frame is preserved in full.
 render_clips = []
 if cover_intro:
     render_clips.append({'file': str(cover_intro), 'cover': True})
@@ -153,16 +153,25 @@ concat_inputs = []
 for i, clip in enumerate(render_clips):
     inputs += ['-i', clip['file']]
     if clip['cover']:
-        video_chain = 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black'
-    else:
-        video_chain = (
-            f'scale={CONTENT_WIDTH}:{CONTENT_HEIGHT}:force_original_aspect_ratio=decrease,'
-            'pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black'
+        filters.append(
+            f'[{i}:v]fps={OUTPUT_FPS},settb=AVTB,setpts=PTS-STARTPTS,'
+            'scale=1080:1920:force_original_aspect_ratio=decrease,'
+            'pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1,format=yuv420p[v%d]' % i
         )
-    filters.append(
-        f'[{i}:v]fps={OUTPUT_FPS},settb=AVTB,setpts=PTS-STARTPTS,'
-        f'{video_chain},setsar=1,format=yuv420p[v{i}]'
-    )
+    else:
+        filters.append(
+            f'[{i}:v]fps={OUTPUT_FPS},settb=AVTB,setpts=PTS-STARTPTS,split=2[bgsrc{i}][fgsrc{i}]'
+        )
+        filters.append(
+            f'[bgsrc{i}]scale=1080:1920:force_original_aspect_ratio=increase,'
+            f'crop=1080:1920,gblur=sigma=30[bg{i}]'
+        )
+        filters.append(
+            f'[fgsrc{i}]scale={CONTENT_WIDTH}:{CONTENT_HEIGHT}:force_original_aspect_ratio=decrease[fg{i}]'
+        )
+        filters.append(
+            f'[bg{i}][fg{i}]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p[v{i}]'
+        )
     filters.append(
         f'[{i}:a]aresample=48000:async=1:first_pts=0,asetpts=PTS-STARTPTS[a{i}]'
     )
@@ -196,8 +205,6 @@ if duration > HARD_MAX_SECONDS:
 if final.stat().st_size < 100000:
     raise SystemExit('Built MP4 is unexpectedly small.')
 
-# Verify the encoded video stream itself lasts essentially as long as the
-# container/audio. This catches the exact frozen-last-frame failure before post.
 video_duration = float(subprocess.check_output([
     FFPROBE,'-v','error','-select_streams','v:0','-show_entries','stream=duration','-of','default=nw=1:nk=1',str(final)
 ], text=True).strip())
@@ -240,10 +247,11 @@ manifest = {
     'targetChannel': 'rubaradaclips',
     'titleBurnedIn': True,
     'partLabelBurnedIn': True,
-    'overlayLayoutVersion': 'story-title-lowered-v3',
+    'overlayLayoutVersion': 'story-title-lowered-v4-wide-frame',
     'concatPolicy': 'normalized-filter-concat-v2',
     'packingPolicy': 'max-whole-episodes-under-590s',
-    'sourceFrameInsetPercent': 3,
+    'sourceFrameInsetPercent': SOURCE_FRAME_INSET_PERCENT,
+    'sourceFrameMode': 'full-frame-blurred-background-v1',
     'coverArtEmbedded': bool(cover_intro),
     'coverDurationSeconds': COVER_SECONDS if cover_intro else 0,
     'thumbnailOffsetMs': THUMBNAIL_OFFSET_MS if cover_intro else 1000
@@ -266,7 +274,8 @@ if story_total_parts >= part:
     'storyHashtag': story_hashtag,
     'pipelineRevision': PIPELINE_REVISION,
     'logicalPostKey': logical_post_key,
-    'sourceFrameInsetPercent': 3,
+    'sourceFrameInsetPercent': SOURCE_FRAME_INSET_PERCENT,
+    'sourceFrameMode': 'full-frame-blurred-background-v1',
     'coverArtEmbedded': bool(cover_intro),
     'thumbnailOffsetMs': THUMBNAIL_OFFSET_MS if cover_intro else 1000
 }, indent=2) + '\n')
