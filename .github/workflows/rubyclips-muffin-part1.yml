@@ -141,7 +141,7 @@ jobs:
               d=json.load(open('/tmp/health.json'))
               assert d.get('ok') is True
               assert str(d.get('channelName','')).lstrip('@').lower() == 'rubaradaclips'
-              assert 'youtube-source' in str(d.get('version',''))
+              assert 'wide-frame-title-card' in str(d.get('version',''))
           except Exception:
               raise SystemExit(1)
           PY
@@ -252,7 +252,7 @@ jobs:
           s['nextPart']=part+1
           s['lastPackingPolicy']='max-whole-episodes-under-595s'
           s['concatPolicy']='normalized-filter-concat-v2'
-          s['overlayLayoutVersion']='story-title-lowered-v3'
+          s['overlayLayoutVersion']='story-title-lowered-v5-wide-frame-title-card'
           s['lastStoryHashtag']=info.get('storyHashtag')
           s['pipelineRevision']=info.get('pipelineRevision')
           s['lastLogicalPostKey']=info.get('logicalPostKey')
