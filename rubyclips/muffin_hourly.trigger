@@ -1,3 +1,4 @@
-reason=force-road-through-fire-part1-final-black-pillarbox-tight-title-preview-card
-retry=10
+reason=continuation-part2-hotfix
+retry=11
 generation=6
+triggered_at_utc=2026-09-17T16:52:00Z
