@@ -65,6 +65,17 @@ $(cat "$ROOT/ui.txt")"
 }
 
 capture_png() {
+  local hostdir="$ROOT/hostshot"
+  mkdir -p "$hostdir"
+  rm -f "$hostdir"/*.png >/dev/null 2>&1 || true
+  if $ADB -s "$SERIAL" emu screenrecord screenshot "$hostdir" >/dev/null 2>&1; then
+    local shot
+    shot=$(find "$hostdir" -maxdepth 1 -type f -name '*.png' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2- || true)
+    if [ -n "$shot" ] && [ -s "$shot" ]; then
+      cp "$shot" "$ROOT/full.png"
+      return 0
+    fi
+  fi
   $ADB -s "$SERIAL" exec-out screencap -p > "$ROOT/full.png"
 }
 
@@ -163,10 +174,18 @@ sleep 2
 $ADB -s "$SERIAL" shell input keyevent KEYCODE_HOME || true
 report_state 0
 
-if install_tiktok; then
+# Preserve restored TikTok app data. Only install TikTok on a genuinely fresh phone.
+if $ADB -s "$SERIAL" shell pm path "$TIKTOK_PACKAGE" >/dev/null 2>&1; then
+  post_comment 'TAKARADA_STATUS|tiktok_existing_install_preserved'
   $ADB -s "$SERIAL" shell monkey -p "$TIKTOK_PACKAGE" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
   sleep 10
   report_state 1
+else
+  if install_tiktok; then
+    $ADB -s "$SERIAL" shell monkey -p "$TIKTOK_PACKAGE" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+    sleep 10
+    report_state 1
+  fi
 fi
 
 LAST_SEQ=1
