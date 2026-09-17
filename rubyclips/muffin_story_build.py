@@ -18,7 +18,9 @@ PIPELINE_REVISION = 'avsync-v3-idempotent'
 CONTENT_WIDTH = 900
 CONTENT_HEIGHT = 1600
 SOURCE_FRAME_INSET_PERCENT = 16.7
-COVER_SECONDS = 1.25
+# Two seconds gives Buffer/TikTok's 1000 ms thumbnail selector a stable,
+# unmistakable story-title card instead of a random first video frame.
+COVER_SECONDS = 2.0
 THUMBNAIL_OFFSET_MS = 1000
 
 
@@ -113,6 +115,9 @@ def esc(p):
     return p.as_posix().replace(':','\\:').replace("'","\\'")
 
 
+# Build a real title-card preview from source artwork. The title and part number
+# are burned directly into this opening card so the TikTok grid thumbnail is
+# recognizable even before playback starts.
 cover_candidates = sorted(p for p in WORK.glob('story-cover.*') if p.is_file())
 cover_intro = None
 if cover_candidates:
@@ -123,7 +128,13 @@ if cover_candidates:
         '[coverbgsrc]scale=1080:1920:force_original_aspect_ratio=increase,'
         'crop=1080:1920,gblur=sigma=24[coverbg];'
         f'[coverfgsrc]scale={CONTENT_WIDTH}:{CONTENT_HEIGHT}:force_original_aspect_ratio=decrease[coverfg];'
-        '[coverbg][coverfg]overlay=(W-w)/2:(H-h)/2,setsar=1,format=yuv420p[vcover]'
+        '[coverbg][coverfg]overlay=(W-w)/2:(H-h)/2[coverbase];'
+        f"[coverbase]drawtext=fontfile={FONT}:textfile='{esc(WORK/'story-title.txt')}':"
+        "fontcolor=white:fontsize=58:line_spacing=8:box=1:boxcolor=black@0.72:boxborderw=20:"
+        "x=(w-text_w)/2:y=520,"
+        f"drawtext=fontfile={FONT}:textfile='{esc(WORK/'part-label.txt')}':"
+        "fontcolor=white:fontsize=44:box=1:boxcolor=black@0.72:boxborderw=16:"
+        "x=(w-text_w)/2:y=710,setsar=1,format=yuv420p[vcover]"
     )
     subprocess.run([
         FFMPEG,'-y','-hide_banner','-loglevel','error',
@@ -136,7 +147,7 @@ if cover_candidates:
     ], check=True, timeout=300)
     if cover_intro.stat().st_size < 50000:
         raise SystemExit('Built story cover intro is unexpectedly small.')
-    print('Embedded source story artwork for TikTok preview:', cover_source)
+    print('Embedded titled source artwork for TikTok preview:', cover_source)
 
 # Normalize each source independently. For story footage, create a blurred
 # edge-to-edge background from the same frame, then overlay a substantially
@@ -179,13 +190,15 @@ for i, clip in enumerate(render_clips):
 
 filters.append(''.join(concat_inputs) + f'concat=n={len(render_clips)}:v=1:a=1[vcat][acat]')
 overlay_enable = f":enable='gte(t,{COVER_SECONDS})'" if cover_intro else ''
+# Keep the live-video labels well below TikTok's search/header overlay. The old
+# y=195/315 coordinates were still too high on-device.
 filters.append(
     f"[vcat]drawtext=fontfile={FONT}:textfile='{esc(WORK/'story-title.txt')}':"
     "fontcolor=white:fontsize=35:line_spacing=5:box=1:boxcolor=black@0.68:boxborderw=14:"
-    f"x=(w-text_w)/2:y=195{overlay_enable},"
+    f"x=(w-text_w)/2:y=330{overlay_enable},"
     f"drawtext=fontfile={FONT}:textfile='{esc(WORK/'part-label.txt')}':"
     "fontcolor=white:fontsize=31:box=1:boxcolor=black@0.68:boxborderw=11:"
-    f"x=(w-text_w)/2:y=315{overlay_enable}[vout]"
+    f"x=(w-text_w)/2:y=460{overlay_enable}[vout]"
 )
 
 final = OUT / f'muffindrama-{series_id}-r{restart_generation}-part-{part:02d}.mp4'
@@ -247,12 +260,13 @@ manifest = {
     'targetChannel': 'rubaradaclips',
     'titleBurnedIn': True,
     'partLabelBurnedIn': True,
-    'overlayLayoutVersion': 'story-title-lowered-v4-wide-frame',
+    'overlayLayoutVersion': 'story-title-lowered-v5-wide-frame-title-card',
     'concatPolicy': 'normalized-filter-concat-v2',
     'packingPolicy': 'max-whole-episodes-under-590s',
     'sourceFrameInsetPercent': SOURCE_FRAME_INSET_PERCENT,
     'sourceFrameMode': 'full-frame-blurred-background-v1',
     'coverArtEmbedded': bool(cover_intro),
+    'coverTitleBurnedIn': bool(cover_intro),
     'coverDurationSeconds': COVER_SECONDS if cover_intro else 0,
     'thumbnailOffsetMs': THUMBNAIL_OFFSET_MS if cover_intro else 1000
 }
@@ -277,6 +291,7 @@ if story_total_parts >= part:
     'sourceFrameInsetPercent': SOURCE_FRAME_INSET_PERCENT,
     'sourceFrameMode': 'full-frame-blurred-background-v1',
     'coverArtEmbedded': bool(cover_intro),
+    'coverTitleBurnedIn': bool(cover_intro),
     'thumbnailOffsetMs': THUMBNAIL_OFFSET_MS if cover_intro else 1000
 }, indent=2) + '\n')
 print(json.dumps(manifest, indent=2))
