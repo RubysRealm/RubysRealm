@@ -1,3 +1,3 @@
-reason=force-road-through-fire-part1-wide-frame-lower-title-preview-card
-retry=9
-generation=5
+reason=force-road-through-fire-part1-final-black-pillarbox-tight-title-preview-card
+retry=10
+generation=6
