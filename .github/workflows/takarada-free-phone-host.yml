@@ -42,18 +42,42 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pil curl unzip zbar-tools
+          sudo apt-get install -y python3-pil curl unzip zbar-tools zstd
 
-      - name: Restore Android 35 phone state
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.android/avd/*
-            ~/.android/adb*
-          key: takarada-phone-api35-${{ github.run_id }}
-          restore-keys: |
-            takarada-phone-api35-35162753324
-            takarada-phone-api35-
+      - name: Restore latest persisted Android phone state
+        id: restore_phone_state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          ARTIFACT_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=takarada-phone-state&per_page=100" \
+            --jq '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | last | .id // empty')
+          if [ -z "$ARTIFACT_ID" ]; then
+            echo 'restored=false' >> "$GITHUB_OUTPUT"
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$TRIGGER_ISSUE/comments" \
+              -f body='TAKARADA_STATUS|phone_state_artifact_missing|starting_fresh=1' >/dev/null || true
+            exit 0
+          fi
+
+          rm -rf /tmp/takarada-phone-restore /tmp/takarada-phone-state.zip
+          mkdir -p /tmp/takarada-phone-restore
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > /tmp/takarada-phone-state.zip
+          unzip -q /tmp/takarada-phone-state.zip -d /tmp/takarada-phone-restore
+          ARCHIVE=$(find /tmp/takarada-phone-restore -type f -name 'takarada-phone-state.tar.zst' -print -quit)
+          if [ -z "$ARCHIVE" ] || [ ! -s "$ARCHIVE" ]; then
+            echo 'Persisted phone artifact did not contain the state archive.' >&2
+            exit 1
+          fi
+
+          rm -rf "$HOME/.android/avd/test.avd" "$HOME/.android/avd/test.ini"
+          tar --zstd -xf "$ARCHIVE" -C "$HOME"
+          test -s "$HOME/.android/avd/test.avd/userdata-qemu.img"
+          test -s "$HOME/.android/avd/test.ini"
+          echo 'restored=true' >> "$GITHUB_OUTPUT"
+          echo "artifact_id=$ARTIFACT_ID" >> "$GITHUB_OUTPUT"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$TRIGGER_ISSUE/comments" \
+            -f body="TAKARADA_STATUS|phone_state_artifact_restored|artifact=$ARTIFACT_ID" >/dev/null || true
 
       - name: Use compatible software graphics
         shell: bash
@@ -71,7 +95,56 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_7_pro
+          avd-name: test
           force-avd-creation: false
           disable-animations: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader -feature -Vulkan -noaudio -no-boot-anim -camera-back none -camera-front none -no-metrics
           script: bash virtual-phone/github-phone-agent-v4.sh
+
+      - name: Package Android phone state
+        id: package_phone_state
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          STATE_DIR="$HOME/.android/avd/test.avd"
+          STATE_INI="$HOME/.android/avd/test.ini"
+          test -s "$STATE_DIR/userdata-qemu.img"
+          test -s "$STATE_INI"
+          rm -f /tmp/takarada-phone-state.tar.zst
+          tar --zstd -cf /tmp/takarada-phone-state.tar.zst -C "$HOME" \
+            .android/avd/test.avd \
+            .android/avd/test.ini
+          test -s /tmp/takarada-phone-state.tar.zst
+          SHA256=$(sha256sum /tmp/takarada-phone-state.tar.zst | awk '{print $1}')
+          BYTES=$(stat -c '%s' /tmp/takarada-phone-state.tar.zst)
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "bytes=$BYTES" >> "$GITHUB_OUTPUT"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$TRIGGER_ISSUE/comments" \
+            -f body="TAKARADA_STATUS|phone_state_packaged|sha256=$SHA256|bytes=$BYTES" >/dev/null || true
+
+      - name: Upload persisted Android phone state
+        id: upload_phone_state
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: takarada-phone-state
+          path: /tmp/takarada-phone-state.tar.zst
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Verify persisted Android phone state
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ steps.upload_phone_state.outputs.artifact-id }}
+          STATE_SHA256: ${{ steps.package_phone_state.outputs.sha256 }}
+          STATE_BYTES: ${{ steps.package_phone_state.outputs.bytes }}
+        run: |
+          set -euo pipefail
+          test -n "$ARTIFACT_ID"
+          REMOTE_BYTES=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID" --jq '.size_in_bytes')
+          test "${REMOTE_BYTES:-0}" -gt 0
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$TRIGGER_ISSUE/comments" \
+            -f body="TAKARADA_STATUS|phone_state_persisted|run=${GITHUB_RUN_ID}|artifact=$ARTIFACT_ID|archive_sha256=$STATE_SHA256|archive_bytes=$STATE_BYTES|artifact_bytes=$REMOTE_BYTES" >/dev/null
