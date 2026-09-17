@@ -26,6 +26,7 @@ def probe(url):
             'url': url,
             'id': str(data.get('id') or ''),
             'title': str(data.get('title') or ''),
+            'thumbnail': str(data.get('thumbnail') or ''),
             'duration': duration,
         }
     except Exception as exc:
@@ -56,7 +57,9 @@ if not candidates:
 WORK.mkdir(parents=True, exist_ok=True)
 for p in WORK.glob('ep*.mp4'):
     p.unlink(missing_ok=True)
-for name in ['episodes.json','selected.json','concat.txt','continuation.json','source-cut.mp4','source-normalized.mp4']:
+for p in WORK.glob('story-cover.*'):
+    p.unlink(missing_ok=True)
+for name in ['episodes.json','selected.json','concat.txt','continuation.json','source-cut.mp4','source-normalized.mp4','story-cover-intro.mp4']:
     (WORK / name).unlink(missing_ok=True)
 
 probes = [x for x in (probe(url) for url in candidates) if x and x['duration'] >= MIN_SOURCE_SECONDS]
@@ -72,6 +75,23 @@ if start >= full_duration - 2.0:
 clip_len = min(CHUNK_SECONDS, full_duration - start)
 end = start + clip_len
 story_complete = end >= full_duration - 2.0
+
+# Preserve the story artwork supplied by the source. Buffer/TikTok video posts
+# cannot use an arbitrary external thumbnail image, so the renderer embeds this
+# art briefly at the start and the publisher's 1000 ms thumbnail offset lands on it.
+cover_file = None
+try:
+    run([
+        'yt-dlp','--no-playlist','--skip-download','--write-thumbnail',
+        '--convert-thumbnails','jpg','--socket-timeout','30','--retries','3',
+        '-o',str(WORK / 'story-cover.%(ext)s'),chosen['url']
+    ], timeout=180)
+    covers = sorted(p for p in WORK.glob('story-cover.*') if p.is_file())
+    if covers:
+        cover_file = str(covers[0])
+        print('Captured source story artwork:', cover_file, flush=True)
+except Exception as exc:
+    print(f'Could not capture source story artwork; continuing without custom cover frame: {exc}', flush=True)
 
 raw_template = str(WORK / 'source-cut.%(ext)s')
 section = f'*{start:.3f}-{end:.3f}'
@@ -117,12 +137,16 @@ item = {
     'file': str(out),
     'duration': actual,
 }
+if cover_file:
+    item['coverFile'] = cover_file
 (WORK / 'episodes.json').write_text(json.dumps([item], indent=2) + '\n')
 continuation = {
     'sourceProvider': item['sourceProvider'],
     'sourceVideoId': chosen['id'],
     'sourceUrl': chosen['url'],
     'sourceTitle': chosen['title'],
+    'sourceThumbnailUrl': chosen.get('thumbnail') or None,
+    'sourceCoverFile': cover_file,
     'part': part,
     'storyTotalParts': story_total_parts,
     'startSeconds': start,
