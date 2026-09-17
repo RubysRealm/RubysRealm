@@ -6,6 +6,7 @@ import json
 import os
 import shlex
 import subprocess
+import threading
 import time
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,6 +16,9 @@ SERIAL = os.environ.get('ANDROID_SERIAL', 'emulator-5554')
 SECRET = os.environ['TAKARADA_REMOTE_SECRET']
 PORT = int(os.environ.get('TAKARADA_REMOTE_PORT', '8765'))
 COOKIE_VALUE = hashlib.sha256((SECRET + '|takarada-remote').encode()).hexdigest()
+HOSTSHOT_DIR = '/tmp/takarada-hostshot'
+SHOT_LOCK = threading.Lock()
+os.makedirs(HOSTSHOT_DIR, exist_ok=True)
 
 
 def adb(*args, timeout=15):
@@ -22,8 +26,30 @@ def adb(*args, timeout=15):
 
 
 def screenshot():
-    p = adb('exec-out', 'screencap', '-p', timeout=20)
-    return p.stdout if p.returncode == 0 else b''
+    # Prefer the Android Emulator host-side screenshot path. This is different
+    # from guest `screencap` and can render headless emulator output directly.
+    # Fall back to guest screencap if the emulator command is unavailable.
+    with SHOT_LOCK:
+        try:
+            for name in os.listdir(HOSTSHOT_DIR):
+                if name.lower().endswith('.png'):
+                    try:
+                        os.remove(os.path.join(HOSTSHOT_DIR, name))
+                    except OSError:
+                        pass
+            p = adb('emu', 'screenrecord', 'screenshot', HOSTSHOT_DIR, timeout=20)
+            if p.returncode == 0:
+                shots = [os.path.join(HOSTSHOT_DIR, n) for n in os.listdir(HOSTSHOT_DIR) if n.lower().endswith('.png')]
+                if shots:
+                    newest = max(shots, key=os.path.getmtime)
+                    with open(newest, 'rb') as f:
+                        data = f.read()
+                    if data.startswith(b'\x89PNG') and len(data) > 1000:
+                        return data
+        except Exception:
+            pass
+        p = adb('exec-out', 'screencap', '-p', timeout=20)
+        return p.stdout if p.returncode == 0 else b''
 
 
 def type_text(text):
@@ -51,18 +77,20 @@ PAGE = r'''<!doctype html>
 <title>Takarada Secure Phone</title>
 <style>
 body{font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif;margin:0;background:#111;color:#eee;text-align:center}
-main{max-width:520px;margin:auto;padding:10px}h2{margin:8px 0}p{font-size:13px;color:#bbb}
-#phone{width:100%;max-width:360px;aspect-ratio:9/16;object-fit:contain;background:#000;border-radius:12px;touch-action:none;border:1px solid #333}
-.row{display:flex;gap:8px;justify-content:center;margin:9px 0;flex-wrap:wrap}
-button,input{font-size:16px;padding:12px;border-radius:9px;border:1px solid #444;background:#222;color:#fff}
-button{min-width:90px}input{width:min(88vw,360px)}#status{min-height:20px;font-size:13px;color:#aaa}
+main{max-width:520px;margin:auto;padding:6px}h2{margin:5px 0;font-size:18px}p{font-size:12px;color:#bbb;margin:5px 8px}
+#phone{width:auto;max-width:100%;height:min(68vh,640px);aspect-ratio:9/16;object-fit:contain;background:#000;border-radius:12px;touch-action:none;border:1px solid #333}
+.controls{position:sticky;bottom:0;background:#111;padding:4px 0 6px}.row{display:flex;gap:6px;justify-content:center;margin:5px 0;flex-wrap:wrap}
+button,input{font-size:15px;padding:10px;border-radius:9px;border:1px solid #444;background:#222;color:#fff}
+button{min-width:82px}input{width:min(88vw,360px)}#status{min-height:18px;font-size:12px;color:#aaa}
 </style></head><body><main>
 <h2>Takarada secure phone</h2><p>Temporary direct controller. Text you enter here is sent to the virtual phone runner and is not posted to GitHub.</p>
 <img id="phone" src="/screen.jpg?t=0" alt="virtual phone">
+<div class="controls">
 <div id="status">Tap the phone image to interact. Swipe gestures work too.</div>
 <div class="row"><button onclick="key('back')">Back</button><button onclick="key('home')">Home</button><button onclick="key('enter')">Enter</button></div>
 <div class="row"><input id="txt" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Type password / code privately"></div>
 <div class="row"><button onclick="sendText()">Type into phone</button><button onclick="toggle()">Show / hide</button></div>
+</div>
 </main><script>
 const img=document.getElementById('phone'), st=document.getElementById('status'), txt=document.getElementById('txt');
 let start=null;
@@ -84,7 +112,7 @@ LOGIN = r'''<!doctype html><html><head><meta name="viewport" content="width=devi
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = 'TakaradaRemote/1.0'
+    server_version = 'TakaradaRemote/1.1'
     def log_message(self, fmt, *args):
         pass
 
