@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+import base64
 import hashlib
 import hmac
+import io
 import json
 import os
 import shlex
@@ -9,6 +11,7 @@ import threading
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
+from PIL import Image
 
 ADB = os.environ.get('ADB', 'adb')
 SERIAL = os.environ.get('ANDROID_SERIAL', 'emulator-5554')
@@ -47,6 +50,17 @@ def screenshot():
             pass
         p = adb('exec-out', 'screencap', '-p', timeout=20)
         return p.stdout if p.returncode == 0 else b''
+
+
+def screenshot_text():
+    data = screenshot()
+    if not data:
+        return b''
+    im = Image.open(io.BytesIO(data)).convert('RGB')
+    im.thumbnail((360, 640), Image.Resampling.LANCZOS)
+    out = io.BytesIO()
+    im.save(out, 'JPEG', quality=48, optimize=True)
+    return base64.b64encode(out.getvalue())
 
 
 def type_text(text):
@@ -105,7 +119,7 @@ LOGIN = r'''<!doctype html><html><head><meta name="viewport" content="width=devi
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = 'TakaradaRemote/1.2'
+    server_version = 'TakaradaRemote/1.3'
 
     def log_message(self, fmt, *args):
         pass
@@ -135,6 +149,13 @@ class Handler(BaseHTTPRequestHandler):
             if not assistant_auth(self.path):
                 return self.send_bytes(403, b'forbidden')
             return self.send_bytes(200, screenshot(), 'image/png')
+        if u.path == '/assistant/screen.txt':
+            if not assistant_auth(self.path):
+                return self.send_bytes(403, b'forbidden')
+            data = screenshot_text()
+            if not data:
+                return self.send_bytes(503, b'no screenshot')
+            return self.send_bytes(200, data, 'text/plain; charset=utf-8')
         if u.path == '/assistant/tap':
             if not assistant_auth(self.path):
                 return self.send_bytes(403, b'forbidden')
