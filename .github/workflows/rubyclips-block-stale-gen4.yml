@@ -1,0 +1,46 @@
+name: Block stale Rubaradaclips generation 4
+
+on:
+  push:
+    paths:
+      - 'rubyclips/stale_gen4_block.trigger'
+
+permissions:
+  contents: write
+
+jobs:
+  block-stale-generation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install durable no-repost marker on generation 4 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG='rubyclips-tt-road-through-fire-r4-p1'
+          cat > /tmp/publish.json <<'JSON'
+          {
+            "ok": true,
+            "postId": "6aab67807c96844cd5226a20",
+            "status": "sent",
+            "channelName": "rubaradaclips",
+            "channelId": "6a9f6ff1cd8b9c702c2897e1",
+            "logicalPostKey": "rubyclips:road-through-fire:r4:p1",
+            "staleGenerationBlocked": true,
+            "reason": "generation 4 superseded by user-requested generation 5 framing/title-card correction"
+          }
+          JSON
+          if gh release view "$TAG" --repo RubysRealm/RubysRealm >/dev/null 2>&1; then
+            gh release upload "$TAG" /tmp/publish.json --repo RubysRealm/RubysRealm --clobber
+          else
+            gh release create "$TAG" /tmp/publish.json --repo RubysRealm/RubysRealm --title 'Blocked stale RubyClips generation 4' --notes 'Superseded by generation 5 before repost.'
+          fi
+          gh release download "$TAG" --repo RubysRealm/RubysRealm --pattern publish.json --dir /tmp/check --clobber
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/check/publish.json'))
+          assert d.get('staleGenerationBlocked') is True
+          assert d.get('postId') == '6aab67807c96844cd5226a20'
+          print('Generation 4 durable no-repost marker installed.')
+          PY
