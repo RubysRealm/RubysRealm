@@ -29,6 +29,9 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
 
+      - name: Sync Spotify source catalog
+        run: python3 rubyclips/spotify_story_sync.py
+
       - name: Check story state
         id: state
         run: |
@@ -37,7 +40,12 @@ jobs:
           s=json.load(open('rubyclips/muffin_state.json'))
           provider=str(s.get('sourceProvider','')).lower()
           complete=bool(s.get('currentSeriesComplete'))
-          ready=False if (provider == 'dailymotion-muffindrama-mirror' and complete) else (complete or int(s.get('nextEpisode',1)) <= int(s.get('currentSeriesEpisodeCount',1)))
+          if provider == 'spotify-show':
+              ready = not complete
+          elif provider == 'dailymotion-muffindrama-mirror' and complete:
+              ready = False
+          else:
+              ready = complete or int(s.get('nextEpisode',1)) <= int(s.get('currentSeriesEpisodeCount',1))
           with open(os.environ['GITHUB_OUTPUT'],'a') as f:
               f.write(f"ready={'true' if ready else 'false'}\n")
               f.write(f"next_episode={s.get('nextEpisode',1)}\n")
@@ -223,8 +231,6 @@ jobs:
       - name: Advance story state exactly once
         if: steps.state.outputs.ready == 'true'
         run: |
-          git fetch origin main
-          git reset --hard origin/main
           python - <<'PY'
           import json
           from pathlib import Path
