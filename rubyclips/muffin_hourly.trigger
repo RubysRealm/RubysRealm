@@ -1,4 +1,4 @@
-reason=spotify-source-swap
-retry=14
+reason=spotify-source-creator-channel
+retry=15
 generation=7
-triggered_at_utc=2026-09-21T17:50:00Z
+triggered_at_utc=2026-09-21T18:05:00Z
