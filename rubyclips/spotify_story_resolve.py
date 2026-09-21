@@ -77,7 +77,33 @@ def spotify_episode_meta(episode_id, fallback_title, fallback_creator):
     return title, creator, image
 
 
-def yt_candidates(query):
+def yt_channel_candidates(handle):
+    handle = str(handle or '').strip().lstrip('@')
+    if not handle:
+        return []
+    url = f'https://www.youtube.com/@{handle}/videos'
+    cmd = [
+        'yt-dlp', '--flat-playlist', '--playlist-end', '80', '--dump-json', '--no-warnings',
+        '--socket-timeout', '25', '--retries', '3',
+        '--js-runtimes', 'node', '--remote-components', 'ejs:github',
+        url
+    ]
+    proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=240)
+    rows = []
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line.startswith('{'):
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            pass
+    if not rows:
+        print('Creator channel listing returned no entries:', proc.stdout[-1200:], flush=True)
+    return rows
+
+
+def yt_search_candidates(query):
     cmd = [
         'yt-dlp', '--skip-download', '--dump-json', '--no-warnings',
         '--socket-timeout', '25', '--retries', '3',
@@ -97,28 +123,54 @@ def yt_candidates(query):
     return rows
 
 
-def choose_transport(title, creator):
-    rows = yt_candidates(f'{title} {creator}'.strip())
+def probe_transport(url):
+    cmd = [
+        'yt-dlp', '--skip-download', '--dump-single-json', '--no-warnings',
+        '--socket-timeout', '25', '--retries', '3',
+        '--js-runtimes', 'node', '--remote-components', 'ejs:github',
+        '--extractor-args', 'youtube:player_client=tv,web_safari',
+        url
+    ]
+    proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
+    lines = [x.strip() for x in proc.stdout.splitlines() if x.strip().startswith('{')]
+    if not lines:
+        return {}
+    try:
+        return json.loads(lines[-1])
+    except json.JSONDecodeError:
+        return {}
+
+
+def choose_transport(title, creator, channel_handle):
+    rows = yt_channel_candidates(channel_handle)
+    if not rows:
+        rows = yt_search_candidates(f'{title} {creator}'.strip())
     if not rows:
         raise RuntimeError('No public media matches were found for the Spotify episode title.')
 
     creator_n = normalize_title(creator)
+    handle_n = normalize_title(channel_handle)
     scored = []
     for row in rows:
         row_title = str(row.get('title') or '')
-        uploader = ' '.join(str(row.get(k) or '') for k in ('uploader', 'channel', 'channel_id'))
+        uploader = ' '.join(str(row.get(k) or '') for k in ('uploader', 'channel', 'channel_id', 'uploader_id'))
         title_score = similarity(title, row_title)
-        creator_match = bool(creator_n and creator_n in normalize_title(uploader))
+        uploader_n = normalize_title(uploader)
+        creator_match = bool(
+            (creator_n and creator_n in uploader_n) or
+            (handle_n and handle_n in uploader_n)
+        )
         duration = float(row.get('duration') or 0)
-        url = str(row.get('webpage_url') or '')
-        if not url and row.get('id'):
-            url = f'https://www.youtube.com/watch?v={row["id"]}'
-        if not url.startswith('http') or duration < 15:
+        url = str(row.get('webpage_url') or row.get('url') or '')
+        video_id = str(row.get('id') or '')
+        if video_id and (not url.startswith('http') or 'youtube.com' not in url):
+            url = f'https://www.youtube.com/watch?v={video_id}'
+        if not url.startswith('http'):
             continue
         scored.append((creator_match, title_score, duration, row, url))
 
     if not scored:
-        raise RuntimeError('Search returned no usable public media transport.')
+        raise RuntimeError('Creator channel returned no usable public media transport.')
     scored.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
     creator_match, title_score, duration, row, url = scored[0]
     if title_score < 0.72 or (creator and not creator_match and title_score < 0.94):
@@ -126,16 +178,23 @@ def choose_transport(title, creator):
             f'Refusing uncertain media match for Spotify episode. '
             f'Best title={row.get("title")!r}, uploader={row.get("uploader") or row.get("channel")!r}, score={title_score:.3f}'
         )
+
+    detail = {}
+    if duration < 15 or not row.get('thumbnail'):
+        detail = probe_transport(url)
+        duration = float(detail.get('duration') or duration or 0)
+    if duration < 15:
+        raise RuntimeError(f'Matched creator video has no usable duration: {url}')
+
     return {
         'url': url,
-        'id': str(row.get('id') or ''),
-        'title': str(row.get('title') or title),
-        'thumbnail': str(row.get('thumbnail') or ''),
+        'id': str(detail.get('id') or row.get('id') or ''),
+        'title': str(detail.get('title') or row.get('title') or title),
+        'thumbnail': str(detail.get('thumbnail') or row.get('thumbnail') or ''),
         'duration': duration,
-        'uploader': str(row.get('uploader') or row.get('channel') or creator),
+        'uploader': str(detail.get('uploader') or detail.get('channel') or row.get('uploader') or row.get('channel') or creator),
         'matchScore': title_score,
     }
-
 
 def cobalt_media(url):
     payload = json.dumps({
@@ -241,7 +300,8 @@ except Exception as exc:
 if not title:
     raise SystemExit('Spotify episode title is unavailable.')
 
-transport = choose_transport(title, creator)
+channel_handle = str(state.get('youtubeChannelHandle') or 'babynojamie')
+transport = choose_transport(title, creator, channel_handle)
 full_duration = float(transport['duration'])
 part = int(state.get('nextPart') or 1)
 next_ep = int(state.get('nextEpisode') or part)
