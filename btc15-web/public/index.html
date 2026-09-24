@@ -5,11 +5,11 @@
 <div class="card"><div class="lab">Contract BTC Value • BRTI PROXY</div><div id="price" class="val">—</div><div id="cbmeta" class="small">Connecting to BRTI proxy…</div><div id="cbcompare" class="small" style="margin-top:6px"></div><div id="kraken" class="small"></div></div>
 <div class="card"><div class="lab">Price to beat</div><div id="ptb" class="val">—</div><div id="dist" class="small"></div></div>
 <div class="card"><div class="lab">Time remaining</div><div id="remain" class="val">—</div><div id="session" class="small"></div></div>
-<div class="card"><div class="lab">Verified record</div><div class="row"><span>Wins</span><b id="wins">0</b></div><div class="row"><span>Losses</span><b id="losses">0</b></div><div class="row"><span>Win rate</span><b id="wr">—</b></div><div class="small">Only finalized Kalshi + settlement-value-verified rounds count.</div></div>
-<div class="card"><div class="lab">150% opportunity</div><div class="row"><span>Winning picks</span><b id="ew">0</b></div><div class="row"><span>Losing picks</span><b id="el">0</b></div></div><div class="card"><div class="lab">Adaptive learning</div><div class="row"><span>Mode</span><b id="learnmode">SHADOW</b></div><div class="row"><span>Verified rounds</span><b id="learnrounds">0</b></div><div class="row"><span>Model version</span><b id="learnver">1</b></div><div class="small" id="learndetail">Learning only from finalized Kalshi results.</div></div></div>
-<div class="card hist"><div class="lab">Last 10 predictions</div><div id="history"></div></div><div class="foot">One prediction is stored per contract in this browser and never changed during that round. Current contract value uses a multi-exchange BRTI proxy; exact licensed BRTI is not redistributed by this app. Model confidence is score-derived, not a proven win probability. This app does not place trades.</div></div>
+<div class="card"><div class="lab">Verified record</div><div class="row"><span>Wins</span><b id="wins">0</b></div><div class="row"><span>Losses</span><b id="losses">0</b></div><div class="row"><span>Win rate</span><b id="wr">—</b></div><div class="small">Only dual-endpoint finalized Kalshi results with official BRTI settlement-value/PTB agreement count.</div></div>
+<div class="card"><div class="lab">150% opportunity</div><div class="row"><span>Winning picks</span><b id="ew">0</b></div><div class="row"><span>Losing picks</span><b id="el">0</b></div></div><div class="card"><div class="lab">Adaptive learning</div><div class="row"><span>Mode</span><b id="learnmode">SHADOW</b></div><div class="row"><span>Verified rounds</span><b id="learnrounds">0</b></div><div class="row"><span>Model version</span><b id="learnver">1</b></div><div class="small" id="learndetail">Learning only from strictly re-verified finalized rounds.</div></div></div>
+<div class="card hist"><div class="lab">Last 10 predictions</div><div id="history"></div></div><div class="foot">One prediction is stored per contract in this browser and never changed during that round. Historical W/L rows are re-verified under the current settlement-verification version before they count. Current contract value uses a multi-exchange BRTI proxy; exact licensed BRTI is not redistributed by this app. Model confidence is score-derived, not a proven win probability. This app does not place trades.</div></div>
 <script>
-var KEY='btc15webv1',MODEL_KEY='btc15modelv2',last=null,busy=false,forceAfter=false,seenContract=null,liveCoinbasePrice=null,liveCoinbaseAt=0,liveBrti=null,liveSpread=null,liveVenues=[],liveRef=null,liveSpot=null,liveExchange=null,cbStream=null;
+var KEY='btc15webv1',MODEL_KEY='btc15modelv3',VERIFY_VERSION=3,last=null,busy=false,forceAfter=false,seenContract=null,liveCoinbasePrice=null,liveCoinbaseAt=0,liveBrti=null,liveSpread=null,liveVenues=[],liveRef=null,liveSpot=null,liveExchange=null,cbStream=null;
 var BASE_W={momentum:.28,trend:.17,mean_reversion:.11,ptb_time:.22,market:.08,book:.06,flow:.05,cross:.03,research:0};
 var LIMITS={momentum:[-.05,.50],trend:[-.05,.40],mean_reversion:[-.10,.30],ptb_time:[0,.50],market:[-.05,.30],book:[-.08,.20],flow:[-.08,.20],cross:[-.05,.15],research:[-.08,.08]};
 function g(id){return document.getElementById(id)}
@@ -31,16 +31,71 @@ function connectCoinbase(){try{if(cbStream)cbStream.close();cbStream=new EventSo
 function lock(s){var h=load(),x=h.find(function(v){return v.contract_id===s.market.contract_id});if(!x){var d=decision(s);x={contract_id:s.market.contract_id,pick:d.pick,locked_at:new Date().toISOString(),entry_price:d.pick==='OVER'?(s.market.yes_ask??s.market.yes_mid):(s.market.no_ask??s.market.no_mid),yes_ask:s.market.yes_ask,no_ask:s.market.no_ask,ptb:s.market.price_to_beat,btc:activePrice(s),outcome:'PENDING',verified:false,trained:false,early150:false,confidence:d.confidence,score:d.score,signals:s.prediction.signals,base_pick:d.base_pick,adaptive_pick:d.adaptive_pick,base_score:d.base_score,adaptive_score:d.adaptive_score,model_version:d.model_version,adaptive_active:d.adaptive_active};h.push(x);save(h)}return x}
 function verifySettlement(m){if(!m||m.status!=='finalized'||(m.result!=='yes'&&m.result!=='no'))return null;var ev=Number(m.expiration_value),ptb=Number(m.price_to_beat);if(!Number.isFinite(ev)||!Number.isFinite(ptb))return null;var byValue=ev>=ptb?'OVER':'UNDER',byResult=m.result==='yes'?'OVER':'UNDER';if(byValue!==byResult)return{conflict:true,byValue:byValue,byResult:byResult};return{actual:byResult,value:ev,settlement_ts:m.settlement_ts||null}}
 function pnlFor(row,pick,actual){var px=pick==='OVER'?Number(row.yes_ask):Number(row.no_ask);if(!Number.isFinite(px)||px<=0||px>=1)return null;return pick===actual?1-px:-px}
-function trainRow(row){if(row.trained||!row.verified||!row.signals)return;var m=modelLoad(),actual=row.actual,y=actual==='OVER'?1:0,base=row.base_pick||side(scoreSignals(row.signals,BASE_W));var adaptive=row.adaptive_pick||side(scoreSignals(row.signals,m.weights)),bp=pnlFor(row,base,actual),ap=pnlFor(row,adaptive,actual);m.evals.push({contract_id:row.contract_id,base_correct:base===actual?1:0,adaptive_correct:adaptive===actual?1:0,base_pnl:bp,adaptive_pnl:ap});m.evals=m.evals.slice(-40);var cur=scoreSignals(row.signals,m.weights),prob=1/(1+Math.exp(-2*cur)),err=y-prob,lr=.012;for(var k in BASE_W){var x=Number(row.signals[k]);if(!Number.isFinite(x))continue;var w=Number(m.weights[k])||BASE_W[k];w=w*.998+BASE_W[k]*.002+lr*err*x;var lim=LIMITS[k];m.weights[k]=clamp2(w,lim[0],lim[1])}m.verified_rounds=(m.verified_rounds||0)+1;m.version=(m.version||1)+1;m.last_update=new Date().toISOString();var r=m.evals.slice(-24),n=r.length;if(n>=12){var ba=r.reduce(function(a,e){return a+e.base_correct},0)/n,aa=r.reduce(function(a,e){return a+e.adaptive_correct},0)/n,bpSum=r.reduce(function(a,e){return a+(Number.isFinite(e.base_pnl)?e.base_pnl:0)},0),apSum=r.reduce(function(a,e){return a+(Number.isFinite(e.adaptive_pnl)?e.adaptive_pnl:0)},0);if(!m.active&&(aa>=ba+.02||(aa>=ba&&apSum>bpSum+.05)))m.active=true;else if(m.active&&n>=16&&aa+.03<ba&&apSum<bpSum){m.active=false;m.rollback_count=(m.rollback_count||0)+1;for(var q in BASE_W)m.weights[q]=(m.weights[q]+BASE_W[q])/2}}modelSave(m);row.trained=true;row.training_version=m.version}
-async function grade(cur){var h=load(),changed=false;for(const x of h){if(x.contract_id===cur||x.verified===true)continue;try{var r=await fetch('/api/market?ticker='+encodeURIComponent(x.contract_id)+'&ts='+Date.now(),{cache:'no-store'}),j=await r.json(),v=verifySettlement(j.market);if(v&&v.conflict){x.verification_conflict=true;x.verified=false;x.outcome='PENDING';x.verification_source='CONFLICT';changed=true;continue}if(v&&v.actual){x.actual=v.actual;x.settlement_value=v.value;x.settlement_ts=v.settlement_ts;x.outcome=v.actual===x.pick?'WIN':'LOSS';x.verified=true;x.verification_conflict=false;x.verification_source='KALSHI_FINAL+BRTI_MATH';trainRow(x);changed=true}}catch(e){}}if(changed)save(h)}
+function trainRow(row){if(row.trained||!row.verified||row.verification_version!==VERIFY_VERSION||row.training_eligible===false||!row.signals)return;var m=modelLoad(),actual=row.actual,y=actual==='OVER'?1:0,base=row.base_pick||side(scoreSignals(row.signals,BASE_W));var adaptive=row.adaptive_pick||side(scoreSignals(row.signals,m.weights)),bp=pnlFor(row,base,actual),ap=pnlFor(row,adaptive,actual);m.evals.push({contract_id:row.contract_id,base_correct:base===actual?1:0,adaptive_correct:adaptive===actual?1:0,base_pnl:bp,adaptive_pnl:ap});m.evals=m.evals.slice(-40);var cur=scoreSignals(row.signals,m.weights),prob=1/(1+Math.exp(-2*cur)),err=y-prob,lr=.012;for(var k in BASE_W){var x=Number(row.signals[k]);if(!Number.isFinite(x))continue;var w=Number(m.weights[k])||BASE_W[k];w=w*.998+BASE_W[k]*.002+lr*err*x;var lim=LIMITS[k];m.weights[k]=clamp2(w,lim[0],lim[1])}m.verified_rounds=(m.verified_rounds||0)+1;m.version=(m.version||1)+1;m.last_update=new Date().toISOString();var r=m.evals.slice(-24),n=r.length;if(n>=12){var ba=r.reduce(function(a,e){return a+e.base_correct},0)/n,aa=r.reduce(function(a,e){return a+e.adaptive_correct},0)/n,bpSum=r.reduce(function(a,e){return a+(Number.isFinite(e.base_pnl)?e.base_pnl:0)},0),apSum=r.reduce(function(a,e){return a+(Number.isFinite(e.adaptive_pnl)?e.adaptive_pnl:0)},0);if(!m.active&&(aa>=ba+.02||(aa>=ba&&apSum>bpSum+.05)))m.active=true;else if(m.active&&n>=16&&aa+.03<ba&&apSum<bpSum){m.active=false;m.rollback_count=(m.rollback_count||0)+1;for(var q in BASE_W)m.weights[q]=(m.weights[q]+BASE_W[q])/2}}modelSave(m);row.trained=true;row.training_version=m.version}
+async function grade(cur){
+  var h=load(),changed=false;
+  var todo=h.filter(function(x){return x.contract_id!==cur&&!(x.verified===true&&x.verification_version===VERIFY_VERSION)}).slice(0,12);
+  if(!todo.length)return;
+  var results=await Promise.all(todo.map(async function(x){
+    try{
+      var r=await fetch('/api/verify?ticker='+encodeURIComponent(x.contract_id)+'&ts='+Date.now(),{cache:'no-store'});
+      var j=await r.json();
+      return{x:x,j:j};
+    }catch(e){return{x:x,j:{ok:false,verified:false,state:'VERIFYING',reason:String(e.message||e)}}}
+  }));
+  for(const z of results){
+    var x=z.x,j=z.j||{};
+    x.verification_version=VERIFY_VERSION;
+    x.verification_checked_at=new Date().toISOString();
+    x.verification_reason=j.reason||'Verification unavailable';
+    if(j.verified===true&&j.actual){
+      x.actual=j.actual;
+      x.settlement_value=j.settlement_value;
+      x.settlement_ts=j.settlement_ts;
+      x.official_ptb=j.price_to_beat;
+      x.outcome=j.actual===x.pick?'WIN':'LOSS';
+      x.verified=true;
+      x.verification_conflict=false;
+      x.verification_source='KALSHI_DUAL_FINAL+BRTI_MATH';
+      x.trained=false;
+      var storedPtb=Number(x.ptb),officialPtb=Number(j.price_to_beat);
+      x.training_eligible=!Number.isFinite(storedPtb)||!Number.isFinite(officialPtb)||Math.abs(storedPtb-officialPtb)<0.01;
+      if(x.training_eligible)trainRow(x);
+      changed=true;
+    }else{
+      x.verified=false;
+      x.outcome='PENDING';
+      x.verification_conflict=j.state==='CONFLICT';
+      x.verification_source=j.state||'VERIFYING';
+      x.training_eligible=false;
+      changed=true;
+    }
+  }
+  if(changed)save(h);
+}
 function early(s,x){if(x.early150||!Number.isFinite(Number(x.entry_price))||Number(x.entry_price)<=0)return;var v=x.pick==='OVER'?s.market.yes_mid:s.market.no_mid;if(Number.isFinite(Number(v))&&Number(v)>=1.5*Number(x.entry_price)){var h=load(),y=h.find(function(q){return q.contract_id===x.contract_id});if(y){y.early150=true;save(h)}}}
 function learningStats(){var m=modelLoad(),r=m.evals.slice(-24),n=r.length,ba=n?r.reduce(function(a,e){return a+e.base_correct},0)/n:null,aa=n?r.reduce(function(a,e){return a+e.adaptive_correct},0)/n:null,bp=n?r.reduce(function(a,e){return a+(Number.isFinite(e.base_pnl)?e.base_pnl:0)},0):0,ap=n?r.reduce(function(a,e){return a+(Number.isFinite(e.adaptive_pnl)?e.adaptive_pnl:0)},0):0;g('learnmode').textContent=m.active?'ADAPTIVE':'SHADOW';g('learnmode').className=m.active?'win':'pending';g('learnrounds').textContent=m.verified_rounds||0;g('learnver').textContent=m.version||1;g('learndetail').textContent=n?'Last '+n+': base '+(ba*100).toFixed(1)+'% vs adaptive '+(aa*100).toFixed(1)+'% • theoretical P/L '+bp.toFixed(2)+' vs '+ap.toFixed(2)+(m.rollback_count?' • rollbacks '+m.rollback_count:''):'Learning only from finalized Kalshi results.'}
-function stats(){var h=load(),z=h.filter(function(x){return x.verified===true&&(x.outcome==='WIN'||x.outcome==='LOSS')}),w=z.filter(function(x){return x.outcome==='WIN'}).length,l=z.filter(function(x){return x.outcome==='LOSS'}).length;g('wins').textContent=w;g('losses').textContent=l;g('wr').textContent=w+l?(100*w/(w+l)).toFixed(1)+'%':'—';g('ew').textContent=z.filter(function(x){return x.outcome==='WIN'&&x.early150}).length;g('el').textContent=z.filter(function(x){return x.outcome==='LOSS'&&x.early150}).length;var rows=h.slice(-10).reverse();g('history').innerHTML=rows.length?rows.map(function(x){return '<div class="hr"><span>'+x.contract_id+'</span><b class="'+(x.pick==='OVER'?'over':'under')+'">'+x.pick+'</b><b class="'+(x.verified?(x.outcome==='WIN'?'win':'loss'):'pending')+'">'+(x.verified?x.outcome+' ✓':'VERIFYING')+'</b><span>'+(x.verified&&Number.isFinite(Number(x.settlement_value))?money(x.settlement_value):(x.early150?'1.5× ✓':'—'))+'</span></div>'}).join(''):'<div class="status">No recorded predictions yet.</div>';learningStats()}
+function stats(){
+  var h=load(),z=h.filter(function(x){return x.verified===true&&x.verification_version===VERIFY_VERSION&&(x.outcome==='WIN'||x.outcome==='LOSS')});
+  var w=z.filter(function(x){return x.outcome==='WIN'}).length,l=z.filter(function(x){return x.outcome==='LOSS'}).length;
+  g('wins').textContent=w;g('losses').textContent=l;g('wr').textContent=w+l?(100*w/(w+l)).toFixed(1)+'%':'—';
+  g('ew').textContent=z.filter(function(x){return x.outcome==='WIN'&&x.early150}).length;
+  g('el').textContent=z.filter(function(x){return x.outcome==='LOSS'&&x.early150}).length;
+  var rows=h.slice(-10).reverse();
+  g('history').innerHTML=rows.length?rows.map(function(x){
+    var strict=x.verified===true&&x.verification_version===VERIFY_VERSION;
+    var state=x.verification_conflict?'CONFLICT':strict?x.outcome+' ✓':'VERIFYING';
+    var cls=x.verification_conflict?'loss':strict?(x.outcome==='WIN'?'win':'loss'):'pending';
+    var extra=strict&&Number.isFinite(Number(x.settlement_value))?money(x.settlement_value):(x.early150?'1.5× ✓':'—');
+    return '<div class="hr"><span>'+x.contract_id+'</span><b class="'+(x.pick==='OVER'?'over':'under')+'">'+x.pick+'</b><b class="'+cls+'">'+state+'</b><span>'+extra+'</span></div>'
+  }).join(''):'<div class="status">No recorded predictions yet.</div>';
+  learningStats()
+}
 function render(s,x){last=s;var p=activePrice(s),t=s.market.price_to_beat,d=p-t;g('pick').textContent=x.pick;g('pick').className='pick '+(x.pick==='OVER'?'over':'under');g('conf').textContent='Locked '+new Date(x.locked_at).toLocaleTimeString()+' • '+(x.adaptive_active?'adaptive':'base')+' model v'+x.model_version+' • strength '+x.confidence+'%';g('price').textContent=money(p);g('kraken').textContent=s.spot.kraken_price?'Exchange/Kraken cross-check: Kraken '+money(s.spot.kraken_price):'';priceOnly();g('ptb').textContent=money(t);g('dist').textContent=(d>=0?'+':'')+d.toFixed(2)+' '+(d>=0?'above':'below');g('session').textContent=s.market.contract_id;g('remain').textContent=tm((Date.parse(s.market.end_utc)-Date.now())/1000);g('signals').innerHTML=Object.entries(s.prediction.signals).map(function(v){return '<div class="sig"><span class="small">'+v[0].replaceAll('_',' ')+'</span><b>'+v[1]+'</b></div>'}).join('');g('status').textContent='Live • OVER '+(s.market.yes_mid!==null?(s.market.yes_mid*100).toFixed(1)+'¢':'—')+' • UNDER '+(s.market.no_mid!==null?(s.market.no_mid*100).toFixed(1)+'¢':'—');g('dot').style.background='#32d583';g('feed').textContent='Live';stats()}
 async function tick(force){if(busy){if(force)forceAfter=true;return}busy=true;try{var r=await fetch('/api/state?ts='+Date.now(),{cache:'no-store'}),s=await r.json();if(!s.ok)throw Error(s.error||'Live feed error');seenContract=s.market.contract_id;var x=lock(s);early(s,x);render(s,x);grade(s.market.contract_id).then(stats).catch(function(){})}catch(e){g('dot').style.background='#ff5a6f';g('feed').textContent='Feed error';g('status').textContent=String(e.message||e);stats()}finally{busy=false;if(forceAfter){forceAfter=false;setTimeout(function(){tick(true)},0)}}}
 async function watchSession(){try{var r=await fetch('/api/session?ts='+Date.now(),{cache:'no-store'}),j=await r.json(),m=j.market;if(!m||!m.contract_id)return;if(seenContract&&m.contract_id!==seenContract){seenContract=m.contract_id;g('session').textContent=m.contract_id;g('ptb').textContent=money(m.price_to_beat);g('remain').textContent=tm((Date.parse(m.end_utc)-Date.now())/1000);g('pick').textContent='ANALYZING';g('pick').className='pick';g('conf').textContent='New 15-minute session detected • loading fresh model inputs';g('status').textContent='New session detected • refreshing prediction now';tick(true)}else if(!seenContract){seenContract=m.contract_id}}catch(e){}}
 setInterval(function(){if(last){g('remain').textContent=tm((Date.parse(last.market.end_utc)-Date.now())/1000);priceOnly()}},250);
 setInterval(function(){tick(false)},1500);
 setInterval(watchSession,750);
-connectCoinbase();watchSession();tick(true);stats();
+connectCoinbase();watchSession();tick(true);stats();setTimeout(function(){grade(seenContract).then(stats)},1200);setInterval(function(){grade(seenContract).then(stats).catch(function(){})},10000);
 </script></body></html>
