@@ -68,7 +68,7 @@ jobs:
         if: steps.state.outputs.ready == 'true'
         run: |
           command -v ffmpeg >/dev/null 2>&1 || brew install ffmpeg
-          python -m pip install --quiet --upgrade yt-dlp
+          python -m pip install --quiet --upgrade yt-dlp votify
           npm init -y >/dev/null 2>&1
           npm install --silent puppeteer-core @tobyg74/tiktok-api-dl
           FONT_SRC="$(fc-match -f '%{file}\n' 'Arial:style=Bold' | head -1)"
