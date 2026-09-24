@@ -99,7 +99,11 @@ function lockIfReady(s){
   if(row)return row;
   const elapsed=(Date.now()-Date.parse(s.market.start_utc))/1000;
   if(elapsed<LOCK_AFTER_SEC)return null;
-  if(elapsed>ENTRY_WINDOW_END_SEC)return{skip_late:true,contract_id:s.market.contract_id};
+  if(elapsed>ENTRY_WINDOW_END_SEC){
+      const d=decision(s),p=activePrice(s);
+      const entry=d.pick==='OVER'?(s.market.yes_ask??s.market.yes_mid):(s.market.no_ask??s.market.no_mid);
+      return{late_test:true,contract_id:s.market.contract_id,pick:d.pick,locked_at:new Date().toISOString(),entry_price:entry,ptb:s.market.price_to_beat,btc:p,distance_abs:Math.abs(p-s.market.price_to_beat),confidence:d.confidence,model_version:d.model_version,value_entry:false,theoretical_spent:0};
+    }
 
   const d=decision(s),p=activePrice(s);
   const entry=d.pick==='OVER'?(s.market.yes_ask??s.market.yes_mid):(s.market.no_ask??s.market.no_mid);
@@ -255,10 +259,10 @@ function render(s,row){
   const candidate=decision(s);
   const candidateEntry=candidate.pick==='OVER'?(s.market.yes_ask??s.market.yes_mid):(s.market.no_ask??s.market.no_mid);
   el('selentry').textContent=row&&row.entry_price!=null?Math.round(Number(row.entry_price)*100)+'¢':Number.isFinite(Number(candidateEntry))?Math.round(Number(candidateEntry)*100)+'¢':'—';
-  if(row&&row.skip_late){el('valuestate').textContent='Skipped — missed first minute';
-    el('pick').textContent='WAIT NEXT ROUND';el('pick').className='pick pending';
-    el('conf').textContent='Opened after the first-minute decision window • no late entry will be simulated';
-    el('status').textContent='Late-round protection active • waiting for the next 15-minute session';
+  if(row&&row.late_test){el('valuestate').textContent='TEST ONLY — not counted';
+    el('pick').textContent=row.pick;el('pick').className='pick '+(row.pick==='OVER'?'over':'under');
+    el('conf').textContent='MID-ROUND TEST PICK • opened after the 60s window • not counted in record or P/L';
+    el('status').textContent='Current round shown for testing only. Next round will use the normal 55-second lock.';
   }else if(!row){
     const cand=decision(s),left=Math.max(0,LOCK_AFTER_SEC-elapsed);
     el('pick').textContent='ANALYZING';el('pick').className='pick';el('valuestate').textContent=Number.isFinite(Number(candidateEntry))?(Number(candidateEntry)<=MAX_VALUE_ENTRY?'Value eligible now':'Above 67¢ cap'):'Waiting for market';
@@ -279,7 +283,7 @@ async function tick(force=false){
     const r=await fetch('/api/state?ts='+Date.now(),{cache:'no-store'}),s=await r.json();
     if(!s.ok)throw Error(s.error||'Live feed error');
     seenContract=s.market.contract_id;captureShadow(s);
-    const row=lockIfReady(s);if(row&&!row.skip_late)track150(s,row);render(s,row);
+    const row=lockIfReady(s);if(row&&!row.late_test)track150(s,row);render(s,row);
     verifyHistory(s.market.contract_id).catch(()=>{});
   }catch(e){
     el('dot').style.background='#ff5a6f';el('feed').textContent='Feed error';el('status').textContent=String(e.message||e);renderStats();
