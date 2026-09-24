@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -14,6 +15,7 @@ BASE = Path('rubyclips')
 WORK = BASE / 'muffin_work'
 STATE_PATH = BASE / 'muffin_state.json'
 COBALT_API = 'https://rubyclips-cobalt-3.onrender.com/'
+PHONE_MEDIA_API = 'https://rubyclips-phone-host.onrender.com/api/auto-cut'
 CHUNK_SECONDS = 580.0
 HARD_MAX_SECONDS = 598.5
 UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140 Safari/537.36'
@@ -339,20 +341,40 @@ def make_cut(transport, start, clip_len, out):
     raw.unlink(missing_ok=True)
     out.unlink(missing_ok=True)
 
+    # First use our Render media bridge so the YouTube bytes are acquired
+    # outside GitHub's challenged runner IP range.
+    bridge_url = PHONE_MEDIA_API + '?' + urllib.parse.urlencode({
+        'v': transport['id'],
+        'start': f'{start:.3f}',
+        'duration': f'{clip_len:.3f}',
+    })
     try:
-        media_url = cobalt_media(transport['url'])
         run([
             'ffmpeg', '-y', '-hide_banner', '-loglevel', 'warning',
-            '-ss', f'{start:.3f}', '-i', media_url, '-t', f'{clip_len:.3f}',
+            '-i', bridge_url, '-t', f'{clip_len:.3f}',
             '-map', '0:v:0', '-map', '0:a:0?',
             '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '22', '-pix_fmt', 'yuv420p',
             '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-movflags', '+faststart', str(raw)
         ], timeout=1800)
-        strategy = 'spotify-catalog:cobalt-public-transport'
-    except Exception as exc:
-        print(f'Cobalt transport unavailable, falling back to resilient YouTube acquisition: {exc}', flush=True)
-        yt_strategy = youtube_section_download(transport['url'], start, clip_len, raw)
-        strategy = f'spotify-catalog:{yt_strategy}'
+        if not raw.exists() or raw.stat().st_size < 500000:
+            raise RuntimeError('Render media bridge returned an unusable cut.')
+        strategy = 'spotify-catalog:render-auto-bridge'
+    except Exception as bridge_exc:
+        print(f'Render media bridge unavailable; trying Cobalt/direct paths: {bridge_exc}', flush=True)
+        try:
+            media_url = cobalt_media(transport['url'])
+            run([
+                'ffmpeg', '-y', '-hide_banner', '-loglevel', 'warning',
+                '-ss', f'{start:.3f}', '-i', media_url, '-t', f'{clip_len:.3f}',
+                '-map', '0:v:0', '-map', '0:a:0?',
+                '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '22', '-pix_fmt', 'yuv420p',
+                '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-movflags', '+faststart', str(raw)
+            ], timeout=1800)
+            strategy = 'spotify-catalog:cobalt-public-transport'
+        except Exception as exc:
+            print(f'Cobalt transport unavailable, falling back to resilient YouTube acquisition: {exc}', flush=True)
+            yt_strategy = youtube_section_download(transport['url'], start, clip_len, raw)
+            strategy = f'spotify-catalog:{yt_strategy}'
 
     if not raw.exists() or raw.stat().st_size < 500000:
         raise RuntimeError('Media transport did not create a usable source cut.')
