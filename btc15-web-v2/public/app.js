@@ -5,6 +5,7 @@ const SHADOW_KEY='btc15v2_shadow';
 const VERIFY_VERSION=3;
 const LOCK_AFTER_SEC=115;
 const MAX_VALUE_ENTRY=.67;
+const ENTRY_WINDOW_END_SEC=180;
 
 const BASE_W={
   momentum:.10, trend:.07, mean_reversion:.04, ptb_time:.62,
@@ -98,6 +99,7 @@ function lockIfReady(s){
   if(row)return row;
   const elapsed=(Date.now()-Date.parse(s.market.start_utc))/1000;
   if(elapsed<LOCK_AFTER_SEC)return null;
+  if(elapsed>ENTRY_WINDOW_END_SEC)return{skip_late:true,contract_id:s.market.contract_id};
 
   const d=decision(s),p=activePrice(s);
   const entry=d.pick==='OVER'?(s.market.yes_ask??s.market.yes_mid):(s.market.no_ask??s.market.no_mid);
@@ -251,7 +253,11 @@ function render(s,row){
   el('kraken').textContent=s.spot.kraken_price?'Kraken cross-check: '+money(s.spot.kraken_price):'';
   renderPrice();
 
-  if(!row){
+  if(row&&row.skip_late){
+    el('pick').textContent='WAIT NEXT ROUND';el('pick').className='pick pending';
+    el('conf').textContent='V2 opened after the profitable entry window • no late entry will be simulated';
+    el('status').textContent='Late-round protection active • waiting for the next 15-minute session';
+  }else if(!row){
     const cand=decision(s),left=Math.max(0,LOCK_AFTER_SEC-elapsed);
     el('pick').textContent='ANALYZING';el('pick').className='pick';
     el('conf').textContent='Current V2 candidate: '+cand.pick+' • locks in '+left.toFixed(0)+'s • PTB distance '+money(Math.abs(d));
@@ -271,7 +277,7 @@ async function tick(force=false){
     const r=await fetch('/api/state?ts='+Date.now(),{cache:'no-store'}),s=await r.json();
     if(!s.ok)throw Error(s.error||'Live feed error');
     seenContract=s.market.contract_id;captureShadow(s);
-    const row=lockIfReady(s);if(row)track150(s,row);render(s,row);
+    const row=lockIfReady(s);if(row&&!row.skip_late)track150(s,row);render(s,row);
     verifyHistory(s.market.contract_id).catch(()=>{});
   }catch(e){
     el('dot').style.background='#ff5a6f';el('feed').textContent='Feed error';el('status').textContent=String(e.message||e);renderStats();
