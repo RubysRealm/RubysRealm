@@ -23,7 +23,7 @@ def latest_episode(show_id):
     page = fetch(f'https://open.spotify.com/embed/show/{show_id}')
     episode_id = None
     for pattern in (
-        r'https://open\\.spotify\\.com/episode/([A-Za-z0-9]+)',
+        r'https://open\.spotify\.com/episode/([A-Za-z0-9]+)',
         r'/episode/([A-Za-z0-9]+)',
         r'spotify:episode:([A-Za-z0-9]+)',
     ):
@@ -39,12 +39,12 @@ def latest_episode(show_id):
     m = re.search(r'<title[^>]*>(.*?)</title>', page, re.I | re.S)
     if m:
         raw = html.unescape(re.sub(r'<[^>]+>', '', m.group(1))).strip()
-        suffix = re.match(r'^(.*?)\\s+-\\s+(.+?)\\s+\\|\\s+Spotify\\s*$', raw)
+        suffix = re.match(r'^(.*?)\s+-\s+(.+?)\s+\\|\s+Spotify\s*$', raw)
         if suffix:
             title = suffix.group(1).strip()
             creator = suffix.group(2).strip()
         else:
-            title = re.sub(r'\\s*\\|\\s*Spotify\\s*$', '', raw).strip()
+            title = re.sub(r'\s*\\|\s*Spotify\s*$', '', raw).strip()
 
     return episode_id, title, creator
 
