@@ -58,17 +58,17 @@ def spotify_episode_meta(episode_id, fallback_title, fallback_creator):
     m = re.search(r'<title[^>]*>(.*?)</title>', page, re.I | re.S)
     if m:
         raw = html.unescape(re.sub(r'<[^>]+>', '', m.group(1))).strip()
-        suffix = re.match(r'^(.*?)\\s+-\\s+(.+?)\\s+\\|\\s+Spotify\\s*$', raw)
+        suffix = re.match(r'^(.*?)\s+-\s+(.+?)\s+\\|\s+Spotify\s*$', raw)
         if suffix:
             title = suffix.group(1).strip() or title
             creator = suffix.group(2).strip() or creator
         else:
-            title = re.sub(r'\\s*\\|\\s*Spotify\\s*$', '', raw).strip() or title
+            title = re.sub(r'\s*\\|\s*Spotify\s*$', '', raw).strip() or title
 
     image = None
     for pattern in (
-        r'https://image-cdn-[^"\\\']+spotifycdn\\.com/image/[A-Za-z0-9]+',
-        r'https://i\\.scdn\\.co/image/[A-Za-z0-9]+',
+        r'https://image-cdn-[^"\\\']+spotifycdn\.com/image/[A-Za-z0-9]+',
+        r'https://i\.scdn\.co/image/[A-Za-z0-9]+',
     ):
         m = re.search(pattern, page)
         if m:
@@ -142,9 +142,24 @@ def probe_transport(url):
 
 
 def choose_transport(title, creator, channel_handle):
-    rows = yt_channel_candidates(channel_handle)
-    if not rows:
-        rows = yt_search_candidates(f'{title} {creator}'.strip())
+    # Search both the pinned creator channel and normal YouTube discovery.
+    # The old flow stopped at the pinned channel whenever it returned any rows,
+    # even if none of those rows matched the Spotify episode title.
+    channel_rows = yt_channel_candidates(channel_handle)
+    search_rows = yt_search_candidates(f'{title} {creator}'.strip())
+    if not search_rows:
+        search_rows = yt_search_candidates(title)
+
+    rows = []
+    seen = set()
+    for row in channel_rows + search_rows:
+        key = str(row.get('id') or row.get('webpage_url') or row.get('url') or '')
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        rows.append(row)
+
     if not rows:
         raise RuntimeError('No public media matches were found for the Spotify episode title.')
 
@@ -171,7 +186,7 @@ def choose_transport(title, creator, channel_handle):
 
     if not scored:
         raise RuntimeError('Creator channel returned no usable public media transport.')
-    scored.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+    scored.sort(key=lambda x: (x[1], x[0], x[2]), reverse=True)
     creator_match, title_score, duration, row, url = scored[0]
     if title_score < 0.72 or (creator and not creator_match and title_score < 0.94):
         raise RuntimeError(
