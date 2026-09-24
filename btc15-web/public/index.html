@@ -10,8 +10,8 @@
 <div class="card hist"><div class="lab">Last 10 predictions</div><div id="history"></div></div><div class="foot">One prediction is stored per contract in this browser and never changed during that round. Current contract value uses a multi-exchange BRTI proxy; exact licensed BRTI is not redistributed by this app. Model confidence is score-derived, not a proven win probability. This app does not place trades.</div></div>
 <script>
 var KEY='btc15webv1',MODEL_KEY='btc15modelv2',last=null,busy=false,forceAfter=false,seenContract=null,liveCoinbasePrice=null,liveCoinbaseAt=0,liveBrti=null,liveSpread=null,liveVenues=[],liveRef=null,liveSpot=null,liveExchange=null,cbStream=null;
-var BASE_W={momentum:.28,trend:.17,mean_reversion:.11,ptb_time:.22,market:.08,book:.06,flow:.05,cross:.03};
-var LIMITS={momentum:[-.05,.50],trend:[-.05,.40],mean_reversion:[-.10,.30],ptb_time:[0,.50],market:[-.05,.30],book:[-.08,.20],flow:[-.08,.20],cross:[-.05,.15]};
+var BASE_W={momentum:.28,trend:.17,mean_reversion:.11,ptb_time:.22,market:.08,book:.06,flow:.05,cross:.03,research:0};
+var LIMITS={momentum:[-.05,.50],trend:[-.05,.40],mean_reversion:[-.10,.30],ptb_time:[0,.50],market:[-.05,.30],book:[-.08,.20],flow:[-.08,.20],cross:[-.05,.15],research:[-.08,.08]};
 function g(id){return document.getElementById(id)}
 function load(){try{return JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){return[]}}
 function save(x){localStorage.setItem(KEY,JSON.stringify(x.slice(-150)))}
