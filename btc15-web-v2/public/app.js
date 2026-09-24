@@ -4,6 +4,7 @@ const MODEL_KEY='btc15v2_model';
 const SHADOW_KEY='btc15v2_shadow';
 const VERIFY_VERSION=3;
 const LOCK_AFTER_SEC=115;
+const MAX_VALUE_ENTRY=.67;
 
 const BASE_W={
   momentum:.10, trend:.07, mean_reversion:.04, ptb_time:.62,
@@ -99,16 +100,18 @@ function lockIfReady(s){
   if(elapsed<LOCK_AFTER_SEC)return null;
 
   const d=decision(s),p=activePrice(s);
+  const entry=d.pick==='OVER'?(s.market.yes_ask??s.market.yes_mid):(s.market.no_ask??s.market.no_mid);
+  const valueEntry=Number.isFinite(Number(entry))&&Number(entry)<=MAX_VALUE_ENTRY;
   row={
     contract_id:s.market.contract_id,pick:d.pick,locked_at:new Date().toISOString(),
     lock_elapsed_sec:elapsed,
-    entry_price:d.pick==='OVER'?(s.market.yes_ask??s.market.yes_mid):(s.market.no_ask??s.market.no_mid),
+    entry_price:entry,
     yes_ask:s.market.yes_ask,no_ask:s.market.no_ask,ptb:s.market.price_to_beat,
     btc:p,distance_abs:Math.abs(p-s.market.price_to_beat),signals:s.prediction.signals,
     confidence:d.confidence,score:d.score,base_pick:d.base_pick,adaptive_pick:d.adaptive_pick,
     model_version:d.model_version,adaptive_active:d.adaptive_active,
     outcome:'PENDING',verified:false,verification_version:null,trained:false,early150:false,
-    theoretical_spent:1
+    theoretical_spent:valueEntry?1:0,value_entry:valueEntry
   };
   h.push(row);saveHistory(h);return row;
 }
@@ -209,9 +212,9 @@ function renderStats(){
   el('ew').textContent=settled.filter(x=>x.outcome==='WIN'&&x.early150).length;
   el('el').textContent=settled.filter(x=>x.outcome==='LOSS'&&x.early150).length;
 
-  const spent=h.reduce((a,x)=>a+(Number(x.theoretical_spent)||1),0);
+  const spent=h.reduce((a,x)=>a+(Number(x.theoretical_spent)||0),0);
   const earned=settled.reduce((a,x)=>{
-    if(x.outcome!=='WIN')return a;
+    if(x.outcome!=='WIN'||!x.value_entry)return a;
     const p=Number(x.entry_price);return a+(Number.isFinite(p)&&p>0?1/p:0);
   },0);
   const net=earned-spent;
@@ -234,7 +237,7 @@ function renderStats(){
     const strict=x.verified&&x.verification_version===VERIFY_VERSION;
     const state=x.verification_conflict?'CONFLICT':strict?x.outcome+' ✓':'VERIFYING';
     const cls=x.verification_conflict?'loss':strict?(x.outcome==='WIN'?'win':'loss'):'pending';
-    const payout=strict&&x.outcome==='WIN'&&Number(x.entry_price)>0?'$'+(1/Number(x.entry_price)).toFixed(2):strict?'$0.00':'—';
+    const payout=!x.value_entry?'NO VALUE':strict&&x.outcome==='WIN'&&Number(x.entry_price)>0?'$'+(1/Number(x.entry_price)).toFixed(2):strict?'$0.00':'—';
     return '<div class="hr"><span>'+x.contract_id+'</span><b class="'+(x.pick==='OVER'?'over':'under')+'">'+x.pick+'</b><b class="'+cls+'">'+state+'</b><span>'+payout+'</span></div>';
   }).join(''):'<div class="status">No V2 locked predictions yet.</div>';
 }
@@ -252,10 +255,10 @@ function render(s,row){
     const cand=decision(s),left=Math.max(0,LOCK_AFTER_SEC-elapsed);
     el('pick').textContent='ANALYZING';el('pick').className='pick';
     el('conf').textContent='Current V2 candidate: '+cand.pick+' • locks in '+left.toFixed(0)+'s • PTB distance '+money(Math.abs(d));
-    el('status').textContent='V2 analysis window • snapshots at 30 / 60 / 90 / 115 sec • $1 theoretical begins only when locked';
+    el('status').textContent='V2 analysis window • snapshots at 30 / 60 / 90 / 115 sec • $1 sim only enters at 67¢ or cheaper';
   }else{
     el('pick').textContent=row.pick;el('pick').className='pick '+(row.pick==='OVER'?'over':'under');
-    el('conf').textContent='Locked '+new Date(row.locked_at).toLocaleTimeString()+' • model v'+row.model_version+' • strength '+row.confidence+'% • $1 theoretical';
+    el('conf').textContent='Locked '+new Date(row.locked_at).toLocaleTimeString()+' • model v'+row.model_version+' • strength '+row.confidence+'% • '+(row.value_entry?'$1 VALUE ENTRY @ '+Math.round(Number(row.entry_price)*100)+'¢':'NO VALUE ENTRY @ '+Math.round(Number(row.entry_price)*100)+'¢');
     el('status').textContent='Live • OVER '+(s.market.yes_mid!==null?(s.market.yes_mid*100).toFixed(1)+'¢':'—')+' • UNDER '+(s.market.no_mid!==null?(s.market.no_mid*100).toFixed(1)+'¢':'—');
   }
   el('dot').style.background='#32d583';el('feed').textContent='Live';renderStats();
