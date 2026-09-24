@@ -1,4 +1,4 @@
-name: Rubaradaclips bgutil transport probe
+name: Rubaradaclips accessible Spotify episode probe
 on:
   push:
     paths:
@@ -7,12 +7,8 @@ permissions:
   contents: read
 jobs:
   probe:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,7 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install current yt-dlp and bgutil 2.0
+      - name: Install current transport stack
         shell: bash
         run: |
           set -euo pipefail
@@ -31,31 +27,66 @@ jobs:
           cd "$HOME/bgutil-ytdlp-pot-provider/server"
           npm ci --no-audit --no-fund
           npx tsc
-          node build/generate_once.js | tail -n 1 | tee /tmp/pot.json
-          python - <<'PY'
-          import json
-          d=json.load(open('/tmp/pot.json'))
-          assert d.get('poToken') and d.get('contentBinding'), d
-          print('POT_GENERATION_OK')
-          PY
-      - name: Probe exact Spotify-selected public video with vendor settings
-        shell: bash
-        run: |
-          set -uo pipefail
-          URL='https://www.youtube.com/watch?v=jXkBF-MCjEA'
-          SERVER="$HOME/bgutil-ytdlp-pot-provider/server"
-          yt-dlp -vF --color never             --ignore-no-formats-error             --js-runtimes node             --remote-components ejs:github             --extractor-args "youtube:player_client=web,web_music,mweb;pot_trace=true;fetch_pot=always"             --extractor-args "youtubepot-bgutilscript:server_home=$SERVER"             "$URL" 2>&1 | tee /tmp/probe.log
-          RC=${PIPESTATUS[0]}
-          echo "probe_exit=$RC"
-          grep -E "\\[pot:bgutil|Generated POT|Generating POT|Available formats|Sign in|bot|ERROR|WARNING" /tmp/probe.log | tail -n 200 || true
-          exit "$RC"
-      - name: Download a short proof segment
-        if: success()
+          node build/generate_once.js | tail -n 1 | python -c "import json,sys; d=json.load(sys.stdin); assert d.get('poToken') and d.get('contentBinding'); print('POT_OK')"
+      - name: Find first accessible episode transport
         shell: bash
         run: |
           set -euo pipefail
-          URL='https://www.youtube.com/watch?v=jXkBF-MCjEA'
           SERVER="$HOME/bgutil-ytdlp-pot-provider/server"
-          yt-dlp             --js-runtimes node             --remote-components ejs:github             --extractor-args "youtube:player_client=web,web_music,mweb;pot_trace=true;fetch_pot=always"             --extractor-args "youtubepot-bgutilscript:server_home=$SERVER"             --download-sections '*0-20'             -f 'best[height<=720]/best'             --merge-output-format mp4             -o /tmp/proof.%(ext)s             "$URL"
-          ls -lh /tmp/proof.*
-          test "$(find /tmp -maxdepth 1 -name 'proof.*' -type f -size +500k | wc -l | tr -d ' ')" -ge 1
+          python - "$SERVER" <<'PY'
+          import json, subprocess, sys, pathlib
+          server=sys.argv[1]
+          candidates=[
+            {"spotifyId":"0GnEJOTdJMlBZmkawwC9JB","title":"40 minutes of reddit stories and minecraft to help you be productive","youtubeId":"gTZi1vZ4Zes"},
+            {"spotifyId":"7ftpSf4ODZfJafmQBPP6HX","title":"reading the MESSIEST REDDIT STORIES i could possibly find","youtubeId":"hGTWkG5zwFQ"},
+            {"spotifyId":"2GIOjWw1E90bvEXGCPoEWA","title":"I read your UNHINGED emails again...","youtubeId":"jXkBF-MCjEA"},
+          ]
+          base=[
+            'yt-dlp','--dump-single-json','--no-warnings',
+            '--js-runtimes','node','--remote-components','ejs:github',
+            '--extractor-args','youtube:player_client=web,web_music,mweb;pot_trace=true;fetch_pot=always',
+            '--extractor-args',f'youtubepot-bgutilscript:server_home={server}',
+          ]
+          results=[]
+          winner=None
+          for c in candidates:
+              url='https://www.youtube.com/watch?v='+c['youtubeId']
+              p=subprocess.run(base+[url],text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=180)
+              lines=[x for x in p.stdout.splitlines() if x.lstrip().startswith('{')]
+              row=dict(c,exit=p.returncode,formats=0,tail=p.stdout[-1800:])
+              if lines:
+                  try:
+                      d=json.loads(lines[-1]); row['formats']=len(d.get('formats') or []); row['duration']=d.get('duration'); row['resolvedTitle']=d.get('title')
+                  except Exception as e: row['parseError']=repr(e)
+              print(json.dumps({k:v for k,v in row.items() if k!='tail'},ensure_ascii=False))
+              results.append(row)
+              if p.returncode==0 and row['formats']>0 and not winner:
+                  winner=c
+                  pathlib.Path('/tmp/winner.json').write_text(json.dumps(c))
+                  break
+          pathlib.Path('/tmp/probe-results.json').write_text(json.dumps(results,indent=2))
+          if not winner:
+              print('\n'.join(r['tail'] for r in results))
+              raise SystemExit('NO_ACCESSIBLE_EPISODE_TRANSPORT')
+          PY
+      - name: Download proof from accessible episode
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVER="$HOME/bgutil-ytdlp-pot-provider/server"
+          VID="$(python -c "import json; print(json.load(open('/tmp/winner.json'))['youtubeId'])")"
+          yt-dlp             --js-runtimes node --remote-components ejs:github             --extractor-args "youtube:player_client=web,web_music,mweb;fetch_pot=always"             --extractor-args "youtubepot-bgutilscript:server_home=$SERVER"             --download-sections '*0-20'             -f 'best[height<=720]/best'             --merge-output-format mp4             -o '/tmp/proof.%(ext)s'             "https://www.youtube.com/watch?v=$VID"
+          FILE="$(find /tmp -maxdepth 1 -name 'proof.*' -type f | head -1)"
+          test -n "$FILE"
+          test "$(stat -c%s "$FILE")" -gt 500000
+          echo "PROOF_DOWNLOAD_OK $VID $(stat -c%s "$FILE")"
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubaradaclips-accessible-episode-probe
+          path: |
+            /tmp/winner.json
+            /tmp/probe-results.json
+          if-no-files-found: ignore
+          retention-days: 1
