@@ -102,7 +102,17 @@ function lockIfReady(s){
   if(elapsed>ENTRY_WINDOW_END_SEC){
       const d=decision(s),p=activePrice(s);
       const entry=d.pick==='OVER'?(s.market.yes_ask??s.market.yes_mid):(s.market.no_ask??s.market.no_mid);
-      return{late_test:true,contract_id:s.market.contract_id,pick:d.pick,locked_at:new Date().toISOString(),entry_price:entry,ptb:s.market.price_to_beat,btc:p,distance_abs:Math.abs(p-s.market.price_to_beat),confidence:d.confidence,model_version:d.model_version,value_entry:false,theoretical_spent:0};
+      row={
+        contract_id:s.market.contract_id,pick:d.pick,locked_at:new Date().toISOString(),
+        lock_elapsed_sec:elapsed,entry_price:entry,yes_ask:s.market.yes_ask,no_ask:s.market.no_ask,
+        ptb:s.market.price_to_beat,btc:p,distance_abs:Math.abs(p-s.market.price_to_beat),
+        signals:s.prediction.signals,confidence:d.confidence,score:d.score,
+        base_pick:d.base_pick,adaptive_pick:d.adaptive_pick,model_version:d.model_version,
+        adaptive_active:d.adaptive_active,outcome:'PENDING',verified:false,
+        verification_version:null,trained:true,early150:false,theoretical_spent:0,
+        value_entry:false,late_test:true
+      };
+      h.push(row);saveHistory(h);return row;
     }
 
   const d=decision(s),p=activePrice(s);
@@ -128,7 +138,7 @@ function theoreticalPnl(row,pick,actual){
   return pick===actual?(1/px)-1:-1;
 }
 function train(row){
-  if(row.trained||!row.verified||row.verification_version!==VERIFY_VERSION||!row.signals)return;
+  if(row.trained||row.late_test||!row.verified||row.verification_version!==VERIFY_VERSION||!row.signals)return;
   const m=loadModel(),actual=row.actual,y=actual==='OVER'?1:0;
   const base=row.base_pick||pickSide(regimeScore(row.signals,BASE_W,row.distance_abs));
   const adaptive=row.adaptive_pick||pickSide(regimeScore(row.signals,m.weights,row.distance_abs));
@@ -165,7 +175,7 @@ function train(row){
 
 async function verifyHistory(currentTicker){
   const h=loadHistory();
-  const todo=h.filter(x=>x.contract_id!==currentTicker&&!(x.verified&&x.verification_version===VERIFY_VERSION)).slice(0,12);
+  const now=Date.now();const todo=h.filter(x=>!(x.verified&&x.verification_version===VERIFY_VERSION)&&((x.contract_id!==currentTicker)||((Number(x.lock_elapsed_sec)||0)>=0&&last&&Date.parse(last.market.end_utc)<=now))).slice(0,12);
   if(!todo.length)return;
   const results=await Promise.all(todo.map(async row=>{
     try{
@@ -241,7 +251,7 @@ function renderStats(){
   const rows=h.slice(-10).reverse();
   el('history').innerHTML=rows.length?rows.map(x=>{
     const strict=x.verified&&x.verification_version===VERIFY_VERSION;
-    const state=x.verification_conflict?'CONFLICT':strict?x.outcome+' ✓':'VERIFYING';
+    const state=x.verification_conflict?'CONFLICT':strict?x.outcome+' ✓':x.late_test?'TEST • VERIFYING':'VERIFYING';
     const cls=x.verification_conflict?'loss':strict?(x.outcome==='WIN'?'win':'loss'):'pending';
     const payout=!x.value_entry?'NO VALUE':strict&&x.outcome==='WIN'&&Number(x.entry_price)>0?'$'+(1/Number(x.entry_price)).toFixed(2):strict?'$0.00':'—';
     return '<div class="hr"><span>'+x.contract_id+'</span><b class="'+(x.pick==='OVER'?'over':'under')+'">'+x.pick+'</b><b class="'+cls+'">'+state+'</b><span>'+payout+'</span></div>';
@@ -261,8 +271,8 @@ function render(s,row){
   el('selentry').textContent=row&&row.entry_price!=null?Math.round(Number(row.entry_price)*100)+'¢':Number.isFinite(Number(candidateEntry))?Math.round(Number(candidateEntry)*100)+'¢':'—';
   if(row&&row.late_test){el('valuestate').textContent='TEST ONLY — not counted';
     el('pick').textContent=row.pick;el('pick').className='pick '+(row.pick==='OVER'?'over':'under');
-    el('conf').textContent='MID-ROUND TEST PICK • opened after the 60s window • not counted in record or P/L';
-    el('status').textContent='Current round shown for testing only. Next round will use the normal 55-second lock.';
+    el('conf').textContent='MID-ROUND TEST PICK • will still be verified for WIN/LOSS • excluded from $1 P/L';
+    el('status').textContent='This pick is saved and will be graded from the official Kalshi settlement. Next round returns to the normal 55-second lock.';
   }else if(!row){
     const cand=decision(s),left=Math.max(0,LOCK_AFTER_SEC-elapsed);
     el('pick').textContent='ANALYZING';el('pick').className='pick';el('valuestate').textContent=Number.isFinite(Number(candidateEntry))?(Number(candidateEntry)<=MAX_VALUE_ENTRY?'Value eligible now':'Above 67¢ cap'):'Waiting for market';
