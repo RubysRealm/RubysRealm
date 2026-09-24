@@ -293,6 +293,17 @@ async function tick(force=false){
   try{
     const r=await fetch('/api/state?ts='+Date.now(),{cache:'no-store'}),s=await r.json();
     if(!s.ok)throw Error(s.error||'Live feed error');
+    if(s.maintenance||!s.market){
+      const bp=Number(s.spot?.price),cp=Number(s.spot?.coinbase_app_spot);
+      el('pick').textContent='PAUSED';el('pick').className='pick pending';
+      el('conf').textContent='No active Kalshi KXBTC15M round';
+      el('status').textContent='Kalshi maintenance / no active round. Live BTC pricing remains available.';
+      el('price').textContent=money(bp);el('ptb').textContent='—';el('dist').textContent='No active round';
+      el('remain').textContent='—';el('session').textContent='KALSHI MAINTENANCE';
+      el('yesask').textContent='—';el('noask').textContent='—';el('selentry').textContent='—';el('valuestate').textContent='No active market';
+      el('cbmeta').textContent='BRTI reference proxy';el('cbcompare').textContent='Coinbase Spot '+money(cp)+' • BRTI proxy '+money(bp);
+      el('dot').style.background='#f2bd57';el('feed').textContent='Price feed live';renderStats();return;
+    }
     seenContract=s.market.contract_id;captureShadow(s);
     const row=lockIfReady(s);if(row&&!row.late_test)track150(s,row);render(s,row);
     verifyHistory(s.market.contract_id).catch(()=>{});
