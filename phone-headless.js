@@ -56,6 +56,70 @@ async function fetchJson(url, opts = {}, timeoutMs = 25000) {
 
 async function resolvePublicMuxed(videoId) {
   const errors = [];
+  const pipedApis = [
+    'https://pipedapi.kavin.rocks',
+    'https://pipedapi.leptons.xyz',
+    'https://pipedapi.nosebs.ru',
+    'https://pipedapi.moomoo.me',
+    'https://pipedapi.syncpundit.io',
+    'https://api-piped.mha.fi',
+    'https://piped-api.garudalinux.org'
+  ];
+  const qualityNumber = x => {
+    const q = String(x?.quality || x?.qualityLabel || '').match(/\d+/);
+    return q ? Number(q[0]) : 0;
+  };
+  const streamUrl = (x, base) => {
+    const u = String(x?.url || '').trim();
+    if (!u) return '';
+    try { return new URL(u, base).href; } catch { return ''; }
+  };
+
+  for (const api of pipedApis) {
+    try {
+      const d = await fetchJson(`${api}/streams/${encodeURIComponent(videoId)}`, {}, 30000);
+      const videoRows = Array.isArray(d.videoStreams) ? d.videoStreams : [];
+      const audioRows = Array.isArray(d.audioStreams) ? d.audioStreams : [];
+
+      const muxed = videoRows
+        .map(x => ({...x, resolvedUrl: streamUrl(x, api), q: qualityNumber(x)}))
+        .filter(x => x.resolvedUrl && x.videoOnly === false)
+        .sort((a,b) => {
+          const aq = a.q && a.q <= 720 ? a.q : 0;
+          const bq = b.q && b.q <= 720 ? b.q : 0;
+          return bq - aq;
+        });
+      const muxedPreferred = muxed.find(x => x.q > 0 && x.q <= 720) || muxed[0];
+      if (muxedPreferred) {
+        console.log('Automatic source resolved through Piped muxed', api, 'quality', muxedPreferred.q || 'unknown');
+        return { url: muxedPreferred.resolvedUrl, source: `piped:${api}`, title: String(d.title || '') };
+      }
+
+      const videos = videoRows
+        .map(x => ({...x, resolvedUrl: streamUrl(x, api), q: qualityNumber(x)}))
+        .filter(x => x.resolvedUrl)
+        .sort((a,b) => {
+          const aq = a.q && a.q <= 720 ? a.q : 0;
+          const bq = b.q && b.q <= 720 ? b.q : 0;
+          return bq - aq;
+        });
+      const video = videos.find(x => x.q > 0 && x.q <= 720) || videos[0];
+      const audios = audioRows
+        .map(x => ({...x, resolvedUrl: streamUrl(x, api), br: Number(x.bitrate || 0)}))
+        .filter(x => x.resolvedUrl)
+        .sort((a,b) => b.br - a.br);
+      const audio = audios[0];
+
+      if (video && audio) {
+        console.log('Automatic source resolved through Piped adaptive pair', api, 'quality', video.q || 'unknown');
+        return { videoUrl: video.resolvedUrl, audioUrl: audio.resolvedUrl, source: `piped-pair:${api}`, title: String(d.title || '') };
+      }
+      errors.push(`${api}: no usable media streams`);
+    } catch (e) {
+      errors.push(`${api}: ${String(e?.message || e).slice(0,180)}`);
+    }
+  }
+
   for (const api of AUTO_SOURCE_APIS) {
     try {
       const d = await fetchJson(`${api}/api/v1/videos/${encodeURIComponent(videoId)}`);
@@ -109,14 +173,33 @@ async function resolvePublicMuxed(videoId) {
 async function buildAutomaticCut(videoId, start, duration) {
   const resolved = await resolvePublicMuxed(videoId);
   const out = path.join('/tmp', `rubyclips-auto-${videoId}-${Math.round(start)}-${Date.now()}.mp4`);
-  await run(ffmpegPath, [
-    '-y','-hide_banner','-loglevel','warning',
-    '-ss', String(start), '-i', resolved.url,
+  const commonOut = [
     '-t', String(duration),
-    '-map','0:v:0','-map','0:a:0?',
     '-c:v','libx264','-preset','veryfast','-crf','21','-pix_fmt','yuv420p',
     '-c:a','aac','-b:a','160k','-ar','48000','-movflags','+faststart', out
-  ]);
+  ];
+
+  if (resolved.videoUrl && resolved.audioUrl) {
+    await run(ffmpegPath, [
+      '-y','-hide_banner','-loglevel','warning',
+      '-rw_timeout','30000000',
+      '-reconnect','1','-reconnect_streamed','1','-reconnect_delay_max','5',
+      '-ss', String(start), '-i', resolved.videoUrl,
+      '-ss', String(start), '-i', resolved.audioUrl,
+      '-map','0:v:0','-map','1:a:0?',
+      ...commonOut
+    ]);
+  } else {
+    await run(ffmpegPath, [
+      '-y','-hide_banner','-loglevel','warning',
+      '-rw_timeout','30000000',
+      '-reconnect','1','-reconnect_streamed','1','-reconnect_delay_max','5',
+      '-ss', String(start), '-i', resolved.url,
+      '-map','0:v:0','-map','0:a:0?',
+      ...commonOut
+    ]);
+  }
+
   if (!fs.existsSync(out) || fs.statSync(out).size < 250000) {
     try { fs.unlinkSync(out); } catch {}
     throw new Error('Automatic cut was not created or was unexpectedly small');
