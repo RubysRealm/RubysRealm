@@ -323,16 +323,16 @@ def youtube_section_download(video_url, start, clip_len, raw):
 
     server = bootstrap_bgutil()
     raw.unlink(missing_ok=True)
-    print('Trying Spotify transport acquisition: bgutil-po-token-mweb', flush=True)
+    print('Trying Spotify transport acquisition: bgutil-2-current-web-clients', flush=True)
     proc = subprocess.run(
         base
-        + ['--extractor-args', 'youtube:player_client=mweb;formats=missing_pot,duplicate']
+        + ['--extractor-args', 'youtube:player_client=web,web_music,mweb;fetch_pot=always']
         + ['--extractor-args', f'youtubepot-bgutilscript:server_home={server}']
         + tail
     )
     if proc.returncode == 0 and raw.exists() and raw.stat().st_size >= 500000:
-        return 'bgutil-po-token-mweb'
-    errors.append(f'bgutil-po-token-mweb: exit {proc.returncode}')
+        return 'bgutil-2-current-web-clients'
+    errors.append(f'bgutil-2-current-web-clients: exit {proc.returncode}')
     raise RuntimeError('All YouTube transport acquisition strategies failed: ' + '; '.join(errors))
 
 
