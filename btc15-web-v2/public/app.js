@@ -43,6 +43,13 @@ function saveModel(m){localStorage.setItem(MODEL_KEY,JSON.stringify(m))}
 function activePrice(s){
   return Number.isFinite(livePrice)&&Date.now()-liveAt<5000?livePrice:Number(s.spot.price);
 }
+function displayCoinbasePrice(s){
+  if(Number.isFinite(liveSpot)&&Date.now()-liveAt<5000)return liveSpot;
+  var x=Number(s&&s.spot&&s.spot.coinbase_app_spot);
+  if(Number.isFinite(x))return x;
+  if(Number.isFinite(liveExchange))return liveExchange;
+  return Number(s.spot.price);
+}
 function regimeScore(sig,w,dist){
   dist=Math.abs(Number(dist)||0);
   const ptb=Number(sig?.ptb_time)||0;
@@ -213,11 +220,12 @@ function track150(s,row){
 
 function renderPrice(){
   if(!last)return;
-  const p=activePrice(last),ptb=Number(last.market.price_to_beat),d=p-ptb,age=Date.now()-liveAt;
+  const p=displayCoinbasePrice(last),ptb=Number(last.market.price_to_beat),d=p-ptb,age=Date.now()-liveAt;
+  const delta=Number.isFinite(liveBrti)&&Number.isFinite(p)?liveBrti-p:null;
   el('price').textContent=money(p);
   el('dist').textContent=(d>=0?'+':'')+d.toFixed(2)+' '+(d>=0?'above':'below');
-  el('cbmeta').textContent=Number.isFinite(livePrice)&&age<5000?'BRTI proxy • '+(age/1000).toFixed(1)+'s • '+(liveVenues.join(' + ')||'feed warming'):'BTC reference fallback';
-  el('cbcompare').textContent='Proxy '+money(liveBrti)+' • Coinbase Spot '+money(liveSpot)+' • Advanced '+money(liveExchange)+(Number.isFinite(liveSpread)?' • venue spread $'+liveSpread.toFixed(2):'');
+  el('cbmeta').textContent=Number.isFinite(p)?'Coinbase Spot • '+(age/1000).toFixed(1)+'s':'Coinbase reference fallback';
+  el('cbcompare').textContent='BRTI proxy '+money(liveBrti)+' • Coinbase Advanced '+money(liveExchange)+(Number.isFinite(delta)?' • BRTI vs Coinbase '+(delta>=0?'+':'')+'$'+delta.toFixed(2):'')+' • model anchor: BRTI proxy';
 }
 
 function renderStats(){
@@ -259,7 +267,7 @@ function renderStats(){
 }
 
 function render(s,row){
-  last=s;const p=activePrice(s),ptb=Number(s.market.price_to_beat),d=p-ptb;
+  last=s;const p=displayCoinbasePrice(s),ptb=Number(s.market.price_to_beat),d=p-ptb;
   const elapsed=(Date.now()-Date.parse(s.market.start_utc))/1000;
   el('price').textContent=money(p);el('ptb').textContent=money(ptb);el('yesask').textContent=Number.isFinite(Number(s.market.yes_ask))?Math.round(Number(s.market.yes_ask)*100)+'¢':'—';el('noask').textContent=Number.isFinite(Number(s.market.no_ask))?Math.round(Number(s.market.no_ask)*100)+'¢':'—';
   el('session').textContent=s.market.contract_id;el('remain').textContent=tm((Date.parse(s.market.end_utc)-Date.now())/1000);
