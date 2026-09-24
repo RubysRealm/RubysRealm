@@ -3,9 +3,9 @@ const KEY='btc15v2_history';
 const MODEL_KEY='btc15v2_model';
 const SHADOW_KEY='btc15v2_shadow';
 const VERIFY_VERSION=3;
-const LOCK_AFTER_SEC=115;
+const LOCK_AFTER_SEC=55;
 const MAX_VALUE_ENTRY=.67;
-const ENTRY_WINDOW_END_SEC=180;
+const ENTRY_WINDOW_END_SEC=60;
 
 const BASE_W={
   momentum:.10, trend:.07, mean_reversion:.04, ptb_time:.62,
@@ -78,7 +78,7 @@ function decision(s){
 function captureShadow(s){
   const elapsed=(Date.now()-Date.parse(s.market.start_utc))/1000;
   if(elapsed<0)return;
-  const a=loadShadow(),marks=[30,60,90,115];
+  const a=loadShadow(),marks=[15,30,45,55];
   for(const second of marks){
     if(elapsed<second)continue;
     if(a.some(x=>x.contract_id===s.market.contract_id&&x.second===second))continue;
@@ -247,23 +247,25 @@ function renderStats(){
 function render(s,row){
   last=s;const p=activePrice(s),ptb=Number(s.market.price_to_beat),d=p-ptb;
   const elapsed=(Date.now()-Date.parse(s.market.start_utc))/1000;
-  el('price').textContent=money(p);el('ptb').textContent=money(ptb);
+  el('price').textContent=money(p);el('ptb').textContent=money(ptb);el('yesask').textContent=Number.isFinite(Number(s.market.yes_ask))?Math.round(Number(s.market.yes_ask)*100)+'¢':'—';el('noask').textContent=Number.isFinite(Number(s.market.no_ask))?Math.round(Number(s.market.no_ask)*100)+'¢':'—';
   el('session').textContent=s.market.contract_id;el('remain').textContent=tm((Date.parse(s.market.end_utc)-Date.now())/1000);
   el('signals').innerHTML=Object.entries(s.prediction.signals).map(([k,v])=>'<div class="sig"><span class="small">'+k.replaceAll('_',' ')+'</span><b>'+v+'</b></div>').join('');
   el('kraken').textContent=s.spot.kraken_price?'Kraken cross-check: '+money(s.spot.kraken_price):'';
   renderPrice();
-
-  if(row&&row.skip_late){
+  const candidate=decision(s);
+  const candidateEntry=candidate.pick==='OVER'?(s.market.yes_ask??s.market.yes_mid):(s.market.no_ask??s.market.no_mid);
+  el('selentry').textContent=row&&row.entry_price!=null?Math.round(Number(row.entry_price)*100)+'¢':Number.isFinite(Number(candidateEntry))?Math.round(Number(candidateEntry)*100)+'¢':'—';
+  if(row&&row.skip_late){el('valuestate').textContent='Skipped — missed first minute';
     el('pick').textContent='WAIT NEXT ROUND';el('pick').className='pick pending';
-    el('conf').textContent='V2 opened after the profitable entry window • no late entry will be simulated';
+    el('conf').textContent='Opened after the first-minute decision window • no late entry will be simulated';
     el('status').textContent='Late-round protection active • waiting for the next 15-minute session';
   }else if(!row){
     const cand=decision(s),left=Math.max(0,LOCK_AFTER_SEC-elapsed);
-    el('pick').textContent='ANALYZING';el('pick').className='pick';
+    el('pick').textContent='ANALYZING';el('pick').className='pick';el('valuestate').textContent=Number.isFinite(Number(candidateEntry))?(Number(candidateEntry)<=MAX_VALUE_ENTRY?'Value eligible now':'Above 67¢ cap'):'Waiting for market';
     el('conf').textContent='Current V2 candidate: '+cand.pick+' • locks in '+left.toFixed(0)+'s • PTB distance '+money(Math.abs(d));
-    el('status').textContent='V2 analysis window • snapshots at 30 / 60 / 90 / 115 sec • $1 sim only enters at 67¢ or cheaper';
+    el('status').textContent='First-minute analysis • snapshots at 15 / 30 / 45 / 55 sec • $1 sim only enters at 67¢ or cheaper';
   }else{
-    el('pick').textContent=row.pick;el('pick').className='pick '+(row.pick==='OVER'?'over':'under');
+    el('pick').textContent=row.pick;el('pick').className='pick '+(row.pick==='OVER'?'over':'under');el('valuestate').textContent=row.value_entry?'VALUE ENTRY':'NO VALUE ENTRY';
     el('conf').textContent='Locked '+new Date(row.locked_at).toLocaleTimeString()+' • model v'+row.model_version+' • strength '+row.confidence+'% • '+(row.value_entry?'$1 VALUE ENTRY @ '+Math.round(Number(row.entry_price)*100)+'¢':'NO VALUE ENTRY @ '+Math.round(Number(row.entry_price)*100)+'¢');
     el('status').textContent='Live • OVER '+(s.market.yes_mid!==null?(s.market.yes_mid*100).toFixed(1)+'¢':'—')+' • UNDER '+(s.market.no_mid!==null?(s.market.no_mid*100).toFixed(1)+'¢':'—');
   }
@@ -294,7 +296,7 @@ async function watchSession(){
       seenContract=m.contract_id;
       el('session').textContent=m.contract_id;el('ptb').textContent=money(m.price_to_beat);
       el('pick').textContent='ANALYZING';el('pick').className='pick';
-      el('conf').textContent='New round • V2 analyzing for about 115 seconds before lock';
+      el('conf').textContent='New round • first-minute analysis • lock by 0:55';
       tick(true);
     }else if(!seenContract)seenContract=m.contract_id;
   }catch{}
