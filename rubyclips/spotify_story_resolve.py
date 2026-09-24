@@ -4,7 +4,9 @@ import html
 import json
 import math
 import re
+import shutil
 import subprocess
+import sys
 import urllib.request
 from pathlib import Path
 
@@ -245,6 +247,93 @@ def copy_cover(url):
     return str(dest)
 
 
+YT_FORMAT = '18/best[ext=mp4][vcodec^=avc1][acodec!=none][height<=720]/best[ext=mp4][acodec!=none][height<=720]/best[height<=720]'
+
+
+def bootstrap_bgutil():
+    """Start the same PO-token helper already used by the proven YouTube resolver."""
+    print('Direct YouTube clients were challenged; bootstrapping PO-token provider.', flush=True)
+    run([sys.executable, '-m', 'pip', 'install', '--quiet', '--upgrade', 'bgutil-ytdlp-pot-provider'])
+
+    root = Path.home() / 'bgutil-ytdlp-pot-provider'
+    try:
+        version = output([
+            sys.executable, '-c',
+            "import importlib.metadata as m; print(m.version('bgutil-ytdlp-pot-provider'))",
+        ])
+    except Exception:
+        version = ''
+
+    if root.exists():
+        shutil.rmtree(root)
+
+    cloned = False
+    if version:
+        proc = subprocess.run([
+            'git', 'clone', '--depth', '1', '--single-branch', '--branch', version,
+            'https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git', str(root),
+        ])
+        cloned = proc.returncode == 0
+        if not cloned and root.exists():
+            shutil.rmtree(root)
+
+    if not cloned:
+        run([
+            'git', 'clone', '--depth', '1',
+            'https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git', str(root),
+        ])
+
+    server = root / 'server'
+    run(['npm', 'ci', '--silent'], cwd=server)
+    run(['npx', 'tsc'], cwd=server)
+    if not (server / 'build').exists():
+        raise RuntimeError('PO-token provider build did not produce server/build.')
+    return server
+
+
+def youtube_section_download(video_url, start, clip_len, raw):
+    section = f'*{start:.3f}-{start + clip_len:.3f}'
+    base = [
+        'yt-dlp', '--no-playlist', '--no-progress', '--no-warnings',
+        '--retries', '20', '--fragment-retries', '20', '--retry-sleep', 'fragment:2',
+        '--js-runtimes', 'node', '--remote-components', 'ejs:github',
+    ]
+    tail = [
+        '--download-sections', section,
+        '-f', YT_FORMAT,
+        '--merge-output-format', 'mp4', '--remux-video', 'mp4',
+        '-o', str(raw), video_url,
+    ]
+
+    strategies = [
+        ('ejs-tv-web-mweb', 'youtube:player_client=tv_downgraded,web_creator,mweb;formats=missing_pot,duplicate'),
+        ('ejs-mweb', 'youtube:player_client=mweb;formats=missing_pot,duplicate'),
+        ('ejs-web-embedded', 'youtube:player_client=web_embedded;formats=missing_pot,duplicate'),
+    ]
+    errors = []
+    for name, extractor in strategies:
+        raw.unlink(missing_ok=True)
+        print(f'Trying Spotify transport acquisition: {name}', flush=True)
+        proc = subprocess.run(base + ['--extractor-args', extractor] + tail)
+        if proc.returncode == 0 and raw.exists() and raw.stat().st_size >= 500000:
+            return name
+        errors.append(f'{name}: exit {proc.returncode}')
+
+    server = bootstrap_bgutil()
+    raw.unlink(missing_ok=True)
+    print('Trying Spotify transport acquisition: bgutil-po-token-mweb', flush=True)
+    proc = subprocess.run(
+        base
+        + ['--extractor-args', 'youtube:player_client=mweb;formats=missing_pot,duplicate']
+        + ['--extractor-args', f'youtubepot-bgutilscript:server_home={server}']
+        + tail
+    )
+    if proc.returncode == 0 and raw.exists() and raw.stat().st_size >= 500000:
+        return 'bgutil-po-token-mweb'
+    errors.append(f'bgutil-po-token-mweb: exit {proc.returncode}')
+    raise RuntimeError('All YouTube transport acquisition strategies failed: ' + '; '.join(errors))
+
+
 def make_cut(transport, start, clip_len, out):
     raw = WORK / 'spotify-source-cut.mp4'
     raw.unlink(missing_ok=True)
@@ -261,20 +350,9 @@ def make_cut(transport, start, clip_len, out):
         ], timeout=1800)
         strategy = 'spotify-catalog:cobalt-public-transport'
     except Exception as exc:
-        print(f'Cobalt transport unavailable, falling back to direct public source: {exc}', flush=True)
-        section = f'*{start:.3f}-{start + clip_len:.3f}'
-        run([
-            'yt-dlp', '--no-playlist', '--no-progress', '--retries', '12', '--fragment-retries', '12',
-            '--retry-sleep', 'fragment:2', '--js-runtimes', 'node', '--remote-components', 'ejs:github',
-            '--extractor-args', 'youtube:player_client=tv,web_safari',
-            '--add-header', 'Referer:https://www.youtube.com/',
-            '--add-header', 'Origin:https://www.youtube.com',
-            '--download-sections', section,
-            '-f', '18/best[ext=mp4][vcodec^=avc1][acodec!=none][height<=720]/best[ext=mp4][acodec!=none][height<=720]/best[height<=720]',
-            '--merge-output-format', 'mp4', '--remux-video', 'mp4',
-            '-o', str(raw), transport['url']
-        ], timeout=1800)
-        strategy = 'spotify-catalog:youtube-tv-web_safari'
+        print(f'Cobalt transport unavailable, falling back to resilient YouTube acquisition: {exc}', flush=True)
+        yt_strategy = youtube_section_download(transport['url'], start, clip_len, raw)
+        strategy = f'spotify-catalog:{yt_strategy}'
 
     if not raw.exists() or raw.stat().st_size < 500000:
         raise RuntimeError('Media transport did not create a usable source cut.')
