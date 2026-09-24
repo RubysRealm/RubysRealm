@@ -21,6 +21,109 @@ const YTDLP = process.env.YTDLP_PATH || path.resolve('yt-dlp');
 const TV_URL = 'https://www.youtube.com/tv';
 const TV_UA = 'Mozilla/5.0 (SMART-TV; LINUX; Tizen 7.0) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/2.2 Chrome/94.0.4606.31 TV Safari/537.36';
 
+
+const AUTO_SOURCE_APIS = [
+  'https://tube.rklab.co.in',
+  'https://invidious.nerdvpn.de',
+  'https://yt.chocolatemoo53.com',
+  'https://invidious.tiekoetter.com',
+  'https://inv.nadeko.net'
+];
+const AUTO_COBALT_APIS = [
+  'https://cobalt-api.meowing.de/',
+  'https://capi.3kh0.net/'
+];
+
+async function fetchJson(url, opts = {}, timeoutMs = 25000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, {
+      ...opts,
+      signal: controller.signal,
+      headers: {
+        'user-agent': 'Mozilla/5.0 Chrome/151 Safari/537.36',
+        'accept': 'application/json',
+        ...(opts.headers || {})
+      }
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0,240)}`);
+    return await r.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function resolvePublicMuxed(videoId) {
+  const errors = [];
+  for (const api of AUTO_SOURCE_APIS) {
+    try {
+      const d = await fetchJson(`${api}/api/v1/videos/${encodeURIComponent(videoId)}`);
+      const rows = (d.formatStreams || [])
+        .map(x => ({
+          url: String(x.url || ''),
+          q: Number(String(x.qualityLabel || x.quality || '').replace(/\D/g,'') || 0),
+          mime: String(x.type || x.mimeType || '')
+        }))
+        .filter(x => x.url.startsWith('http') && /video\/mp4/i.test(x.mime))
+        .sort((a,b) => (Math.min(b.q || 0,720) - Math.min(a.q || 0,720)));
+      const preferred = rows.find(x => x.q <= 720) || rows[0];
+      if (preferred) {
+        console.log('Automatic public source resolved through', api, 'quality', preferred.q);
+        return { url: preferred.url, source: `invidious:${api}`, title: String(d.title || '') };
+      }
+      errors.push(`${api}: no muxed MP4`);
+    } catch (e) {
+      errors.push(`${api}: ${String(e?.message || e).slice(0,180)}`);
+    }
+  }
+
+  const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  for (const api of AUTO_COBALT_APIS) {
+    try {
+      const d = await fetchJson(api, {
+        method: 'POST',
+        headers: {'content-type':'application/json'},
+        body: JSON.stringify({
+          url: watchUrl,
+          videoQuality: '720',
+          youtubeVideoCodec: 'h264',
+          downloadMode: 'auto',
+          filenameStyle: 'basic',
+          alwaysProxy: true
+        })
+      }, 45000);
+      const u = String(d.url || '');
+      if (u.startsWith('http') && ['tunnel','redirect'].includes(String(d.status || ''))) {
+        console.log('Automatic public source resolved through Cobalt', api);
+        return { url: u, source: `cobalt:${api}`, title: '' };
+      }
+      errors.push(`${api}: ${String(d.status || 'no-url')}`);
+    } catch (e) {
+      errors.push(`${api}: ${String(e?.message || e).slice(0,180)}`);
+    }
+  }
+  throw new Error('Automatic public source resolution failed: ' + errors.join(' | '));
+}
+
+async function buildAutomaticCut(videoId, start, duration) {
+  const resolved = await resolvePublicMuxed(videoId);
+  const out = path.join('/tmp', `rubyclips-auto-${videoId}-${Math.round(start)}-${Date.now()}.mp4`);
+  await run(ffmpegPath, [
+    '-y','-hide_banner','-loglevel','warning',
+    '-ss', String(start), '-i', resolved.url,
+    '-t', String(duration),
+    '-map','0:v:0','-map','0:a:0?',
+    '-c:v','libx264','-preset','veryfast','-crf','21','-pix_fmt','yuv420p',
+    '-c:a','aac','-b:a','160k','-ar','48000','-movflags','+faststart', out
+  ]);
+  if (!fs.existsSync(out) || fs.statSync(out).size < 250000) {
+    try { fs.unlinkSync(out); } catch {}
+    throw new Error('Automatic cut was not created or was unexpectedly small');
+  }
+  return { out, source: resolved.source, title: resolved.title };
+}
+
 fs.mkdirSync(PROFILE, { recursive: true });
 fs.mkdirSync(SOURCE_DIR, { recursive: true });
 
@@ -272,6 +375,27 @@ app.get('/api/continue-after-qr', auth, async (req,res) => {
   if (!approved) return res.status(409).json({ok:false,approved:false,stage:getStatus().stage});
   const started = await startAcquisition('manual-confirmed-tv-approval');
   res.json({ok:true,approved:true,started,stage:getStatus().stage});
+});
+app.get('/api/auto-cut', async (req,res) => {
+  const videoId = String(req.query.v || '').trim();
+  const start = Math.max(0, Number(req.query.start || 0));
+  const duration = Math.min(590, Math.max(5, Number(req.query.duration || 580)));
+  if (!/^[A-Za-z0-9_-]{6,20}$/.test(videoId)) return res.status(400).json({ok:false,error:'invalid video id'});
+  let built = null;
+  try {
+    console.log('Automatic Rubaradaclips cut request', {videoId,start,duration});
+    built = await buildAutomaticCut(videoId, start, duration);
+    res.setHeader('x-rubyclips-source', built.source);
+    res.setHeader('cache-control','no-store');
+    res.sendFile(built.out, err => {
+      try { fs.unlinkSync(built.out); } catch {}
+      if (err) console.error('auto-cut send error', err);
+    });
+  } catch (e) {
+    if (built?.out) try { fs.unlinkSync(built.out); } catch {}
+    console.error('Automatic Rubaradaclips cut failed:', e);
+    res.status(502).json({ok:false,error:String(e?.message || e)});
+  }
 });
 app.get('/api/state',(req,res)=>res.json(getStatus()));
 app.get('/healthz',(req,res)=>res.json({ok:true,service:'rubyclips-youtube-phone',browser:!!page,stage:getStatus().stage}));
