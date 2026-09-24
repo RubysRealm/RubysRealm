@@ -1,39 +1,48 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BTC Forecast Lab — V2 + Kalshi</title>
+<title>BTC Forecast Lab</title>
 <style>
-:root{color-scheme:dark;--bg:#060b12;--panel:#0b121c;--panel2:#0f1825;--line:#1c2a3c;--soft:#101b29;--text:#f5f8fc;--muted:#7f93aa;--green:#38d996;--red:#ff6577;--amber:#f2bd57;--blue:#6ea8ff;--cyan:#53d6e8}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 50% -10%,#13233a 0,#08111c 38%,#050a10 78%);font-family:Inter,ui-sans-serif,Segoe UI,Arial,sans-serif;color:var(--text);min-height:100vh}
-.shell{max-width:1320px;margin:auto;padding:22px}.topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:14px}.brand{font-size:25px;font-weight:850;letter-spacing:-.45px}.brand span{color:#9fc2ff}.sub{color:var(--muted);font-size:12px;margin-top:4px}.live{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:12px}.dot{width:8px;height:8px;border-radius:50%;background:var(--amber);box-shadow:0 0 0 4px #f2bd5712}
-.marketbar{display:grid;grid-template-columns:1.35fr .7fr 1fr 1fr .75fr .75fr;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:14px}.mcell{background:#0b141f;padding:13px 14px;min-height:72px}.mk{font-size:9px;text-transform:uppercase;letter-spacing:.9px;color:var(--muted);font-weight:750}.mv{font-size:20px;font-weight:800;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ms{font-size:10px;color:#6f8298;margin-top:3px}
-.compare{display:grid;grid-template-columns:1fr 1fr;gap:14px}.engine{background:linear-gradient(180deg,#101a27,#0a121c);border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:0 18px 48px #0005}.engineHead{display:flex;justify-content:space-between;align-items:center;padding:15px 17px;border-bottom:1px solid var(--line)}.engineName{font-weight:800;font-size:16px}.tag{font-size:9px;letter-spacing:.8px;text-transform:uppercase;border:1px solid #2a405a;border-radius:999px;padding:5px 8px;color:#9cb4ce}.hero{display:grid;grid-template-columns:1.25fr .95fr;gap:16px;padding:18px}.eyebrow{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:750}.pick{font-size:58px;font-weight:900;letter-spacing:-2px;line-height:1;margin:17px 0 9px}.over{color:var(--green)}.under{color:var(--red)}.pending{color:var(--amber)}.heroNote{font-size:11px;color:#98a9bb;line-height:1.45}.peakCard{background:#08111a;border:1px solid #1a2a3b;border-radius:14px;padding:14px;display:flex;flex-direction:column;justify-content:center}.peakVal{font-size:38px;font-weight:900;letter-spacing:-1.5px;margin:7px 0 2px}.peakSub{font-size:10px;color:var(--muted);line-height:1.4}
-.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.metric{background:#0b141f;padding:12px}.metric .k{font-size:9px;text-transform:uppercase;letter-spacing:.75px;color:var(--muted);font-weight:700}.metric .v{font-size:16px;font-weight:800;margin-top:5px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:14px 16px}.stat{background:#09121b;border:1px solid #182737;border-radius:11px;padding:10px}.stat .k{font-size:9px;text-transform:uppercase;color:var(--muted);letter-spacing:.7px}.stat .v{font-size:17px;font-weight:800;margin-top:5px}.signals{padding:0 16px 15px}.signalsTitle{font-size:9px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:8px}.siggrid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}.sig{background:#09121b;border:1px solid #182737;border-radius:9px;padding:8px}.sig span{display:block;font-size:8px;color:var(--muted);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sig b{display:block;font-size:12px;margin-top:3px}
-.history{margin-top:14px;background:linear-gradient(180deg,#0f1825,#0a121c);border:1px solid var(--line);border-radius:16px;padding:15px}.hTitle{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.hTitle b{font-size:13px}.hTitle span{font-size:10px;color:var(--muted)}.hrow,.hhead{display:grid;grid-template-columns:1.35fr .62fr .65fr .62fr .62fr .65fr .62fr;gap:8px;align-items:center}.hhead{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.65px;padding:7px 6px}.hrow{padding:10px 6px;border-top:1px solid #ffffff0c;font-size:11px}.result.win{color:var(--green)}.result.loss{color:var(--red)}.result.pending{color:var(--amber)}.footer{font-size:10px;color:#5f7388;text-align:center;margin-top:11px}
-@media(max-width:1000px){.marketbar{grid-template-columns:repeat(3,1fr)}.compare{grid-template-columns:1fr}.siggrid{grid-template-columns:repeat(3,1fr)}}@media(max-width:620px){.shell{padding:10px}.marketbar{grid-template-columns:1fr 1fr}.hero{grid-template-columns:1fr}.pick{font-size:46px}.metrics,.stats{grid-template-columns:1fr 1fr}.siggrid{grid-template-columns:1fr 1fr}.hrow,.hhead{grid-template-columns:1.2fr .55fr .65fr .55fr .55fr .65fr .55fr;font-size:9px}}
-</style></head>
-<body><div class="shell">
-<div class="topbar"><div><div class="brand">BTC <span>Forecast Lab</span></div><div class="sub">V2 + Kalshi comparison • same prediction logic, one screen</div></div><div class="live"><span class="dot" id="dot"></span><span id="feed">Connecting…</span></div></div>
+:root{color-scheme:dark;--bg:#060b12;--panel:#0c141f;--panel2:#101a27;--line:#1e2d40;--soft:#0a121b;--text:#f5f8fc;--muted:#8395aa;--green:#39d99a;--red:#ff6476;--amber:#f2bc59;--blue:#7caeff}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#0a111b 0,#05090f 100%);font-family:Inter,Segoe UI,Arial,sans-serif;color:var(--text)}
+.shell{max-width:1220px;margin:auto;padding:22px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.brand{font-size:24px;font-weight:850;letter-spacing:-.4px}.brand span{color:#9fc3ff}.sub{font-size:12px;color:var(--muted);margin-top:4px}.live{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px}.dot{width:8px;height:8px;border-radius:50%;background:var(--amber);box-shadow:0 0 0 4px #f2bc5912}
+.lab{margin-bottom:22px}.labHeader{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10px}.labTitle{font-size:18px;font-weight:850}.labDesc{font-size:11px;color:var(--muted);margin-top:3px}.sourceTag{font-size:9px;letter-spacing:.85px;text-transform:uppercase;border:1px solid #29405c;border-radius:999px;padding:5px 8px;color:#a9c4e3}
+.card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 16px 42px #0004}
+.market{display:grid;grid-template-columns:1.25fr .7fr 1fr 1fr .75fr .75fr;gap:1px;background:var(--line)}.cell{background:#0b141f;padding:13px 14px;min-height:75px}.k{font-size:9px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:750}.v{font-size:20px;font-weight:850;margin-top:6px}.s{font-size:10px;color:#708399;margin-top:3px}
+.main{display:grid;grid-template-columns:1.2fr .8fr;gap:14px;padding:16px}.pickBox{background:var(--soft);border:1px solid #192839;border-radius:14px;padding:17px}.eyebrow{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:750}.pick{font-size:58px;font-weight:900;line-height:1;margin:18px 0 10px;letter-spacing:-2px}.over{color:var(--green)}.under{color:var(--red)}.pending{color:var(--amber)}.note{font-size:11px;line-height:1.45;color:#9fb0c3}
+.multBox{background:var(--soft);border:1px solid #192839;border-radius:14px;padding:17px}.multTop{display:grid;grid-template-columns:1fr 1fr;gap:10px}.bigNum{font-size:36px;font-weight:900;letter-spacing:-1.3px;margin-top:7px}.mini{font-size:10px;color:var(--muted);line-height:1.4;margin-top:3px}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:0 16px 16px}.metric{background:var(--soft);border:1px solid #192839;border-radius:11px;padding:11px}.metric .v{font-size:16px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:0 16px 16px}.stat{background:var(--soft);border:1px solid #192839;border-radius:11px;padding:11px}.stat .v{font-size:16px}.win{color:var(--green)}.loss{color:var(--red)}
+.signals{padding:0 16px 16px}.sigTitle{font-size:9px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:8px}.sigGrid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}.sig{background:var(--soft);border:1px solid #192839;border-radius:9px;padding:8px}.sig span{display:block;font-size:8px;color:var(--muted);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sig b{display:block;font-size:12px;margin-top:3px}
+.history{margin-top:10px;background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:14px;padding:14px}.historyTop{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.historyTop b{font-size:12px}.historyTop span{font-size:9px;color:var(--muted)}.hhead,.hrow{display:grid;grid-template-columns:1.45fr .55fr .65fr .55fr .65fr;gap:8px;align-items:center}.hhead{font-size:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;padding:6px}.hrow{font-size:10px;padding:9px 6px;border-top:1px solid #ffffff0c}
+.sep{height:1px;background:linear-gradient(90deg,transparent,#24364c,transparent);margin:4px 0 20px}.footer{text-align:center;color:#607287;font-size:10px;margin-top:8px}
+@media(max-width:900px){.market{grid-template-columns:repeat(3,1fr)}.main{grid-template-columns:1fr}.sigGrid{grid-template-columns:repeat(3,1fr)}}@media(max-width:620px){.shell{padding:10px}.market{grid-template-columns:1fr 1fr}.metrics,.stats{grid-template-columns:1fr 1fr}.sigGrid{grid-template-columns:1fr 1fr}.pick{font-size:46px}.multTop{grid-template-columns:1fr 1fr}.hhead,.hrow{grid-template-columns:1.2fr .5fr .6fr .55fr .6fr;font-size:8px}}
+</style></head><body><div class="shell">
+<div class="top"><div><div class="brand">BTC <span>Forecast Lab</span></div><div class="sub">V2 + Kalshi on one page • prediction logic unchanged</div></div><div class="live"><span id="dot" class="dot"></span><span id="feed">Connecting…</span></div></div>
 
-<div class="marketbar">
- <div class="mcell"><div class="mk">Active round</div><div id="round" class="mv">—</div><div id="roundsub" class="ms">Waiting for market</div></div>
- <div class="mcell"><div class="mk">Time left</div><div id="remain" class="mv">—</div><div class="ms">15-minute round</div></div>
- <div class="mcell"><div class="mk">Price to beat</div><div id="ptb" class="mv">—</div><div id="dist" class="ms">—</div></div>
- <div class="mcell"><div class="mk">Coinbase BTC</div><div id="coinbase" class="mv">—</div><div id="pricedelta" class="ms">—</div></div>
- <div class="mcell"><div class="mk">BRTI proxy</div><div id="brti" class="mv">—</div><div class="ms">Kalshi reference proxy</div></div>
- <div class="mcell"><div class="mk">Kalshi market</div><div id="kalshiPx" class="mv">—</div><div class="ms">YES / NO ask</div></div>
-</div>
-
-<div class="compare">
- <section class="engine">
- <div class="engineHead"><div class="engineName">ChatGPT V2</div><div class="tag">COINBASE VIEW</div></div>
- <div class="hero">
-   <div><div class="eyebrow">Current prediction</div><div id="v2Pick" class="pick pending">ANALYZING</div><div id="v2Note" class="heroNote">Waiting for first-minute data.</div></div>
-   <div class="peakCard"><div class="eyebrow">Peak multiplier</div><div id="v2Peak" class="peakVal">—</div><div id="v2PeakSub" class="peakSub">Starts tracking when the pick locks.</div></div>
+<section class="lab">
+<div class="labHeader"><div><div class="labTitle">ChatGPT V2</div><div class="labDesc">Independent pick, stats, model state, multiplier tracking, and history</div></div><div class="sourceTag">COINBASE VIEW</div></div>
+<div class="card">
+ <div class="market">
+   <div class="cell"><div class="k">Active round</div><div id="v2Round" class="v">—</div><div id="v2RoundSub" class="s">Waiting for market</div></div>
+   <div class="cell"><div class="k">Time left</div><div id="v2Remain" class="v">—</div><div class="s">15-minute round</div></div>
+   <div class="cell"><div class="k">Price to beat</div><div id="v2Ptb" class="v">—</div><div id="v2Dist" class="s">—</div></div>
+   <div class="cell"><div class="k">Coinbase BTC</div><div id="v2Primary" class="v">—</div><div id="v2PrimarySub" class="s">—</div></div>
+   <div class="cell"><div class="k">YES ask</div><div id="v2Yes" class="v">—</div><div class="s">Kalshi market</div></div>
+   <div class="cell"><div class="k">NO ask</div><div id="v2No" class="v">—</div><div class="s">BRTI comparison</div></div>
+ </div>
+ <div class="main">
+   <div class="pickBox"><div class="eyebrow">Current prediction</div><div id="v2Pick" class="pick pending">ANALYZING</div><div id="v2Note" class="note">Waiting for first-minute data.</div></div>
+   <div class="multBox">
+     <div class="multTop">
+       <div><div class="eyebrow">Current offered multiplier</div><div id="v2CurrentMult" class="bigNum">—</div><div id="v2CurrentMultSub" class="mini">Based on current chosen-side ask.</div></div>
+       <div><div class="eyebrow">Highest multiplier reached</div><div id="v2Peak" class="bigNum">—</div><div id="v2PeakSub" class="mini">Tracks after the pick locks.</div></div>
+     </div>
+   </div>
  </div>
  <div class="metrics">
-   <div class="metric"><div class="k">Entry</div><div id="v2Entry" class="v">—</div></div>
+   <div class="metric"><div class="k">Entry ask</div><div id="v2Entry" class="v">—</div></div>
+   <div class="metric"><div class="k">Lowest ask seen</div><div id="v2LowAsk" class="v">—</div></div>
    <div class="metric"><div class="k">Strength</div><div id="v2Strength" class="v">—</div></div>
-   <div class="metric"><div class="k">Value</div><div id="v2Value" class="v">—</div></div>
    <div class="metric"><div class="k">Status</div><div id="v2Status" class="v">—</div></div>
  </div>
  <div class="stats">
@@ -42,18 +51,35 @@
    <div class="stat"><div class="k">Net P/L</div><div id="v2Pnl" class="v">$0.00</div></div>
    <div class="stat"><div class="k">Model</div><div id="v2Model" class="v">SHADOW</div></div>
  </div>
- <div class="signals"><div class="signalsTitle">Model inputs</div><div id="v2Signals" class="siggrid"></div></div>
+ <div class="signals"><div class="sigTitle">Model inputs</div><div id="v2Signals" class="sigGrid"></div></div>
+</div>
+<div class="history"><div class="historyTop"><b>ChatGPT V2 history</b><span>Pick / verified result / highest offered multiplier / entry</span></div><div class="hhead"><span>Contract</span><span>Pick</span><span>Result</span><span>Peak ×</span><span>Entry</span></div><div id="v2History"></div></div>
 </section>
- <section class="engine">
- <div class="engineHead"><div class="engineName">Kalshi Test</div><div class="tag">KALSHI VIEW</div></div>
- <div class="hero">
-   <div><div class="eyebrow">Current prediction</div><div id="kPick" class="pick pending">ANALYZING</div><div id="kNote" class="heroNote">Waiting for first-minute data.</div></div>
-   <div class="peakCard"><div class="eyebrow">Peak multiplier</div><div id="kPeak" class="peakVal">—</div><div id="kPeakSub" class="peakSub">Starts tracking when the pick locks.</div></div>
+<div class="sep"></div>
+<section class="lab">
+<div class="labHeader"><div><div class="labTitle">Kalshi Test</div><div class="labDesc">Independent pick, stats, model state, multiplier tracking, and history</div></div><div class="sourceTag">KALSHI VIEW</div></div>
+<div class="card">
+ <div class="market">
+   <div class="cell"><div class="k">Active round</div><div id="kRound" class="v">—</div><div id="kRoundSub" class="s">Waiting for market</div></div>
+   <div class="cell"><div class="k">Time left</div><div id="kRemain" class="v">—</div><div class="s">15-minute round</div></div>
+   <div class="cell"><div class="k">Price to beat</div><div id="kPtb" class="v">—</div><div id="kDist" class="s">—</div></div>
+   <div class="cell"><div class="k">BRTI reference proxy</div><div id="kPrimary" class="v">—</div><div id="kPrimarySub" class="s">—</div></div>
+   <div class="cell"><div class="k">YES ask</div><div id="kYes" class="v">—</div><div class="s">Kalshi market</div></div>
+   <div class="cell"><div class="k">NO ask</div><div id="kNo" class="v">—</div><div class="s">Coinbase comparison</div></div>
+ </div>
+ <div class="main">
+   <div class="pickBox"><div class="eyebrow">Current prediction</div><div id="kPick" class="pick pending">ANALYZING</div><div id="kNote" class="note">Waiting for first-minute data.</div></div>
+   <div class="multBox">
+     <div class="multTop">
+       <div><div class="eyebrow">Current offered multiplier</div><div id="kCurrentMult" class="bigNum">—</div><div id="kCurrentMultSub" class="mini">Based on current chosen-side ask.</div></div>
+       <div><div class="eyebrow">Highest multiplier reached</div><div id="kPeak" class="bigNum">—</div><div id="kPeakSub" class="mini">Tracks after the pick locks.</div></div>
+     </div>
+   </div>
  </div>
  <div class="metrics">
-   <div class="metric"><div class="k">Entry</div><div id="kEntry" class="v">—</div></div>
+   <div class="metric"><div class="k">Entry ask</div><div id="kEntry" class="v">—</div></div>
+   <div class="metric"><div class="k">Lowest ask seen</div><div id="kLowAsk" class="v">—</div></div>
    <div class="metric"><div class="k">Strength</div><div id="kStrength" class="v">—</div></div>
-   <div class="metric"><div class="k">Value</div><div id="kValue" class="v">—</div></div>
    <div class="metric"><div class="k">Status</div><div id="kStatus" class="v">—</div></div>
  </div>
  <div class="stats">
@@ -62,14 +88,10 @@
    <div class="stat"><div class="k">Net P/L</div><div id="kPnl" class="v">$0.00</div></div>
    <div class="stat"><div class="k">Model</div><div id="kModel" class="v">SHADOW</div></div>
  </div>
- <div class="signals"><div class="signalsTitle">Model inputs</div><div id="kSignals" class="siggrid"></div></div>
+ <div class="signals"><div class="sigTitle">Model inputs</div><div id="kSignals" class="sigGrid"></div></div>
+</div>
+<div class="history"><div class="historyTop"><b>Kalshi Test history</b><span>Pick / verified result / highest offered multiplier / entry</span></div><div class="hhead"><span>Contract</span><span>Pick</span><span>Result</span><span>Peak ×</span><span>Entry</span></div><div id="kHistory"></div></div>
 </section>
-</div>
 
-<div class="history">
- <div class="hTitle"><b>Round-by-round comparison</b><span>Peak multiplier = best available chosen-side bid ÷ entry price</span></div>
- <div class="hhead"><span>Contract</span><span>V2 Pick</span><span>V2 Result</span><span>V2 Peak</span><span>K Pick</span><span>K Result</span><span>K Peak</span></div>
- <div id="history"></div>
-</div>
-<div class="footer">Predictions lock by 0:55 after each round opens. Peak multiplier tracking does not affect either model’s decision.</div>
+<div class="footer">Highest multiplier = highest payout multiple offered on the chosen side after the pick, calculated as 1 ÷ lowest ask seen. This tracker does not affect predictions.</div>
 </div><script src="/app.js"></script></body></html>
