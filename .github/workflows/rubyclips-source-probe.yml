@@ -1,4 +1,4 @@
-name: Rubaradaclips accessible Spotify episode probe
+name: Rubaradaclips alternate YouTube client probe
 on:
   push:
     paths:
@@ -17,76 +17,70 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install current transport stack
+      - name: Install yt-dlp
+        run: python -m pip install --quiet --upgrade yt-dlp
+      - name: Probe alternate playback clients
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --quiet --upgrade yt-dlp 'bgutil-ytdlp-pot-provider==2.0.0'
-          rm -rf "$HOME/bgutil-ytdlp-pot-provider"
-          git clone --quiet --depth 1 --branch 2.0.0 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git "$HOME/bgutil-ytdlp-pot-provider"
-          cd "$HOME/bgutil-ytdlp-pot-provider/server"
-          npm ci --no-audit --no-fund
-          npx tsc
-          node build/generate_once.js | tail -n 1 | python -c "import json,sys; d=json.load(sys.stdin); assert d.get('poToken') and d.get('contentBinding'); print('POT_OK')"
-      - name: Find first accessible episode transport
-        shell: bash
-        run: |
-          set -euo pipefail
-          SERVER="$HOME/bgutil-ytdlp-pot-provider/server"
-          python - "$SERVER" <<'PY'
-          import json, subprocess, sys, pathlib
-          server=sys.argv[1]
-          candidates=[
-            {"spotifyId":"0GnEJOTdJMlBZmkawwC9JB","title":"40 minutes of reddit stories and minecraft to help you be productive","youtubeId":"gTZi1vZ4Zes"},
-            {"spotifyId":"7ftpSf4ODZfJafmQBPP6HX","title":"reading the MESSIEST REDDIT STORIES i could possibly find","youtubeId":"hGTWkG5zwFQ"},
-            {"spotifyId":"2GIOjWw1E90bvEXGCPoEWA","title":"I read your UNHINGED emails again...","youtubeId":"jXkBF-MCjEA"},
-          ]
-          base=[
-            'yt-dlp','--dump-single-json','--no-warnings',
-            '--js-runtimes','node','--remote-components','ejs:github',
-            '--extractor-args','youtube:player_client=web,web_music,mweb;pot_trace=true;fetch_pot=always',
-            '--extractor-args',f'youtubepot-bgutilscript:server_home={server}',
-          ]
-          results=[]
+          python - <<'PY'
+          import json, subprocess, pathlib
+          video='gTZi1vZ4Zes'
+          clients=['default','visionos','android_vr','ios','tv','tv_downgraded','tv_simply','web_embedded']
+          rows=[]
           winner=None
-          for c in candidates:
-              url='https://www.youtube.com/watch?v='+c['youtubeId']
-              p=subprocess.run(base+[url],text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=180)
-              lines=[x for x in p.stdout.splitlines() if x.lstrip().startswith('{')]
-              row=dict(c,exit=p.returncode,formats=0,tail=p.stdout[-1800:])
-              if lines:
-                  try:
-                      d=json.loads(lines[-1]); row['formats']=len(d.get('formats') or []); row['duration']=d.get('duration'); row['resolvedTitle']=d.get('title')
-                  except Exception as e: row['parseError']=repr(e)
-              print(json.dumps({k:v for k,v in row.items() if k!='tail'},ensure_ascii=False))
-              results.append(row)
-              if p.returncode==0 and row['formats']>0 and not winner:
-                  winner=c
-                  pathlib.Path('/tmp/winner.json').write_text(json.dumps(c))
+          for client in clients:
+              cmd=[
+                'yt-dlp','--dump-single-json','--no-warnings','--no-playlist',
+                '--socket-timeout','20','--retries','2',
+                '--js-runtimes','node','--remote-components','ejs:github',
+              ]
+              if client!='default':
+                  cmd += ['--extractor-args',f'youtube:player_client={client}']
+              cmd += [f'https://www.youtube.com/watch?v={video}']
+              try:
+                  p=subprocess.run(cmd,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=90)
+                  lines=[x for x in p.stdout.splitlines() if x.lstrip().startswith('{')]
+                  row={'client':client,'exit':p.returncode,'formats':0,'tail':p.stdout[-1200:]}
+                  if lines:
+                      try:
+                          d=json.loads(lines[-1])
+                          row['formats']=len(d.get('formats') or [])
+                          row['title']=d.get('title')
+                          row['duration']=d.get('duration')
+                      except Exception as e: row['parseError']=repr(e)
+              except Exception as e:
+                  row={'client':client,'exit':999,'formats':0,'tail':repr(e)}
+              print(json.dumps({k:v for k,v in row.items() if k!='tail'}))
+              rows.append(row)
+              if row['exit']==0 and row['formats']>0:
+                  winner=client
+                  pathlib.Path('/tmp/winner-client.txt').write_text(client)
                   break
-          pathlib.Path('/tmp/probe-results.json').write_text(json.dumps(results,indent=2))
+          pathlib.Path('/tmp/client-results.json').write_text(json.dumps(rows,indent=2))
           if not winner:
-              print('\n'.join(r['tail'] for r in results))
-              raise SystemExit('NO_ACCESSIBLE_EPISODE_TRANSPORT')
+              for r in rows: print(r['client'],r['tail'])
+              raise SystemExit('NO_ALTERNATE_CLIENT_WORKED')
           PY
-      - name: Download proof from accessible episode
+      - name: Download proof
         shell: bash
         run: |
           set -euo pipefail
-          SERVER="$HOME/bgutil-ytdlp-pot-provider/server"
-          VID="$(python -c "import json; print(json.load(open('/tmp/winner.json'))['youtubeId'])")"
-          yt-dlp             --js-runtimes node --remote-components ejs:github             --extractor-args "youtube:player_client=web,web_music,mweb;fetch_pot=always"             --extractor-args "youtubepot-bgutilscript:server_home=$SERVER"             --download-sections '*0-20'             -f 'best[height<=720]/best'             --merge-output-format mp4             -o '/tmp/proof.%(ext)s'             "https://www.youtube.com/watch?v=$VID"
+          CLIENT="$(cat /tmp/winner-client.txt)"
+          ARGS=()
+          if [ "$CLIENT" != default ]; then ARGS=(--extractor-args "youtube:player_client=$CLIENT"); fi
+          yt-dlp --js-runtimes node --remote-components ejs:github "${ARGS[@]}"             --download-sections '*0-15' -f 'best[height<=720]/best' --merge-output-format mp4             -o '/tmp/proof.%(ext)s' 'https://www.youtube.com/watch?v=gTZi1vZ4Zes'
           FILE="$(find /tmp -maxdepth 1 -name 'proof.*' -type f | head -1)"
           test -n "$FILE"
           test "$(stat -c%s "$FILE")" -gt 500000
-          echo "PROOF_DOWNLOAD_OK $VID $(stat -c%s "$FILE")"
+          echo "PROOF_OK client=$CLIENT bytes=$(stat -c%s "$FILE")"
       - name: Upload result
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: rubaradaclips-accessible-episode-probe
+          name: rubaradaclips-alt-client-probe
           path: |
-            /tmp/winner.json
-            /tmp/probe-results.json
+            /tmp/winner-client.txt
+            /tmp/client-results.json
           if-no-files-found: ignore
           retention-days: 1
