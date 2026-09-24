@@ -1,4 +1,4 @@
-name: RubyClips source recovery probe
+name: Rubaradaclips public mirror probe
 
 on:
   push:
@@ -11,54 +11,93 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-python@v5
         with:
-          node-version: '22'
-      - name: Resolve Episode 1 URL
+          python-version: '3.12'
+      - name: Probe RUclips mirror for Spotify-selected episode
+        shell: bash
         run: |
           set -euo pipefail
-          npm init -y >/dev/null 2>&1
-          npm install --silent @tobyg74/tiktok-api-dl ffprobe-static
-          node <<'JS'
-          const fs = require('fs');
-          const Tiktok = require('@tobyg74/tiktok-api-dl');
-          const source='https://www.tiktok.com/@muffindrama_us/video/7682997000391904526';
-          (async()=>{
-            const r=await Tiktok.Downloader(source,{version:'v2'});
-            fs.writeFileSync('resolver.json',JSON.stringify(r,null,2));
-            const url=r?.result?.video?.playAddr?.[0];
-            if(!url) throw new Error('No playAddr returned');
-            fs.writeFileSync('media_url.txt',url);
-            console.log('MEDIA_URL_READY');
-          })().catch(e=>{console.error(e);process.exit(1)});
-          JS
-      - name: Download Episode 1
+          python - <<'PY'
+          import html, json, re, urllib.parse, urllib.request
+          vid='jXkBF-MCjEA'
+          urls=[
+            f'https://ruclips.net/video/{vid}/video.html',
+            f'https://ruclips.net/video/{vid}/',
+            'https://babynojamie.ruclips.net/',
+          ]
+          ua='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153 Safari/537.36'
+          out=[]
+          for url in urls:
+              row={'url':url}
+              try:
+                  req=urllib.request.Request(url,headers={'User-Agent':ua,'Accept':'text/html,*/*'})
+                  with urllib.request.urlopen(req,timeout=35) as r:
+                      raw=r.read(8_000_000)
+                      final=r.geturl()
+                      status=r.status
+                  text=raw.decode('utf-8','replace')
+                  row.update(status=status,final=final,bytes=len(raw),title='')
+                  m=re.search(r'<title[^>]*>(.*?)</title>',text,re.I|re.S)
+                  if m: row['title']=re.sub(r'\s+',' ',html.unescape(m.group(1))).strip()[:300]
+                  pats=[
+                    r'https?://[^"\'<>\s]+',
+                    r'(?:href|src)=["\']([^"\']+)["\']'
+                  ]
+                  vals=[]
+                  for pat in pats:
+                      for m in re.finditer(pat,text,re.I):
+                          v=m.group(1) if m.lastindex else m.group(0)
+                          v=html.unescape(v).replace('\\/','/')
+                          try: v=urllib.parse.urljoin(final,v)
+                          except: pass
+                          if any(k in v.lower() for k in ['googlevideo','videoplayback','.mp4','.m3u8','download','jXkbf-mcjea'.lower()]):
+                              vals.append(v)
+                  row['interesting']=list(dict.fromkeys(vals))[:80]
+                  open('/tmp/ruclips.html','wb').write(raw)
+              except Exception as e:
+                  row['error']=repr(e)
+              out.append(row)
+          open('/tmp/ruclips-probe.json','w').write(json.dumps(out,indent=2))
+          print(json.dumps(out,indent=2))
+          PY
+      - name: Try direct media candidates
+        shell: bash
         run: |
           set -euo pipefail
-          URL="$(cat media_url.txt)"
-          curl -L --fail --retry 2 -A 'Mozilla/5.0' -e 'https://www.tiktok.com/' "$URL" -o episode1.mp4
-          test $(stat -c%s episode1.mp4) -gt 100000
-      - name: Verify video
-        run: |
-          set -euo pipefail
-          FFPROBE="$(node -e "process.stdout.write(require('ffprobe-static').path)")"
-          "$FFPROBE" -v error -show_entries format=duration,size -of json episode1.mp4 | tee episode1-info.json
-      - name: Upload Episode 1
-        uses: actions/upload-artifact@v4
-        with:
-          name: muffindrama-episode1
-          path: |
-            episode1.mp4
-            episode1-info.json
-          retention-days: 1
-      - name: Upload resolver diagnostics
+          python - <<'PY'
+          import json, urllib.request
+          rows=json.load(open('/tmp/ruclips-probe.json'))
+          candidates=[]
+          for r in rows:
+              for u in r.get('interesting',[]):
+                  lu=u.lower()
+                  if 'googlevideo' in lu or 'videoplayback' in lu or '.mp4' in lu or '.m3u8' in lu:
+                      candidates.append(u)
+          print('MEDIA_CANDIDATES',len(candidates))
+          for i,u in enumerate(candidates[:12]):
+              try:
+                  req=urllib.request.Request(u,headers={'User-Agent':'Mozilla/5.0','Range':'bytes=0-1048575','Referer':'https://ruclips.net/'})
+                  with urllib.request.urlopen(req,timeout=30) as r:
+                      b=r.read(1048576)
+                      print('CANDIDATE_OK',i,r.status,r.headers.get('content-type'),len(b),u[:240])
+                      open('/tmp/media-sample.bin','wb').write(b)
+                      open('/tmp/media-url.txt','w').write(u)
+                      break
+              except Exception as e:
+                  print('CANDIDATE_FAIL',i,repr(e),u[:180])
+          PY
+      - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tiktok-api-results
-          path: resolver.json
+          name: rubaradaclips-ruclips-probe
+          path: |
+            /tmp/ruclips-probe.json
+            /tmp/media-url.txt
+            /tmp/media-sample.bin
           if-no-files-found: ignore
           retention-days: 1
