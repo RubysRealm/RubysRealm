@@ -336,6 +336,125 @@ def youtube_section_download(video_url, start, clip_len, raw):
     raise RuntimeError('All YouTube transport acquisition strategies failed: ' + '; '.join(errors))
 
 
+def spotify_native_video(episode_id, start, requested_len, out):
+    """Acquire the actual Spotify podcast-video segments with an anonymous web token."""
+    import asyncio
+
+    async def get_manifest():
+        from votify.api.api import SpotifyApi
+        from votify.api.enums import SessionType
+
+        api = await SpotifyApi.create(session_type=SessionType.WEB)
+        try:
+            playback = await api.get_playback_info(
+                episode_id, 'episode', ['manifest_ids_video']
+            )
+            media = playback.get('media') or {}
+            if not media:
+                raise RuntimeError('Spotify playback API returned no episode media.')
+            item = next(iter(media.values()))
+            video_uri = item.get('video_version_uri')
+            if video_uri:
+                item = media.get(video_uri) or item
+            ids = ((item.get('manifest') or {}).get('manifest_ids_video') or [])
+            if not ids:
+                raise RuntimeError('Spotify episode did not expose a podcast-video manifest id.')
+            file_id = str(ids[0].get('file_id') or '')
+            if not file_id:
+                raise RuntimeError('Spotify podcast-video manifest id was empty.')
+            manifest = await api.get_video_manifest(file_id)
+            return manifest
+        finally:
+            try:
+                await api.client.aclose()
+            except Exception:
+                pass
+
+    manifest = asyncio.run(get_manifest())
+    contents = manifest.get('contents') or []
+    if not contents:
+        raise RuntimeError('Spotify video manifest had no contents.')
+    content = contents[0]
+    if content.get('encryption_infos'):
+        raise RuntimeError('Spotify podcast video unexpectedly requires encrypted media handling.')
+
+    profiles = content.get('profiles') or []
+    videos = [p for p in profiles if str(p.get('mime_type') or '') == 'video/mp4']
+    audios = [p for p in profiles if str(p.get('mime_type') or '') == 'audio/mp4']
+    if not videos or not audios:
+        raise RuntimeError('Spotify manifest did not expose MP4 video and audio profiles.')
+
+    under_720 = [p for p in videos if int(p.get('video_height') or 0) <= 720]
+    videos = under_720 or videos
+    video = max(videos, key=lambda p: (int(p.get('video_height') or 0), int(p.get('video_bitrate') or 0)))
+    audio = max(audios, key=lambda p: int(p.get('audio_bitrate') or 0))
+
+    base_urls = manifest.get('base_urls') or []
+    if not base_urls:
+        raise RuntimeError('Spotify manifest did not expose a CDN base URL.')
+    base_url = str(base_urls[0])
+    init_tpl = str(manifest.get('initialization_template') or '')
+    seg_tpl = str(manifest.get('segment_template') or '')
+    seg_len = int(content.get('segment_length') or 0)
+    full_duration = float(content.get('end_time_millis') or 0) / 1000.0
+    if not init_tpl or not seg_tpl or seg_len <= 0 or full_duration <= 10:
+        raise RuntimeError('Spotify manifest timing/templates were incomplete.')
+    if start >= full_duration - 2.0:
+        raise RuntimeError(f'No Spotify source content remains at {start:.1f}s of {full_duration:.1f}s.')
+
+    clip_len = min(float(requested_len), full_duration - float(start))
+    first_ts = int(math.floor(float(start) / seg_len) * seg_len)
+    last_ts = int(math.ceil((float(start) + clip_len) / seg_len) * seg_len)
+
+    def stream_urls(profile):
+        pid = str(profile['id'])
+        ftype = str(profile['file_type'])
+        init = init_tpl.replace('{{profile_id}}', pid).replace('{{file_type}}', ftype)
+        urls = [base_url + init]
+        for ts in range(first_ts, last_ts + seg_len, seg_len):
+            seg = seg_tpl.replace('{{profile_id}}', pid).replace('{{segment_timestamp}}', str(ts)).replace('{{file_type}}', ftype)
+            urls.append(base_url + seg)
+        return urls
+
+    def append_fragments(urls, dest):
+        dest.unlink(missing_ok=True)
+        with dest.open('wb') as fh:
+            for idx, url in enumerate(urls):
+                req = urllib.request.Request(url, headers={'User-Agent': UA, 'Accept': '*/*'})
+                with urllib.request.urlopen(req, timeout=90) as resp:
+                    data = resp.read()
+                if len(data) < 128:
+                    raise RuntimeError(f'Spotify CDN fragment {idx} was unexpectedly small.')
+                fh.write(data)
+        if dest.stat().st_size < 250000:
+            raise RuntimeError('Spotify CDN fragment bundle was unexpectedly small.')
+
+    video_frag = WORK / 'spotify-native-video.mp4'
+    audio_frag = WORK / 'spotify-native-audio.mp4'
+    append_fragments(stream_urls(video), video_frag)
+    append_fragments(stream_urls(audio), audio_frag)
+
+    local_seek = max(0.0, float(start) - first_ts)
+    out.unlink(missing_ok=True)
+    run([
+        'ffmpeg', '-y', '-hide_banner', '-loglevel', 'warning',
+        '-i', str(video_frag), '-i', str(audio_frag),
+        '-ss', f'{local_seek:.3f}', '-t', f'{clip_len:.3f}',
+        '-map', '0:v:0', '-map', '1:a:0',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-movflags', '+faststart', str(out)
+    ], timeout=1800)
+    if not out.exists() or out.stat().st_size < 500000:
+        raise RuntimeError('Spotify-native media did not create a usable video cut.')
+    return {
+        'fullDuration': full_duration,
+        'clipLength': clip_len,
+        'strategy': 'spotify-native-web-session',
+        'videoHeight': int(video.get('video_height') or 0),
+        'videoBitrate': int(video.get('video_bitrate') or 0),
+        'audioBitrate': int(audio.get('audio_bitrate') or 0),
+    }
+
 def make_cut(transport, start, clip_len, out):
     raw = WORK / 'spotify-source-cut.mp4'
     raw.unlink(missing_ok=True)
@@ -415,16 +534,39 @@ except Exception as exc:
 if not title:
     raise SystemExit('Spotify episode title is unavailable.')
 
-channel_handle = str(state.get('youtubeChannelHandle') or 'babynojamie')
-transport = choose_transport(title, creator, channel_handle)
-full_duration = float(transport['duration'])
 part = int(state.get('nextPart') or 1)
 next_ep = int(state.get('nextEpisode') or part)
-story_total_parts = max(1, math.ceil(full_duration / CHUNK_SECONDS))
 start = (part - 1) * CHUNK_SECONDS
-if start >= full_duration - 2.0:
-    raise SystemExit(f'No source content remains for Part {part}; source is {full_duration:.2f}s.')
-clip_len = min(CHUNK_SECONDS, full_duration - start)
+out = WORK / f'ep{next_ep}.mp4'
+
+# Spotify itself is now the primary media transport. YouTube matching remains
+# only as a compatibility fallback if Spotify changes its public podcast-video APIs.
+transport = {
+    'url': spotify_url,
+    'id': episode_id,
+    'title': title,
+    'thumbnail': '',
+    'duration': 0.0,
+    'uploader': creator or fallback_creator or 'spotify',
+    'matchScore': 1.0,
+}
+try:
+    native = spotify_native_video(episode_id, start, CHUNK_SECONDS, out)
+    full_duration = float(native['fullDuration'])
+    clip_len = float(native['clipLength'])
+    strategy = str(native['strategy'])
+    print(f'Spotify-native podcast video acquired at {native["videoHeight"]}p.', flush=True)
+except Exception as spotify_exc:
+    print(f'Spotify-native video acquisition unavailable; using compatibility transport: {spotify_exc}', flush=True)
+    channel_handle = str(state.get('youtubeChannelHandle') or 'babynojamie')
+    transport = choose_transport(title, creator, channel_handle)
+    full_duration = float(transport['duration'])
+    if start >= full_duration - 2.0:
+        raise SystemExit(f'No source content remains for Part {part}; source is {full_duration:.2f}s.')
+    clip_len = min(CHUNK_SECONDS, full_duration - start)
+    strategy = make_cut(transport, start, clip_len, out)
+
+story_total_parts = max(1, math.ceil(full_duration / CHUNK_SECONDS))
 end = start + clip_len
 story_complete = end >= full_duration - 2.0
 
@@ -436,9 +578,6 @@ for cover_url in (spotify_image, transport.get('thumbnail')):
             break
     except Exception as exc:
         print(f'Cover fetch failed: {exc}', flush=True)
-
-out = WORK / f'ep{next_ep}.mp4'
-strategy = make_cut(transport, start, clip_len, out)
 actual = media_duration(out)
 if actual < 10 or actual > HARD_MAX_SECONDS:
     raise SystemExit(f'Normalized Spotify source cut has invalid duration: {actual:.3f}s')
