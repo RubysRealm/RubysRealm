@@ -214,10 +214,11 @@ function track150(s,row){
 function renderPrice(){
   if(!last)return;
   const p=activePrice(last),ptb=Number(last.market.price_to_beat),d=p-ptb,age=Date.now()-liveAt;
+  const delta=Number.isFinite(liveSpot)&&Number.isFinite(p)?p-liveSpot:null;
   el('price').textContent=money(p);
   el('dist').textContent=(d>=0?'+':'')+d.toFixed(2)+' '+(d>=0?'above':'below');
-  el('cbmeta').textContent=Number.isFinite(livePrice)&&age<5000?'BRTI proxy • '+(age/1000).toFixed(1)+'s • '+(liveVenues.join(' + ')||'feed warming'):'BTC reference fallback';
-  el('cbcompare').textContent='Proxy '+money(liveBrti)+' • Coinbase Spot '+money(liveSpot)+' • Advanced '+money(liveExchange)+(Number.isFinite(liveSpread)?' • venue spread $'+liveSpread.toFixed(2):'');
+  el('cbmeta').textContent=Number.isFinite(livePrice)&&age<5000?'BRTI reference proxy • '+(age/1000).toFixed(1)+'s • '+(liveVenues.join(' + ')||'feed warming'):'BRTI proxy fallback';
+  el('cbcompare').textContent='Coinbase Spot '+money(liveSpot)+' • Coinbase Advanced '+money(liveExchange)+(Number.isFinite(delta)?' • BRTI vs Coinbase '+(delta>=0?'+':'')+'$'+delta.toFixed(2):'');
 }
 
 function renderStats(){
