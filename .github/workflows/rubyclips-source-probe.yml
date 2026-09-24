@@ -1,4 +1,4 @@
-name: Rubaradaclips alternate YouTube client probe
+name: Rubaradaclips Spotify audio-native probe
 on:
   push:
     paths:
@@ -8,79 +8,76 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Install yt-dlp
-        run: python -m pip install --quiet --upgrade yt-dlp
-      - name: Probe alternate playback clients
+      - name: Install Votify and ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install --quiet --upgrade votify
+      - name: Probe anonymous Spotify episode audio path
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json, subprocess, pathlib
-          video='gTZi1vZ4Zes'
-          clients=['default','visionos','android_vr','ios','tv','tv_downgraded','tv_simply','web_embedded']
-          rows=[]
-          winner=None
-          for client in clients:
-              cmd=[
-                'yt-dlp','--dump-single-json','--no-warnings','--no-playlist',
-                '--socket-timeout','20','--retries','2',
-                '--js-runtimes','node','--remote-components','ejs:github',
-              ]
-              if client!='default':
-                  cmd += ['--extractor-args',f'youtube:player_client={client}']
-              cmd += [f'https://www.youtube.com/watch?v={video}']
+          import asyncio,json,pathlib,urllib.request
+          EP='2GIOjWw1E90bvEXGCPoEWA'
+          async def main():
+              from votify.api.api import SpotifyApi
+              from votify.api.enums import SessionType
+              api=await SpotifyApi.create(session_type=SessionType.WEB)
               try:
-                  p=subprocess.run(cmd,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=90)
-                  lines=[x for x in p.stdout.splitlines() if x.lstrip().startswith('{')]
-                  row={'client':client,'exit':p.returncode,'formats':0,'tail':p.stdout[-1200:]}
-                  if lines:
+                  d=await api.get_episode(EP)
+                  e=d['data']['episodeUnionV2']
+                  items=((e.get('audio') or {}).get('items') or [])
+                  print('EPISODE',e.get('name'))
+                  print('MEDIA_TYPES',e.get('mediaTypes'))
+                  print('AUDIO_ITEMS',json.dumps(items,indent=2)[:12000])
+                  if not items: raise RuntimeError('No audio items in public episode metadata')
+                  successes=[]
+                  for item in items:
+                      u=str(item.get('url') or '')
+                      fmt=str(item.get('format') or '')
+                      file_id=u.rstrip('/').split('/')[-1]
+                      if not file_id: continue
+                      # Map common public podcast formats used by votify.
+                      format_id={'OGG_VORBIS_96':'0','OGG_VORBIS_160':'1','OGG_VORBIS_320':'2',
+                                 'MP3_96':'6','MP3_160':'5','MP3_256':'3','MP3_320':'4'}.get(fmt)
+                      if format_id is None: continue
                       try:
-                          d=json.loads(lines[-1])
-                          row['formats']=len(d.get('formats') or [])
-                          row['title']=d.get('title')
-                          row['duration']=d.get('duration')
-                      except Exception as e: row['parseError']=repr(e)
-              except Exception as e:
-                  row={'client':client,'exit':999,'formats':0,'tail':repr(e)}
-              print(json.dumps({k:v for k,v in row.items() if k!='tail'}))
-              rows.append(row)
-              if row['exit']==0 and row['formats']>0:
-                  winner=client
-                  pathlib.Path('/tmp/winner-client.txt').write_text(client)
-                  break
-          pathlib.Path('/tmp/client-results.json').write_text(json.dumps(rows,indent=2))
-          if not winner:
-              for r in rows: print(r['client'],r['tail'])
-              raise SystemExit('NO_ALTERNATE_CLIENT_WORKED')
+                          s=await api.get_audio_stream_urls(format_id,file_id)
+                          cdn=(s.get('cdnurl') or [None])[0]
+                          if not cdn: continue
+                          print('CDN_OK',fmt,cdn[:180])
+                          req=urllib.request.Request(cdn,headers={'User-Agent':'Mozilla/5.0','Range':'bytes=0-1048575'})
+                          with urllib.request.urlopen(req,timeout=45) as r:
+                              b=r.read(1048576)
+                              print('READ_OK',r.status,r.headers.get('content-type'),len(b))
+                          if len(b)>200000:
+                              pathlib.Path('/tmp/audio-url.txt').write_text(cdn)
+                              pathlib.Path('/tmp/audio-format.txt').write_text(fmt)
+                              successes.append((fmt,len(b)))
+                              break
+                      except Exception as ex:
+                          print('AUDIO_ROUTE_FAIL',fmt,repr(ex))
+                  if not successes: raise RuntimeError('No anonymous Spotify audio CDN route succeeded')
+                  print('SPOTIFY_AUDIO_NATIVE_OK',successes)
+              finally:
+                  await api.client.aclose()
+          asyncio.run(main())
           PY
-      - name: Download proof
+      - name: Verify ffmpeg can read source
         shell: bash
         run: |
           set -euo pipefail
-          CLIENT="$(cat /tmp/winner-client.txt)"
-          ARGS=()
-          if [ "$CLIENT" != default ]; then ARGS=(--extractor-args "youtube:player_client=$CLIENT"); fi
-          yt-dlp --js-runtimes node --remote-components ejs:github "${ARGS[@]}"             --download-sections '*0-15' -f 'best[height<=720]/best' --merge-output-format mp4             -o '/tmp/proof.%(ext)s' 'https://www.youtube.com/watch?v=gTZi1vZ4Zes'
-          FILE="$(find /tmp -maxdepth 1 -name 'proof.*' -type f | head -1)"
-          test -n "$FILE"
-          test "$(stat -c%s "$FILE")" -gt 500000
-          echo "PROOF_OK client=$CLIENT bytes=$(stat -c%s "$FILE")"
-      - name: Upload result
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: rubaradaclips-alt-client-probe
-          path: |
-            /tmp/winner-client.txt
-            /tmp/client-results.json
-          if-no-files-found: ignore
-          retention-days: 1
+          URL="$(cat /tmp/audio-url.txt)"
+          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$URL" | tee /tmp/duration.txt
+          python - <<'PY'
+          d=float(open('/tmp/duration.txt').read().strip())
+          assert d>60,d
+          print('AUDIO_DURATION_OK',d)
+          PY
