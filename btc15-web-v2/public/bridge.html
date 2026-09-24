@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><script>
+const SCOPE="v2";
+const ALLOWED=new Set(["btc15v2_history","btc15v2_model","btc15v2_shadow"]);
+function snapshot(){
+  const data={};
+  for(const k of ALLOWED)data[k]=localStorage.getItem(k);
+  return data;
+}
+addEventListener('message',e=>{
+  const m=e.data||{};
+  if(m.type==='btc15-storage-read'){
+    e.source?.postMessage({type:'btc15-storage-state',scope:SCOPE,data:snapshot()},'*');
+  }else if(m.type==='btc15-storage-write'&&ALLOWED.has(m.key)){
+    if(m.value===null)localStorage.removeItem(m.key);else localStorage.setItem(m.key,String(m.value));
+    e.source?.postMessage({type:'btc15-storage-ack',scope:SCOPE,key:m.key},'*');
+  }
+});
+parent.postMessage({type:'btc15-storage-ready',scope:SCOPE,data:snapshot()},'*');
+</script>
