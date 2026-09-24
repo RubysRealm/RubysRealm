@@ -1,0 +1,70 @@
+name: Rubaradaclips Spotify Native Probe
+
+on:
+  push:
+    paths:
+      - '.github/workflows/rubyclips-spotify-native-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Spotify client
+        run: python -m pip install --quiet --upgrade votify
+      - name: Probe public podcast video manifest
+        run: |
+          python - <<'PY'
+          import asyncio, json
+          from votify.api.api import SpotifyApi
+          from votify.api.enums import SessionType
+
+          EP='2GIOjWw1E90bvEXGCPoEWA'
+
+          async def main():
+              api=await SpotifyApi.create(session_type=SessionType.WEB)
+              try:
+                  print('anonymous_session=', api.anonymous_session)
+                  p=await api.get_playback_info(EP,'episode',['manifest_ids_video'])
+                  media=p.get('media') or {}
+                  print('media_keys=', list(media))
+                  assert media, 'no media'
+                  item=next(iter(media.values()))
+                  vu=item.get('video_version_uri')
+                  if vu:
+                      item=media.get(vu) or item
+                  ids=((item.get('manifest') or {}).get('manifest_ids_video') or [])
+                  print('manifest_ids=', ids)
+                  assert ids, 'no manifest id'
+                  file_id=str(ids[0].get('file_id') or '')
+                  m=await api.get_video_manifest(file_id)
+                  c=(m.get('contents') or [None])[0]
+                  assert c, 'no contents'
+                  print(json.dumps({
+                      'base_urls': len(m.get('base_urls') or []),
+                      'segment_length': c.get('segment_length'),
+                      'end_time_millis': c.get('end_time_millis'),
+                      'encryption_infos': c.get('encryption_infos'),
+                      'profiles': [
+                          {
+                              'id': x.get('id'),
+                              'mime_type': x.get('mime_type'),
+                              'video_height': x.get('video_height'),
+                              'video_bitrate': x.get('video_bitrate'),
+                              'audio_bitrate': x.get('audio_bitrate'),
+                              'file_type': x.get('file_type'),
+                          }
+                          for x in (c.get('profiles') or [])
+                      ],
+                  }, indent=2))
+              finally:
+                  await api.client.aclose()
+          asyncio.run(main())
+          PY
