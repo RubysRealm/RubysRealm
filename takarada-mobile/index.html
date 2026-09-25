@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#05060a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Takarada LIVE</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#05060a;color:#fff;font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif}
+#stage{position:fixed;inset:0;background:radial-gradient(circle at 50% 72%,#24223a 0,#0d0e17 37%,#05060a 75%);overflow:hidden}
+#game{position:absolute;left:0;top:0;width:100%;height:61%;background:#000;overflow:hidden;border-bottom:1px solid rgba(255,255,255,.12)}
+#yt{position:absolute;inset:0;width:100%;height:100%}
+#avatarZone{position:absolute;left:0;right:0;bottom:0;height:39%;overflow:hidden}
+#avatarVideo,#avatarFallback{position:absolute;left:50%;bottom:-3%;transform:translateX(-50%);height:108%;width:auto;max-width:98%;object-fit:contain;filter:drop-shadow(0 2vh 2vh rgba(0,0,0,.5))}
+#avatarFallback{display:none}
+#brand{position:absolute;left:4%;bottom:4%;font-size:2.2vh;font-weight:900;letter-spacing:.16em;text-shadow:0 2px 12px #000}
+#live{position:absolute;right:4%;top:3%;z-index:4;background:#ff1744;border-radius:999px;padding:.7vh 1.15vh;font-size:1.55vh;font-weight:900;letter-spacing:.08em;box-shadow:0 0 20px rgba(255,23,68,.35)}
+#now{position:absolute;left:3%;right:3%;bottom:2%;z-index:4;text-align:center;font-size:1.2vh;opacity:.72;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#start{position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;background:rgba(2,3,7,.82);backdrop-filter:blur(10px)}
+#start button{border:0;border-radius:999px;padding:18px 26px;font-size:18px;font-weight:900;background:#fff;color:#05060a;box-shadow:0 8px 30px rgba(0,0,0,.35)}
+#hint{position:absolute;bottom:11%;left:8%;right:8%;text-align:center;font-size:13px;opacity:.72}
+.pulse{animation:pulse 2.4s ease-in-out infinite}@keyframes pulse{50%{transform:translateX(-50%) translateY(-1.2%) scale(1.012)}}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="game"><div id="yt"></div><div id="live">LIVE</div><div id="now"></div></div>
+  <div id="avatarZone">
+    <video id="avatarVideo" class="pulse" src="/takarada-mobile/takarada-streamer.webm" autoplay muted loop playsinline></video>
+    <img id="avatarFallback" class="pulse" src="/takarada-mobile/takarada-avatar.jpg" alt="Takarada">
+    <div id="brand">TAKARADA</div>
+  </div>
+  <div id="start"><button id="go">▶ START TAKARADA</button><div id="hint">Tap once for gameplay audio, then leave this page open during TikTok screen share.</div></div>
+</div>
+<script>
+const videos=[
+ ["c6FAO3-zvhE","Lush Caves"],["AirXwBsNPDw","Rainy Riverside"],["wcIUiy_Ofcw","Ghibli Nostalgic"],
+ ["y8yMP36qHXA","Rainy Swamp"],["Zoq4ogt2wtU","Pine Forest House"],["Dy3VtjcHdCs","Rainy Cliff"],
+ ["ykHsq6yUNGg","Rainy Flower Forest"],["nUbDQ0wUESU","Medieval Farmhouse"],["snvLyjMcgh0","Rainy River"],
+ ["N6S53tOB1ss","Rainy Jungle Tree House"],["C_WaC-JmhFo","Rainy Mountain"],["eHSxedwXaM0","Rainy Cherry Grove"],
+ ["oCIpgdb2pM4","Rainy Mangrove Swamp"],["yTTutYKV1rk","Rainy Overgrown Laputa"],["UDRhiTUMVQY","Ghibli Nostalgic 1.20"],
+ ["wV9VatPiPf4","Rainy Spruce Island"],["LoeTtwvBD_k","Rainy Beach House"],["bp-1X7sQ_2M","Rainy Cherry Lake"]
+];
+let idx=Math.floor(Math.random()*videos.length),player=null,ready=false,started=false;
+const now=document.getElementById("now"),start=document.getElementById("start"),av=document.getElementById("avatarVideo"),fallback=document.getElementById("avatarFallback");
+av.addEventListener("error",()=>{av.style.display="none";fallback.style.display="block"});
+function label(){now.textContent="NOW PLAYING • "+videos[idx][1]}
+function load(){label();if(player&&ready){player.loadVideoById(videos[idx][0]);if(started){player.unMute();player.setVolume(100);player.playVideo()}}}
+window.onYouTubeIframeAPIReady=()=>{player=new YT.Player("yt",{width:"100%",height:"100%",videoId:videos[idx][0],playerVars:{autoplay:0,mute:1,controls:0,rel:0,playsinline:1,modestbranding:1,disablekb:1,iv_load_policy:3},events:{onReady:()=>{ready=true;label()},onStateChange:e=>{if(e.data===0){idx=(idx+1)%videos.length;load()}},onError:()=>{idx=(idx+1)%videos.length;setTimeout(load,800)}}})};
+document.getElementById("go").onclick=()=>{started=true;start.style.display="none";if(player&&ready){player.unMute();player.setVolume(100);player.playVideo()}av.play().catch(()=>{})};
+const s=document.createElement("script");s.src="https://www.youtube.com/iframe_api";document.head.appendChild(s);label();
+document.addEventListener("visibilitychange",()=>{if(!document.hidden&&started&&player&&ready){player.playVideo();player.unMute()}});
+</script>
+</body>
+</html>
