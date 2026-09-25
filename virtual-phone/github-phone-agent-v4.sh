@@ -43,7 +43,7 @@ save_phone_state() {
 
 bash virtual-phone/github-phone-agent-v3.sh &
 AGENT_PID=$!
-LAST_CTL=''
+LAST_CTL=$(gh api "repos/$GITHUB_REPOSITORY/issues/$TRIGGER_ISSUE" --jq '.body // ""' 2>/dev/null || true)
 
 cleanup() {
   kill "$AGENT_PID" >/dev/null 2>&1 || true
