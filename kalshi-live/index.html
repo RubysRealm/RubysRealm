@@ -1,0 +1,41 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ChatGPT Kalshi Test</title><style>
+:root{color-scheme:dark;--bg:#081019;--panel:#0e1824;--panel2:#101d2b;--line:#223247;--muted:#8ea2b8;--text:#f4f8fc;--good:#38d996;--bad:#ff6677;--warn:#f2bd57;--accent:#73a8ff}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#0a1320 0,#071019 48%,#060b12 100%);font-family:Inter,Segoe UI,Arial,sans-serif;color:var(--text);min-height:100vh}
+.wrap{max-width:1180px;margin:0 auto;padding:22px}.header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}.brand{font-size:24px;font-weight:800;letter-spacing:-.3px}.badge{font-size:10px;letter-spacing:.8px;border:1px solid #35547b;color:#a8c8ff;border-radius:999px;padding:5px 8px;margin-left:8px;vertical-align:3px}.sub{font-size:12px;color:var(--muted);margin-top:4px}.live{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}.dot{width:9px;height:9px;border-radius:50%;background:var(--warn)}
+.panel{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 34px #0005}.decision{padding:18px}.decisionTop{display:grid;grid-template-columns:1.05fr 1.95fr;gap:18px;align-items:stretch}.pickPane{display:flex;flex-direction:column;justify-content:center;min-height:210px;padding:8px 10px}.eyebrow{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);font-weight:700}.pick{font-size:58px;font-weight:900;line-height:1;margin:20px 0 10px;letter-spacing:-2px}.over{color:var(--good)}.under{color:var(--bad)}.pending{color:var(--warn)}.win{color:var(--good)}.loss{color:var(--bad)}.conf{font-size:12px;color:#b7c6d8;line-height:1.45}.status{margin-top:14px;padding:10px 12px;border:1px solid #263a51;border-radius:10px;background:#0a1420;color:#9fb1c4;font-size:12px}
+.marketGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.metric{background:#0a1420;border:1px solid #1c2c3e;border-radius:12px;padding:13px;min-height:86px}.metric .k{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:700}.metric .v{font-size:23px;font-weight:800;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.metric .s{font-size:11px;color:var(--muted);margin-top:4px}.compact{font-size:17px!important}.section{margin-top:12px}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.box{padding:15px}.boxTitle{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:700;margin-bottom:8px}.row{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid #ffffff10}.row:last-child{border-bottom:0}.row span{color:#a8bacd}.row b{font-variant-numeric:tabular-nums}.modelMeta{font-size:11px;color:var(--muted);line-height:1.45;margin-top:6px}.signals{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:10px}.sig{background:#0a1420;border:1px solid #1d2c3d;border-radius:10px;padding:10px}.sig span{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.6px}.sig b{display:block;margin-top:4px}.history{padding:15px}.hr{display:grid;grid-template-columns:1.65fr .55fr .7fr .7fr;gap:10px;padding:10px 4px;border-bottom:1px solid #ffffff10;align-items:center}.hr:last-child{border-bottom:0}.historyHead{display:grid;grid-template-columns:1.65fr .55fr .7fr .7fr;gap:10px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.7px;padding:4px}.feedline{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.5}.foot{font-size:11px;color:#65798f;margin-top:12px;text-align:center}
+@media(max-width:900px){.decisionTop{grid-template-columns:1fr}.marketGrid{grid-template-columns:repeat(2,1fr)}.stats{grid-template-columns:1fr}.signals{grid-template-columns:repeat(3,1fr)}}@media(max-width:600px){.wrap{padding:12px}.header{align-items:flex-start}.pick{font-size:46px}.marketGrid{grid-template-columns:1fr 1fr}.signals{grid-template-columns:repeat(2,1fr)}.hr,.historyHead{grid-template-columns:1.2fr .55fr .65fr .65fr;font-size:11px}}
+</style></head><body><div class="wrap">
+<div class="header"><div><div class="brand">ChatGPT Kalshi<span class="badge">KALSHI TEST</span></div><div class="sub">Kalshi-native KXBTC15M test build • independent history and learning</div></div><div class="live"><span class="dot" id="dot"></span><span id="feed">Connecting…</span></div></div>
+
+<div class="panel decision">
+  <div class="decisionTop">
+    <div class="pickPane">
+      <div class="eyebrow">Round decision</div>
+      <div id="pick" class="pick">ANALYZING</div>
+      <div id="conf" class="conf">Building a first-minute decision.</div>
+      <div id="status" class="status">Decision locks by 0:55 after the round begins.</div>
+    </div>
+    <div class="marketGrid">
+      <div class="metric"><div class="k">Time remaining</div><div id="remain" class="v">—</div><div id="session" class="s">—</div></div>
+      <div class="metric"><div class="k">BRTI reference proxy</div><div id="price" class="v">—</div><div id="cbmeta" class="s">Connecting…</div></div>
+      <div class="metric"><div class="k">Price to beat</div><div id="ptb" class="v">—</div><div id="dist" class="s">—</div></div>
+      <div class="metric"><div class="k">Kalshi YES ask</div><div id="yesask" class="v compact">—</div><div class="s">Live KXBTC15M</div></div>
+      <div class="metric"><div class="k">Kalshi NO ask</div><div id="noask" class="v compact">—</div><div class="s">Live KXBTC15M</div></div>
+      <div class="metric"><div class="k">Selected entry</div><div id="selentry" class="v compact">—</div><div id="valuestate" class="s">Waiting for lock</div></div>
+    </div>
+  </div>
+  <div id="cbcompare" class="feedline"></div><div id="kraken" class="feedline"></div>
+</div>
+
+<div class="stats section">
+  <div class="panel box"><div class="boxTitle">Verified performance</div><div class="row"><span>Wins</span><b id="wins">0</b></div><div class="row"><span>Losses</span><b id="losses">0</b></div><div class="row"><span>Win rate</span><b id="wr">—</b></div><div class="row"><span>1.5× wins</span><b id="ew">0</b></div><div class="row"><span>1.5× losses</span><b id="el">0</b></div></div>
+  <div class="panel box"><div class="boxTitle">$1 value test</div><div class="row"><span>Value cap</span><b>67¢</b></div><div class="row"><span>Total spent</span><b id="simspent">$0.00</b></div><div class="row"><span>Total earned</span><b id="simearned">$0.00</b></div><div class="row"><span>Net P/L</span><b id="simpl">$0.00</b></div><div class="modelMeta">Only qualifying entries are counted. No real orders are placed.</div></div>
+  <div class="panel box"><div class="boxTitle">Adaptive model</div><div class="row"><span>Mode</span><b id="learnmode">SHADOW</b></div><div class="row"><span>Verified rounds</span><b id="learnrounds">0</b></div><div class="row"><span>Model version</span><b id="learnver">1</b></div><div id="learndetail" class="modelMeta">Learning from strictly verified results.</div></div>
+</div>
+
+<div class="panel box section"><div class="boxTitle">Model inputs</div><div id="signals" class="signals"></div></div>
+
+<div class="panel history section"><div class="boxTitle">Recent Kalshi test rounds</div><div class="historyHead"><span>Contract</span><span>Pick</span><span>Result</span><span>Payout</span></div><div id="history"></div></div>
+<div class="foot">Decision window: 15 / 30 / 45 / 55 second shadow snapshots • final pick locked by 55 seconds • late rounds are skipped.</div>
+</div><script src="/kalshi-live/app.js"></script></body></html>
