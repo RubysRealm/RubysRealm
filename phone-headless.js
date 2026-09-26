@@ -417,6 +417,7 @@ async function buildBrowserSessionCut(videoId, start, duration) {
 async function resolvePublicMuxed(videoId) {
   const errors = [];
   const pipedApis = [
+    'https://pipedapi.wireway.ch',
     'https://pipedapi.kavin.rocks',
     'https://pipedapi.leptons.xyz',
     'https://pipedapi.nosebs.ru',
