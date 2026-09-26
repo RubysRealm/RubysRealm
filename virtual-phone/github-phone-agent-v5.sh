@@ -103,6 +103,10 @@ execute_command() {
       elif [ "$app" = "feed" ]; then
         "$ADB" -s "$SERIAL" shell am start -n com.takarada.display/.MainActivity --es url "${TAKARADA_FEED_URL:-https://takarada-cloud-live.onrender.com/preview}" >/dev/null 2>&1 || true
       fi ;;
+    url)
+      text64=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("url_b64",""))' <<<"$json")
+      text=$(printf '%s' "$text64" | base64 -d 2>/dev/null || true)
+      "$ADB" -s "$SERIAL" shell am start -a android.intent.action.VIEW -d "$text" >/dev/null 2>&1 || true ;;
     text)
       text64=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("text_b64",""))' <<<"$json")
       text=$(printf '%s' "$text64" | base64 -d 2>/dev/null || true)
@@ -127,7 +131,8 @@ sleep 8
 publish_state 0 boot
 
 LAST_SEQ=0
-while kill -0 "$BASE_PID" >/dev/null 2>&1; do
+END=$((SECONDS + 18600))
+while [ $SECONDS -lt $END ]; do
   refresh_serial
   RAW=$(gh api "repos/$GITHUB_REPOSITORY/contents/$CMD_PATH?ref=$BRANCH" --jq '.content // empty' 2>/dev/null || true)
   if [ -n "$RAW" ]; then
@@ -143,4 +148,5 @@ while kill -0 "$BASE_PID" >/dev/null 2>&1; do
   sleep 2
 done
 
-wait "$BASE_PID"
+kill "$BASE_PID" >/dev/null 2>&1 || true
+wait "$BASE_PID" 2>/dev/null || true
