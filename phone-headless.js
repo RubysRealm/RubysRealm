@@ -22,6 +22,7 @@ const CHROME = process.env.CHROME_PATH || path.resolve('.chrome/opt/google/chrom
 const YTDLP = process.env.YTDLP_PATH || path.resolve('yt-dlp');
 const TV_URL = 'https://www.youtube.com/tv';
 const TV_UA = 'Mozilla/5.0 (SMART-TV; LINUX; Tizen 7.0) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/2.2 Chrome/94.0.4606.31 TV Safari/537.36';
+const DIRECT_HLS_URL = String(process.env.BABYJAMIE_HLS_URL || '').trim();
 
 
 const AUTO_SOURCE_APIS = [
@@ -829,6 +830,40 @@ app.get('/api/continue-after-qr', auth, async (req,res) => {
   const started = await startAcquisition('manual-confirmed-tv-approval');
   res.json({ok:true,approved:true,started,stage:getStatus().stage});
 });
+app.get('/api/direct-cut', async (req,res) => {
+  const start = Math.max(0, Number(req.query.start || 0));
+  const duration = Math.min(590, Math.max(5, Number(req.query.duration || 580)));
+  if (!DIRECT_HLS_URL.startsWith('http')) {
+    return res.status(503).json({ok:false,error:'direct HLS source is not configured'});
+  }
+  const out = path.join('/tmp', `rubyclips-direct-${Math.round(start)}-${Date.now()}.mp4`);
+  try {
+    console.log('Direct HLS Rubaradaclips cut request', {start,duration});
+    await run(ffmpegPath, [
+      '-y','-hide_banner','-loglevel','warning',
+      '-rw_timeout','30000000',
+      '-reconnect','1','-reconnect_streamed','1','-reconnect_delay_max','5',
+      '-ss', String(start), '-i', DIRECT_HLS_URL, '-t', String(duration),
+      '-map','0:v:0','-map','0:a:0?',
+      '-c:v','libx264','-preset','veryfast','-crf','21','-pix_fmt','yuv420p',
+      '-c:a','aac','-b:a','160k','-ar','48000','-movflags','+faststart', out
+    ]);
+    if (!fs.existsSync(out) || fs.statSync(out).size < 250000) {
+      throw new Error('Direct HLS cut was not created or was unexpectedly small');
+    }
+    res.setHeader('x-rubyclips-source','babyjamie-direct-hls');
+    res.setHeader('cache-control','no-store');
+    res.sendFile(out, err => {
+      try { fs.unlinkSync(out); } catch {}
+      if (err) console.error('direct-cut send error', err);
+    });
+  } catch (e) {
+    try { fs.unlinkSync(out); } catch {}
+    console.error('Direct HLS Rubaradaclips cut failed:', e);
+    res.status(502).json({ok:false,error:String(e?.message || e)});
+  }
+});
+
 app.get('/api/auto-cut', async (req,res) => {
   const videoId = String(req.query.v || '').trim();
   const start = Math.max(0, Number(req.query.start || 0));
