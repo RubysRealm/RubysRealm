@@ -110,7 +110,10 @@ async function prepareGuestCookies() {
       args: [
         '--no-sandbox','--disable-dev-shm-usage','--password-store=basic','--no-first-run','--no-default-browser-check',
         '--disable-features=TranslateUI','--disable-background-networking','--disable-component-update','--disable-sync',
-        '--disable-extensions','--disable-renderer-backgrounding','--renderer-process-limit=1'
+        '--disable-extensions','--disable-renderer-backgrounding','--renderer-process-limit=1',
+        '--disable-gpu','--no-zygote','--single-process','--disable-software-rasterizer',
+        '--disable-background-timer-throttling','--disable-backgrounding-occluded-windows',
+        '--disable-breakpad','--disable-crash-reporter','--mute-audio'
       ]
     });
     const guestPage = guestContext.pages()[0] || await guestContext.newPage();
@@ -118,11 +121,17 @@ async function prepareGuestCookies() {
     await guestPage.waitForTimeout(5000);
 
     const clickText = async regex => {
-      const loc = guestPage.getByText(regex).first();
-      if (!await loc.count()) return false;
-      if (!await loc.isVisible({ timeout: 1800 }).catch(() => false)) return false;
-      await loc.click({ timeout: 5000 }).catch(() => {});
-      return true;
+      const loc = guestPage.getByText(regex);
+      const count = await loc.count().catch(() => 0);
+      for (let i = 0; i < count; i++) {
+        const candidate = loc.nth(i);
+        if (!await candidate.isVisible({ timeout: 1200 }).catch(() => false)) continue;
+        try {
+          await candidate.click({ timeout: 5000, force: true });
+          return true;
+        } catch {}
+      }
+      return false;
     };
 
     let body = (await guestPage.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
@@ -133,12 +142,29 @@ async function prepareGuestCookies() {
     body = (await guestPage.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
 
     if (/watch as guest/i.test(body)) {
-      await clickText(/watch as guest/i);
-      await guestPage.waitForTimeout(4500);
+      let guestClicked = await clickText(/watch as guest/i);
+      if (!guestClicked) {
+        // YouTube TV sometimes renders the choices as non-standard focusable
+        // elements. Walk the focus ring until "Watch as guest" is selected.
+        for (let i = 0; i < 8 && !guestClicked; i++) {
+          const active = await guestPage.evaluate(() => document.activeElement?.textContent || '').catch(() => '');
+          if (/watch as guest/i.test(active)) {
+            await guestPage.keyboard.press('Enter').catch(() => {});
+            guestClicked = true;
+            break;
+          }
+          await guestPage.keyboard.press('ArrowDown').catch(() => {});
+          await guestPage.waitForTimeout(250);
+        }
+      }
+      await guestPage.waitForTimeout(3500);
     }
 
     body = (await guestPage.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
     console.log('YouTube guest bootstrap final:', body.slice(0, 900));
+    if (/scan qr code|yt\.be\/activate|sign in with (your )?phone/i.test(body) && !/home|subscriptions|library|search/i.test(body)) {
+      throw new Error('YouTube TV guest mode did not activate.');
+    }
     return await exportYouTubeCookies(guestContext);
   } finally {
     if (guestContext) await guestContext.close().catch(() => {});
