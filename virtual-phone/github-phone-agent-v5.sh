@@ -6,6 +6,7 @@ SERIAL=${ANDROID_SERIAL:-emulator-5554}
 BRANCH=takarada-virtual-phone
 CMD_PATH=virtual-phone/assistant-command.json
 SCREEN_PATH=virtual-phone/runtime/assistant-screen.png
+SCREEN_B64_PATH=virtual-phone/runtime/assistant-screen.b64.txt
 SCREEN_B64_PATH=virtual-phone/runtime/assistant-screen.b64
 UI_PATH=virtual-phone/runtime/assistant-ui.txt
 STATUS_PATH=virtual-phone/runtime/assistant-status.txt
