@@ -178,16 +178,24 @@ install_tiktok() {
     return 1
   fi
   post_comment "TAKARADA_STATUS|tiktok_identity_verified|package=$package|cert=$signer|sha256=$actual_sha"
-  local installed=0 attempt
+  local installed=0 attempt remote_apk=/data/local/tmp/takarada-tiktok.apk
   for attempt in 1 2 3; do
     adb_ready || true
-    if out=$($ADB -s "$SERIAL" install -r "$apk" 2>&1); then installed=1; break; fi
-    post_comment "TAKARADA_STATUS|tiktok_install_retry|attempt=$attempt|serial=$SERIAL"
+    $ADB -s "$SERIAL" shell rm -f "$remote_apk" >/dev/null 2>&1 || true
+    if timeout 180s $ADB -s "$SERIAL" push "$apk" "$remote_apk" >/dev/null 2>&1; then
+      if out=$(timeout 180s $ADB -s "$SERIAL" shell pm install -r "$remote_apk" 2>&1); then
+        if printf '%s' "$out" | grep -qi 'Success'; then installed=1; break; fi
+      fi
+    else
+      out='adb push failed or timed out'
+    fi
+    post_comment "TAKARADA_STATUS|tiktok_local_install_retry|attempt=$attempt|serial=$SERIAL"
     sleep 4
   done
+  $ADB -s "$SERIAL" shell rm -f "$remote_apk" >/dev/null 2>&1 || true
   if [ "$installed" != "1" ]; then
     out=$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-700)
-    post_comment "TAKARADA_AGENT_ERROR|tiktok_install_failed|serial=$SERIAL|$out"
+    post_comment "TAKARADA_AGENT_ERROR|tiktok_local_install_failed|serial=$SERIAL|$out"
     return 1
   fi
   post_comment 'TAKARADA_STATUS|tiktok_verified_installed'
