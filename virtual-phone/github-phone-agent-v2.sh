@@ -179,38 +179,54 @@ install_tiktok() {
   fi
   post_comment "TAKARADA_STATUS|tiktok_identity_verified|package=$package|cert=$signer|sha256=$actual_sha"
   local installed=0 attempt remote_apk=/data/local/tmp/takarada-tiktok.apk
-  local host_bytes remote_bytes http_pid
+  local host_bytes remote_bytes tcp_pid safe_out
   host_bytes=$(stat -c '%s' "$apk")
-  python3 -m http.server 8766 --bind 0.0.0.0 --directory "$ROOT" >"$ROOT/apk-http.log" 2>&1 &
-  http_pid=$!
-  sleep 1
   for attempt in 1 2 3; do
     adb_ready || true
     $ADB -s "$SERIAL" shell rm -f "$remote_apk" >/dev/null 2>&1 || true
+    python3 - "$apk" >"$ROOT/apk-tcp.log" 2>&1 <<'PY' &
+import socket,sys
+path=sys.argv[1]
+srv=socket.socket()
+srv.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+srv.bind(('0.0.0.0',8766))
+srv.listen(1)
+conn,_=srv.accept()
+with conn, open(path,'rb') as f:
+    while True:
+        chunk=f.read(1024*1024)
+        if not chunk: break
+        conn.sendall(chunk)
+srv.close()
+PY
+    tcp_pid=$!
+    sleep 1
     out=''
     if timeout 240s $ADB -s "$SERIAL" shell sh -c \
-      "'if command -v curl >/dev/null 2>&1; then curl -fL --retry 3 --connect-timeout 20 -o $remote_apk http://10.0.2.2:8766/tiktok.apk; elif toybox wget --help >/dev/null 2>&1; then toybox wget -O $remote_apk http://10.0.2.2:8766/tiktok.apk; else exit 127; fi'" \
+      "'if toybox nc --help >/dev/null 2>&1; then toybox nc 10.0.2.2 8766 > $remote_apk; elif command -v nc >/dev/null 2>&1; then nc 10.0.2.2 8766 > $remote_apk; else exit 127; fi'" \
       >/dev/null 2>&1; then
+      wait "$tcp_pid" >/dev/null 2>&1 || true
       remote_bytes=$($ADB -s "$SERIAL" shell sh -c "'wc -c < $remote_apk'" 2>/dev/null | tr -d '\r ' || true)
       if [ "$remote_bytes" = "$host_bytes" ]; then
         if out=$(timeout 240s $ADB -s "$SERIAL" shell pm install -r "$remote_apk" 2>&1); then
           if printf '%s' "$out" | grep -qi 'Success'; then installed=1; break; fi
         fi
       else
-        out="network_download_size_mismatch host=$host_bytes remote=${remote_bytes:-missing}"
+        out="tcp_size_mismatch host=$host_bytes remote=${remote_bytes:-missing}"
       fi
     else
-      out='android_network_download_failed_or_timed_out'
+      out='android_tcp_receive_failed_or_timed_out'
     fi
+    kill "$tcp_pid" >/dev/null 2>&1 || true
     safe_out=$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-500)
-    post_comment "TAKARADA_STATUS|tiktok_network_install_retry|attempt=$attempt|serial=$SERIAL|detail=$safe_out"
+    post_comment "TAKARADA_STATUS|tiktok_tcp_install_retry|attempt=$attempt|serial=$SERIAL|detail=$safe_out"
     sleep 4
   done
-  kill "$http_pid" >/dev/null 2>&1 || true
+  kill "${tcp_pid:-}" >/dev/null 2>&1 || true
   $ADB -s "$SERIAL" shell rm -f "$remote_apk" >/dev/null 2>&1 || true
   if [ "$installed" != "1" ]; then
     out=$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-700)
-    post_comment "TAKARADA_AGENT_ERROR|tiktok_network_install_failed|serial=$SERIAL|$out"
+    post_comment "TAKARADA_AGENT_ERROR|tiktok_tcp_install_failed|serial=$SERIAL|$out"
     return 1
   fi
   post_comment 'TAKARADA_STATUS|tiktok_verified_installed'
