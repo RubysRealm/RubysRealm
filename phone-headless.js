@@ -83,6 +83,21 @@ async function exportYouTubeCookies(browserContext, dest = GUEST_COOKIE_FILE) {
   return dest;
 }
 
+let guestCookiePromise = null;
+
+async function prepareGuestCookiesOnce() {
+  if (fs.existsSync(GUEST_COOKIE_FILE) && fs.statSync(GUEST_COOKIE_FILE).size > 100) {
+    return GUEST_COOKIE_FILE;
+  }
+  if (guestCookiePromise) return await guestCookiePromise;
+  guestCookiePromise = prepareGuestCookies();
+  try {
+    return await guestCookiePromise;
+  } finally {
+    guestCookiePromise = null;
+  }
+}
+
 async function prepareGuestCookies() {
   let guestContext = null;
   try {
@@ -132,7 +147,7 @@ async function prepareGuestCookies() {
 
 async function buildBrowserSessionCut(videoId, start, duration) {
   const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  const cookieFile = await prepareGuestCookies();
+  const cookieFile = await prepareGuestCookiesOnce();
   const out = path.join('/tmp', `rubyclips-browser-${videoId}-${Math.round(start)}-${Date.now()}.mp4`);
   const template = out.replace(/\.mp4$/i, '.%(ext)s');
   const end = start + duration;
@@ -313,14 +328,15 @@ async function resolvePublicMuxed(videoId) {
 }
 
 async function buildAutomaticCut(videoId, start, duration) {
-  let resolved;
+  // The real browser session is the primary path now. Public proxy APIs are only
+  // a fallback because they have repeatedly returned 403/5xx for this source.
   try {
-    resolved = await resolvePublicMuxed(videoId);
-  } catch (publicError) {
-    console.warn('Public media APIs unavailable:', String(publicError?.message || publicError).slice(0, 1400));
     return await buildBrowserSessionCut(videoId, start, duration);
+  } catch (browserError) {
+    console.warn('Live browser source failed; trying public media fallbacks:', String(browserError?.message || browserError).slice(0, 1400));
   }
 
+  const resolved = await resolvePublicMuxed(videoId);
   const out = path.join('/tmp', `rubyclips-auto-${videoId}-${Math.round(start)}-${Date.now()}.mp4`);
   const commonOut = [
     '-t', String(duration),
@@ -328,36 +344,30 @@ async function buildAutomaticCut(videoId, start, duration) {
     '-c:a','aac','-b:a','160k','-ar','48000','-movflags','+faststart', out
   ];
 
-  try {
-    if (resolved.videoUrl && resolved.audioUrl) {
-      await run(ffmpegPath, [
-        '-y','-hide_banner','-loglevel','warning',
-        '-rw_timeout','30000000',
-        '-reconnect','1','-reconnect_streamed','1','-reconnect_delay_max','5',
-        '-ss', String(start), '-i', resolved.videoUrl,
-        '-ss', String(start), '-i', resolved.audioUrl,
-        '-map','0:v:0','-map','1:a:0?',
-        ...commonOut
-      ]);
-    } else {
-      await run(ffmpegPath, [
-        '-y','-hide_banner','-loglevel','warning',
-        '-rw_timeout','30000000',
-        '-reconnect','1','-reconnect_streamed','1','-reconnect_delay_max','5',
-        '-ss', String(start), '-i', resolved.url,
-        '-map','0:v:0','-map','0:a:0?',
-        ...commonOut
-      ]);
-    }
-  } catch (streamError) {
-    try { fs.unlinkSync(out); } catch {}
-    console.warn('Resolved public stream failed during ffmpeg; switching to live browser session:', String(streamError?.message || streamError));
-    return await buildBrowserSessionCut(videoId, start, duration);
+  if (resolved.videoUrl && resolved.audioUrl) {
+    await run(ffmpegPath, [
+      '-y','-hide_banner','-loglevel','warning',
+      '-rw_timeout','30000000',
+      '-reconnect','1','-reconnect_streamed','1','-reconnect_delay_max','5',
+      '-ss', String(start), '-i', resolved.videoUrl,
+      '-ss', String(start), '-i', resolved.audioUrl,
+      '-map','0:v:0','-map','1:a:0?',
+      ...commonOut
+    ]);
+  } else {
+    await run(ffmpegPath, [
+      '-y','-hide_banner','-loglevel','warning',
+      '-rw_timeout','30000000',
+      '-reconnect','1','-reconnect_streamed','1','-reconnect_delay_max','5',
+      '-ss', String(start), '-i', resolved.url,
+      '-map','0:v:0','-map','0:a:0?',
+      ...commonOut
+    ]);
   }
 
   if (!fs.existsSync(out) || fs.statSync(out).size < 250000) {
     try { fs.unlinkSync(out); } catch {}
-    return await buildBrowserSessionCut(videoId, start, duration);
+    throw new Error('Automatic cut was not created or was unexpectedly small');
   }
   return { out, source: resolved.source, title: resolved.title };
 }
