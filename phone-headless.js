@@ -657,38 +657,11 @@ app.get('/source/:name',(req,res)=>{
 app.listen(PORT,'0.0.0.0',()=>console.log(`Rubradaclips YouTube QR host listening on ${PORT}`));
 
 async function boot() {
-  setStatus({stage:'starting_browser',signedIn:false,downloading:false,error:null});
-  try {
-    context = await chromium.launchPersistentContext(PROFILE, {
-      headless: true,
-      executablePath: CHROME,
-      userAgent: TV_UA,
-      viewport: { width: 1280, height: 720 },
-      args: [
-        '--no-sandbox','--disable-dev-shm-usage','--password-store=basic','--no-first-run','--no-default-browser-check',
-        '--disable-features=TranslateUI','--disable-background-networking','--disable-component-update','--disable-sync',
-        '--disable-extensions','--disable-renderer-backgrounding','--renderer-process-limit=1'
-      ]
-    });
-    page = context.pages()[0] || await context.newPage();
-    await prepareTvQr();
-
-    let checking = false;
-    const timer = setInterval(async()=>{
-      if (checking || acquisitionStarted || getStatus().stage === 'ready') return;
-      checking = true;
-      try {
-        if (await qrApprovalDetected()) {
-          clearInterval(timer);
-          await startAcquisition('youtube-tv-qr-approved');
-        }
-      } finally { checking = false; }
-    },4000);
-    timer.unref();
-  } catch(e) {
-    console.error('browser startup failed',e);
-    setStatus({stage:'browser_error',error:String(e?.message||e)});
-  }
+  // Keep the small Render instance idle until /api/auto-cut actually needs
+  // a browser. Running the TV QR browser permanently plus the on-demand guest
+  // browser could exhaust memory and restart the service mid-download.
+  setStatus({stage:'standby',signedIn:false,downloading:false,error:null});
+  console.log('Rubradaclips source bridge standing by; guest browser launches on demand.');
 }
 
 boot();
