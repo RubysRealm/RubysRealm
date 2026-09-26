@@ -204,6 +204,7 @@ async function buildBrowserInterceptCut(videoId, start, duration) {
       headless: true,
       executablePath: CHROME,
       viewport: { width: 960, height: 540 },
+      userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36',
       extraHTTPHeaders: {
         'Referer': 'https://www.youtube.com/',
         'Origin': 'https://www.youtube.com'
@@ -232,11 +233,11 @@ async function buildBrowserInterceptCut(videoId, start, duration) {
     });
 
     const page = browserContext.pages()[0] || await browserContext.newPage();
-    const embed = 'https://www.youtube.com/embed/' + videoId + '?autoplay=1&mute=1&playsinline=1&rel=0';
-    await page.goto(embed, {
+    const watchPage = 'https://www.youtube.com/watch?v=' + videoId + '&autoplay=1&hl=en&gl=US';
+    await page.goto(watchPage, {
       waitUntil: 'domcontentloaded',
       timeout: 90000,
-      referer: 'https://www.youtube.com/'
+      referer: 'https://www.google.com/'
     });
 
     const tryText = async regex => {
