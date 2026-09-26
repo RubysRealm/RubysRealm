@@ -190,6 +190,8 @@ function youtubeItagKind(url) {
     if (itag === 18 || itag === 22) return 'muxed';
     if (mime.startsWith('audio/')) return 'audio';
     if (mime.startsWith('video/')) return 'video';
+    if ([139,140,141,249,250,251].includes(itag)) return 'audio';
+    if ([133,134,135,136,137,160,242,243,244,247,248,264,266,278,298,299,302,303,308,313,315,394,395,396,397,398,399,400,401].includes(itag)) return 'video';
     return 'unknown';
   } catch {
     return 'unknown';
@@ -203,10 +205,10 @@ async function buildBrowserInterceptCut(videoId, start, duration) {
     browserContext = await chromium.launchPersistentContext(profile, {
       headless: true,
       executablePath: CHROME,
-      viewport: { width: 960, height: 540 },
-      userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36',
+      viewport: { width: 1280, height: 720 },
+      userAgent: TV_UA,
       extraHTTPHeaders: {
-        'Referer': 'https://www.youtube.com/',
+        'Referer': 'https://www.youtube.com/tv',
         'Origin': 'https://www.youtube.com'
       },
       args: [
@@ -233,12 +235,6 @@ async function buildBrowserInterceptCut(videoId, start, duration) {
     });
 
     const page = browserContext.pages()[0] || await browserContext.newPage();
-    const watchPage = 'https://www.youtube.com/watch?v=' + videoId + '&autoplay=1&hl=en&gl=US';
-    await page.goto(watchPage, {
-      waitUntil: 'domcontentloaded',
-      timeout: 90000,
-      referer: 'https://www.google.com/'
-    });
 
     const tryText = async regex => {
       const loc = page.getByText(regex);
@@ -251,16 +247,41 @@ async function buildBrowserInterceptCut(videoId, start, duration) {
       return false;
     };
 
-    await tryText(/reject all/i);
-    await tryText(/accept all/i);
-    await page.evaluate(() => {
-      const v = document.querySelector('video');
-      if (v) {
-        v.muted = true;
-        v.play().catch(() => {});
+    await page.goto(TV_URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
+    await page.waitForTimeout(3500);
+    let tvBody = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g,' ');
+    console.log('YouTube TV media capture initial:', tvBody.slice(0,900));
+
+    let started = await tryText(/get started/i);
+    if (!started) await page.keyboard.press('Enter').catch(() => {});
+    await page.waitForTimeout(1800);
+    tvBody = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g,' ');
+    if (/get started/i.test(tvBody)) {
+      await page.keyboard.press('Enter').catch(() => {});
+      await page.waitForTimeout(1800);
+      tvBody = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g,' ');
+    }
+
+    if (/watch as guest/i.test(tvBody)) {
+      let guest = await tryText(/watch as guest/i);
+      if (!guest) {
+        for (let i = 0; i < 3; i++) {
+          await page.keyboard.press('ArrowDown').catch(() => {});
+          await page.waitForTimeout(250);
+        }
+        await page.keyboard.press('Enter').catch(() => {});
       }
-    }).catch(() => {});
-    await page.locator('.ytp-large-play-button').click({timeout:2500,force:true}).catch(() => {});
+      await page.waitForTimeout(3500);
+    }
+
+    tvBody = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g,' ');
+    console.log('YouTube TV media capture guest state:', tvBody.slice(0,1000));
+
+    const tvWatch = TV_URL + '#/watch?v=' + encodeURIComponent(videoId);
+    await page.goto(tvWatch, { waitUntil: 'domcontentloaded', timeout: 90000 });
+    await page.waitForTimeout(2500);
+    await page.keyboard.press('Enter').catch(() => {});
+    await page.waitForTimeout(1200);
 
     for (let i = 0; i < 16; i++) {
       await page.waitForTimeout(750);
