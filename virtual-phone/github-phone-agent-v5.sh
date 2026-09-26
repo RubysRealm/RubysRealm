@@ -189,6 +189,62 @@ execute_command() {
       fi
       return
       ;;
+    click_text)
+      target_b64=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("text_b64",""))' <<<"$json")
+      target=$(printf '%s' "$target_b64" | base64 -d 2>/dev/null || true)
+      refresh_serial
+      timeout 20s "$ADB" -s "$SERIAL" shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
+      timeout 20s "$ADB" -s "$SERIAL" pull /sdcard/window.xml "$ROOT/window.xml" >/dev/null 2>&1 || true
+      wm=$("$ADB" -s "$SERIAL" shell wm size 2>/dev/null | tr -d '\r' | tail -1)
+      coords=$(python3 - "$ROOT/window.xml" "$target" "$wm" <<'PY'
+import re,sys,xml.etree.ElementTree as ET
+xml_path,target,wm=sys.argv[1:4]
+m=re.search(r'(\d+)x(\d+)',wm)
+pw,ph=(int(m.group(1)),int(m.group(2))) if m else (0,0)
+try: root=ET.parse(xml_path).getroot()
+except Exception: print(""); raise SystemExit
+nodes=[]
+maxx=maxy=0
+for n in root.iter('node'):
+    a=n.attrib
+    b=a.get('bounds','')
+    mm=re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]',b)
+    if mm:
+        x1,y1,x2,y2=map(int,mm.groups()); maxx=max(maxx,x2); maxy=max(maxy,y2)
+    else: continue
+    text=(a.get('text') or '').strip()
+    desc=(a.get('content-desc') or '').strip()
+    label=text or desc
+    if label and target.lower() in label.lower():
+        nodes.append((a.get('clickable')=='true',len(label),x1,y1,x2,y2,label))
+if not nodes: print(""); raise SystemExit
+nodes.sort(key=lambda z:(not z[0],z[1]))
+_,_,x1,y1,x2,y2,label=nodes[0]
+sx=(pw/maxx) if pw and maxx else 1.0
+sy=(ph/maxy) if ph and maxy else 1.0
+x=round(((x1+x2)/2)*sx); y=round(((y1+y2)/2)*sy)
+print(f"{x} {y} {label}")
+PY
+)
+      if [ -n "$coords" ]; then
+        x=$(printf '%s' "$coords" | awk '{print $1}')
+        y=$(printf '%s' "$coords" | awk '{print $2}')
+        "$ADB" -s "$SERIAL" shell input tap "$x" "$y" || true
+      else
+        publish_state "$seq" "click_text_not_found:$target"
+        return
+      fi
+      ;;
+    probe)
+      refresh_serial
+      {
+        echo "WM_SIZE=$("$ADB" -s "$SERIAL" shell wm size 2>/dev/null | tr -d '\r' | tail -1)"
+        echo "WM_DENSITY=$("$ADB" -s "$SERIAL" shell wm density 2>/dev/null | tr -d '\r' | tail -1)"
+        echo "FOCUS=$("$ADB" -s "$SERIAL" shell dumpsys window windows 2>/dev/null | grep -m1 'mCurrentFocus' | tr -d '\r' || true)"
+        echo "TIKTOK=$("$ADB" -s "$SERIAL" shell pm path com.zhiliaoapp.musically 2>/dev/null | tr -d '\r' || true)"
+      } > "$ROOT/ui.txt"
+      write_repo_file "$UI_PATH" "$ROOT/ui.txt" "Takarada assistant probe seq $seq"
+      ;;
     install_apk)
       refresh_serial
       apk_path=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("path","/sdcard/Download/tiktok-45.5.4.apk"))' <<<"$json")
