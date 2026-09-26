@@ -23,6 +23,49 @@ const CONTINUITY_SOURCE_ID = 'xb2tc0i';
 const CONTINUITY_SOURCE_URL = 'https://www.dailymotion.com/video/xb2tc0i';
 const COBALT_API = 'https://rubyclips-cobalt-3.onrender.com/';
 const CURRENT_YOUTUBE_STORY_ID = '5-bO9NAhWbI';
+const PIPED_APIS = [
+  'https://pipedapi.wireway.ch',
+  'https://pipedapi.r4fo.com',
+  'https://pipedapi.qdi.fi'
+];
+
+async function resolvePipedHls(video) {
+  const errors = [];
+  for (const base of PIPED_APIS) {
+    try {
+      const response = await fetch(`${base}/streams/${encodeURIComponent(video)}`, {
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': 'Mozilla/5.0 (compatible; Rubaradaclips/1.0)'
+        },
+        redirect: 'follow',
+        cache: 'no-store'
+      });
+      if (!response.ok) {
+        errors.push(`${base}: HTTP ${response.status}`);
+        continue;
+      }
+      const data = await response.json();
+      const hls = String(data?.hls || '');
+      const duration = Number(data?.duration || 0);
+      if (/^https:\/\//i.test(hls) && duration > 15) {
+        return {
+          ok: true,
+          video,
+          hls,
+          duration,
+          source: base,
+          title: String(data?.title || ''),
+          uploader: String(data?.uploader || '')
+        };
+      }
+      errors.push(`${base}: missing HLS/duration`);
+    } catch (error) {
+      errors.push(`${base}: ${String(error?.message || error).slice(0, 300)}`);
+    }
+  }
+  return { ok: false, video, error: 'No Piped source available', details: errors };
+}
 
 async function probeCurrentYouTubeSource() {
   const sourceUrl = `https://www.youtube.com/watch?v=${CURRENT_YOUTUBE_STORY_ID}`;
@@ -184,6 +227,16 @@ function validateManifest(m, tag) {
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
+
+  const pipedVideo = String(req.query?.pipedVideo || '').trim();
+  if (pipedVideo) {
+    if (!/^[A-Za-z0-9_-]{11}$/.test(pipedVideo)) {
+      return res.status(400).json({ ok: false, error: 'Valid YouTube video id required' });
+    }
+    const result = await resolvePipedHls(pipedVideo);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(result.ok ? 200 : 502).json(result);
+  }
 
   if (String(req.query?.health || '') === '1') {
     return res.status(200).json({ ok: true, version: PUBLISHER_VERSION, channelName: RUBYCLIPS_CHANNEL });
