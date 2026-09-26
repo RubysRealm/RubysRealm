@@ -179,51 +179,39 @@ install_tiktok() {
   fi
   post_comment "TAKARADA_STATUS|tiktok_identity_verified|package=$package|cert=$signer|sha256=$actual_sha"
   local installed=0 remote_apk=/data/local/tmp/takarada-tiktok.apk
-  local remote_dir=/data/local/tmp/takarada-tiktok-parts host_bytes remote_bytes part base pushed try out safe_out
+  local host_bytes remote_bytes out safe_out
   host_bytes=$(stat -c '%s' "$apk")
-  rm -rf "$ROOT/apk-parts"
-  mkdir -p "$ROOT/apk-parts"
-  split -b 2097152 -d -a 4 "$apk" "$ROOT/apk-parts/part."
-  $ADB -s "$SERIAL" shell "rm -rf $remote_dir; mkdir -p $remote_dir; rm -f $remote_apk" >/dev/null 2>&1 || true
-  pushed=1
-  for part in "$ROOT"/apk-parts/part.*; do
-    base=$(basename "$part")
-    pushed=0
-    for try in 1 2 3 4 5; do
-      adb_ready || true
-      if timeout 35s $ADB -s "$SERIAL" push "$part" "$remote_dir/$base" >/dev/null 2>&1; then
-        pushed=1
-        break
-      fi
-      sleep 2
-    done
-    if [ "$pushed" != "1" ]; then
-      post_comment "TAKARADA_AGENT_ERROR|tiktok_chunk_push_failed|part=$base|serial=$SERIAL"
-      break
-    fi
-  done
-  if [ "$pushed" = "1" ]; then
-    adb_ready || true
-    if timeout 60s $ADB -s "$SERIAL" shell sh -c "'cat $remote_dir/part.* > $remote_apk'" >/dev/null 2>&1; then
-      remote_bytes=$($ADB -s "$SERIAL" shell sh -c "'wc -c < $remote_apk'" 2>/dev/null | tr -d '\r ' || true)
-      if [ "$remote_bytes" = "$host_bytes" ]; then
-        post_comment "TAKARADA_STATUS|tiktok_chunk_transfer_complete|bytes=$remote_bytes"
-        if out=$(timeout 240s $ADB -s "$SERIAL" shell pm install -r "$remote_apk" 2>&1); then
-          if printf '%s' "$out" | grep -qi 'Success'; then installed=1; fi
-        fi
-      else
-        out="chunk_reassembly_size_mismatch host=$host_bytes remote=${remote_bytes:-missing}"
-      fi
-    else
-      out='chunk_reassembly_failed'
-    fi
+  pkill -f 'python3 -m http.server 8766' >/dev/null 2>&1 || true
+  (cd "$ROOT" && nohup python3 -m http.server 8766 --bind 0.0.0.0 >"$ROOT/apk-http.log" 2>&1 &)
+  sleep 2
+  adb_ready || true
+  $ADB -s "$SERIAL" shell rm -f "$remote_apk" >/dev/null 2>&1 || true
+
+  # Emulator reaches the GitHub runner host at 10.0.2.2. This avoids large ADB pushes.
+  if $ADB -s "$SERIAL" shell 'command -v curl >/dev/null 2>&1'; then
+    timeout 900s $ADB -s "$SERIAL" shell "curl -fL --retry 4 --retry-delay 2 -o '$remote_apk' 'http://10.0.2.2:8766/tiktok.apk'" >"$ROOT/device-fetch.log" 2>&1 || true
   else
-    out='chunk_push_failed'
+    timeout 900s $ADB -s "$SERIAL" shell "toybox wget -O '$remote_apk' 'http://10.0.2.2:8766/tiktok.apk'" >"$ROOT/device-fetch.log" 2>&1 || true
   fi
-  $ADB -s "$SERIAL" shell "rm -rf $remote_dir; rm -f $remote_apk" >/dev/null 2>&1 || true
+
+  remote_bytes=$($ADB -s "$SERIAL" shell stat -c %s "$remote_apk" 2>/dev/null | tr -d '\r ' || true)
+  if [ "$remote_bytes" != "$host_bytes" ]; then
+    safe_out=$(tr '\n' ' ' < "$ROOT/device-fetch.log" 2>/dev/null | cut -c1-700)
+    post_comment "TAKARADA_AGENT_ERROR|tiktok_local_transfer_failed|serial=$SERIAL|host=$host_bytes|remote=${remote_bytes:-missing}|detail=$safe_out"
+    return 1
+  fi
+
+  post_comment "TAKARADA_STATUS|tiktok_local_transfer_complete|bytes=$remote_bytes"
+  adb_ready || true
+  if out=$(timeout 300s $ADB -s "$SERIAL" shell pm install -r "$remote_apk" 2>&1); then
+    if printf '%s' "$out" | grep -qi 'Success'; then installed=1; fi
+  fi
+  $ADB -s "$SERIAL" shell rm -f "$remote_apk" >/dev/null 2>&1 || true
+  pkill -f 'python3 -m http.server 8766' >/dev/null 2>&1 || true
+
   if [ "$installed" != "1" ]; then
     safe_out=$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-700)
-    post_comment "TAKARADA_AGENT_ERROR|tiktok_chunk_install_failed|serial=$SERIAL|detail=$safe_out"
+    post_comment "TAKARADA_AGENT_ERROR|tiktok_local_install_failed|serial=$SERIAL|detail=$safe_out"
     return 1
   fi
   post_comment 'TAKARADA_STATUS|tiktok_verified_installed'
