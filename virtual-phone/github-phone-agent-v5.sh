@@ -119,41 +119,68 @@ execute_command() {
       "$ADB" -s "$SERIAL" shell input text "$text" ;;
     host_install_tiktok)
       refresh_serial
-      host_apk="/tmp/takarada-phone-v2/tiktok.apk"
-      for _ in $(seq 1 180); do
-        [ -s "$host_apk" ] && [ "$(stat -c '%s' "$host_apk" 2>/dev/null || echo 0)" -gt 100000000 ] && break
-        sleep 2
-      done
-      if [ ! -s "$host_apk" ]; then
-        publish_state "$seq" "host_apk_missing"
-        return
+      host_apk="$ROOT/tiktok-host.apk"
+      expected_sha="fbd8bf71e8150019fcafe23afc061d0b54906b5d8d8a37c070a70b6f3f431a0c"
+      tiktok_url="https://cdn.apkba.com/apps/apk/com.zhiliaoapp.musically?version=latest"
+
+      actual_sha=""
+      if [ -s "$host_apk" ]; then
+        actual_sha=$(sha256sum "$host_apk" | awk '{print $1}')
       fi
-      actual_sha=$(sha256sum "$host_apk" | awk '{print $1}')
-      if [ "$actual_sha" != "fbd8bf71e8150019fcafe23afc061d0b54906b5d8d8a37c070a70b6f3f431a0c" ]; then
+      if [ "$actual_sha" != "$expected_sha" ]; then
+        rm -f "$host_apk"
+        if ! curl -fL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 30 --max-time 1500 \
+          -A 'Mozilla/5.0 (Linux; Android 15; Pixel 7 Pro) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36' \
+          -o "$host_apk" "$tiktok_url"; then
+          publish_state "$seq" "host_apk_download_failed"
+          return
+        fi
+        actual_sha=$(sha256sum "$host_apk" | awk '{print $1}')
+      fi
+
+      if [ "$actual_sha" != "$expected_sha" ]; then
         publish_state "$seq" "host_apk_sha_mismatch:$actual_sha"
         return
       fi
-      pkill -f 'python3 -m http.server 8766' >/dev/null 2>&1 || true
-      (cd /tmp/takarada-phone-v2 && nohup python3 -m http.server 8766 --bind 0.0.0.0 >/tmp/takarada-apk-http.log 2>&1 &)
-      sleep 2
+
+      host_bytes=$(stat -c '%s' "$host_apk")
+      installed=0
       remote_apk="/data/local/tmp/takarada-tiktok.apk"
+
+      pkill -f 'python3 -m http.server 8766' >/dev/null 2>&1 || true
+      (cd "$ROOT" && nohup python3 -m http.server 8766 --bind 0.0.0.0 >"$ROOT/apk-http.log" 2>&1 &)
+      sleep 2
       "$ADB" -s "$SERIAL" shell rm -f "$remote_apk" >/dev/null 2>&1 || true
+
       if "$ADB" -s "$SERIAL" shell 'command -v curl >/dev/null 2>&1'; then
-        "$ADB" -s "$SERIAL" shell "curl -fL --retry 3 -o '$remote_apk' 'http://10.0.2.2:8766/tiktok.apk'" >/tmp/takarada-device-fetch.log 2>&1 || true
-      else
-        "$ADB" -s "$SERIAL" shell "toybox wget -O '$remote_apk' 'http://10.0.2.2:8766/tiktok.apk'" >/tmp/takarada-device-fetch.log 2>&1 || true
+        timeout 900s "$ADB" -s "$SERIAL" shell "curl -fL --retry 4 --retry-delay 2 -o '$remote_apk' 'http://10.0.2.2:8766/tiktok-host.apk'" >"$ROOT/device-fetch.log" 2>&1 || true
+      elif "$ADB" -s "$SERIAL" shell 'toybox wget --help >/dev/null 2>&1'; then
+        timeout 900s "$ADB" -s "$SERIAL" shell "toybox wget -O '$remote_apk' 'http://10.0.2.2:8766/tiktok-host.apk'" >"$ROOT/device-fetch.log" 2>&1 || true
       fi
-      remote_size=$("$ADB" -s "$SERIAL" shell stat -c %s "$remote_apk" 2>/dev/null | tr -d '\r' || echo 0)
-      if [ "${remote_size:-0}" -lt 100000000 ]; then
-        publish_state "$seq" "device_download_failed:$remote_size"
-        return
+
+      remote_size=$("$ADB" -s "$SERIAL" shell stat -c %s "$remote_apk" 2>/dev/null | tr -d '\r ' || echo 0)
+      if [ "${remote_size:-0}" = "$host_bytes" ]; then
+        if out=$(timeout 360s "$ADB" -s "$SERIAL" shell pm install -r "$remote_apk" 2>&1); then
+          if printf '%s' "$out" | grep -qi 'Success'; then installed=1; fi
+        fi
       fi
-      "$ADB" -s "$SERIAL" shell pm install -r "$remote_apk" >/tmp/takarada-device-install.log 2>&1 || true
-      if "$ADB" -s "$SERIAL" shell pm path com.zhiliaoapp.musically >/dev/null 2>&1; then
+
+      if [ "$installed" != "1" ]; then
+        refresh_serial
+        if out=$(timeout 1200s "$ADB" -s "$SERIAL" install --streaming -r "$host_apk" 2>&1); then
+          if printf '%s' "$out" | grep -qi 'Success'; then installed=1; fi
+        fi
+      fi
+
+      "$ADB" -s "$SERIAL" shell rm -f "$remote_apk" >/dev/null 2>&1 || true
+      pkill -f 'python3 -m http.server 8766' >/dev/null 2>&1 || true
+
+      if [ "$installed" = "1" ] && "$ADB" -s "$SERIAL" shell pm path com.zhiliaoapp.musically >/dev/null 2>&1; then
         "$ADB" -s "$SERIAL" shell monkey -p com.zhiliaoapp.musically -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
-        publish_state "$seq" "tiktok_installed_local"
+        publish_state "$seq" "tiktok_installed_verified"
       else
-        publish_state "$seq" "tiktok_local_install_failed"
+        safe_out=$(printf '%s' "${out:-no installer output}" | tr '\n' ' ' | cut -c1-500)
+        publish_state "$seq" "tiktok_install_failed:$safe_out"
       fi
       return
       ;;
