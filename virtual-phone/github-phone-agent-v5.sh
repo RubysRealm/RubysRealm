@@ -76,14 +76,26 @@ publish_state() {
   local seq="$1" note="${2:-ok}"
   printf 'seq=%s\nnote=%s\nrun=%s\nutc=%s\n' "$seq" "$note" "${GITHUB_RUN_ID:-unknown}" "$(date -u +%FT%TZ)" > "$ROOT/status.txt"
   write_repo_file "$STATUS_PATH" "$ROOT/status.txt" "Takarada assistant status seq $seq"
-  capture_screen || true
   capture_ui || true
-  if [ -s "$ROOT/screen.png" ]; then
-    write_repo_file "$SCREEN_PATH" "$ROOT/screen.png" "Takarada assistant screen seq $seq"
-    base64 -w0 "$ROOT/screen.png" > "$ROOT/screen.b64"
-    write_repo_file "$SCREEN_B64_PATH" "$ROOT/screen.b64" "Takarada assistant screen base64 seq $seq"
-  fi
   [ -s "$ROOT/ui.txt" ] && write_repo_file "$UI_PATH" "$ROOT/ui.txt" "Takarada assistant UI seq $seq" || true
+
+  if [ "$note" = "screen" ] || [ "$note" = "report" ] || [ "$seq" = "0" ]; then
+    capture_screen || true
+    if [ -s "$ROOT/screen.png" ]; then
+      python3 - "$ROOT/screen.png" "$ROOT/screen-small.jpg" <<'PY'
+from PIL import Image
+import sys
+src,dst=sys.argv[1:3]
+im=Image.open(src).convert("RGB")
+im.thumbnail((360,780))
+im.save(dst,"JPEG",quality=45,optimize=True)
+PY
+      if [ -s "$ROOT/screen-small.jpg" ]; then
+        base64 -w0 "$ROOT/screen-small.jpg" > "$ROOT/screen.b64"
+        write_repo_file "$SCREEN_B64_PATH" "$ROOT/screen.b64" "Takarada assistant compact screen seq $seq"
+      fi
+    fi
+  fi
   return 0
 }
 
@@ -96,7 +108,7 @@ execute_command() {
     tap)
       x=$(python3 -c 'import json,sys; d=json.load(sys.stdin); print(int(d.get("x",0)))' <<<"$json")
       y=$(python3 -c 'import json,sys; d=json.load(sys.stdin); print(int(d.get("y",0)))' <<<"$json")
-      "$ADB" -s "$SERIAL" shell input tap "$x" "$y" ;;
+      "$ADB" -s "$SERIAL" shell input touchscreen tap "$x" "$y" ;;
     swipe)
       x=$(python3 -c 'import json,sys; d=json.load(sys.stdin); print(int(d.get("x1",0)))' <<<"$json")
       y=$(python3 -c 'import json,sys; d=json.load(sys.stdin); print(int(d.get("y1",0)))' <<<"$json")
@@ -222,7 +234,7 @@ if not nodes: print(""); raise SystemExit
 nodes.sort(key=lambda z:(not z[0],z[1]))
 _,_,x1,y1,x2,y2,label=nodes[0]
 sx=(pw/maxx) if pw and maxx else 1.0
-sy=sx
+sy=(ph/maxy) if ph and maxy else 1.0
 x=round(((x1+x2)/2)*sx); y=round(((y1+y2)/2)*sy)
 print(f"{x} {y} {label}")
 PY
@@ -230,7 +242,7 @@ PY
       if [ -n "$coords" ]; then
         x=$(printf '%s' "$coords" | awk '{print $1}')
         y=$(printf '%s' "$coords" | awk '{print $2}')
-        "$ADB" -s "$SERIAL" shell input tap "$x" "$y" || true
+        "$ADB" -s "$SERIAL" shell input touchscreen tap "$x" "$y" || true
       else
         publish_state "$seq" "click_text_not_found:$target"
         return
