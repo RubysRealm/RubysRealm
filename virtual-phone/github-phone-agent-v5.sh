@@ -117,6 +117,46 @@ execute_command() {
       text=$(printf '%s' "$text64" | base64 -d 2>/dev/null || true)
       text=${text// /%s}
       "$ADB" -s "$SERIAL" shell input text "$text" ;;
+    host_install_tiktok)
+      refresh_serial
+      host_apk="/tmp/takarada-phone-v2/tiktok.apk"
+      for _ in $(seq 1 180); do
+        [ -s "$host_apk" ] && [ "$(stat -c '%s' "$host_apk" 2>/dev/null || echo 0)" -gt 100000000 ] && break
+        sleep 2
+      done
+      if [ ! -s "$host_apk" ]; then
+        publish_state "$seq" "host_apk_missing"
+        return
+      fi
+      actual_sha=$(sha256sum "$host_apk" | awk '{print $1}')
+      if [ "$actual_sha" != "fbd8bf71e8150019fcafe23afc061d0b54906b5d8d8a37c070a70b6f3f431a0c" ]; then
+        publish_state "$seq" "host_apk_sha_mismatch:$actual_sha"
+        return
+      fi
+      pkill -f 'python3 -m http.server 8766' >/dev/null 2>&1 || true
+      (cd /tmp/takarada-phone-v2 && nohup python3 -m http.server 8766 --bind 0.0.0.0 >/tmp/takarada-apk-http.log 2>&1 &)
+      sleep 2
+      remote_apk="/data/local/tmp/takarada-tiktok.apk"
+      "$ADB" -s "$SERIAL" shell rm -f "$remote_apk" >/dev/null 2>&1 || true
+      if "$ADB" -s "$SERIAL" shell 'command -v curl >/dev/null 2>&1'; then
+        "$ADB" -s "$SERIAL" shell "curl -fL --retry 3 -o '$remote_apk' 'http://10.0.2.2:8766/tiktok.apk'" >/tmp/takarada-device-fetch.log 2>&1 || true
+      else
+        "$ADB" -s "$SERIAL" shell "toybox wget -O '$remote_apk' 'http://10.0.2.2:8766/tiktok.apk'" >/tmp/takarada-device-fetch.log 2>&1 || true
+      fi
+      remote_size=$("$ADB" -s "$SERIAL" shell stat -c %s "$remote_apk" 2>/dev/null | tr -d '\r' || echo 0)
+      if [ "${remote_size:-0}" -lt 100000000 ]; then
+        publish_state "$seq" "device_download_failed:$remote_size"
+        return
+      fi
+      "$ADB" -s "$SERIAL" shell pm install -r "$remote_apk" >/tmp/takarada-device-install.log 2>&1 || true
+      if "$ADB" -s "$SERIAL" shell pm path com.zhiliaoapp.musically >/dev/null 2>&1; then
+        "$ADB" -s "$SERIAL" shell monkey -p com.zhiliaoapp.musically -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+        publish_state "$seq" "tiktok_installed_local"
+      else
+        publish_state "$seq" "tiktok_local_install_failed"
+      fi
+      return
+      ;;
     install_apk)
       refresh_serial
       apk_path=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("path","/sdcard/Download/tiktok-45.5.4.apk"))' <<<"$json")
