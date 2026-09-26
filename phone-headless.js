@@ -328,15 +328,16 @@ async function resolvePublicMuxed(videoId) {
 }
 
 async function buildAutomaticCut(videoId, start, duration) {
-  // The real browser session is the primary path now. Public proxy APIs are only
-  // a fallback because they have repeatedly returned 403/5xx for this source.
+  // Prefer lightweight public transports first. The prior browser-first flow
+  // launched a second Chromium context alongside the TV browser and could
+  // restart the small Render instance before the fallbacks were ever tried.
+  let resolved;
   try {
+    resolved = await resolvePublicMuxed(videoId);
+  } catch (publicError) {
+    console.warn('Public media fallbacks failed; trying live YouTube guest-browser session:', String(publicError?.message || publicError).slice(0, 1400));
     return await buildBrowserSessionCut(videoId, start, duration);
-  } catch (browserError) {
-    console.warn('Live browser source failed; trying public media fallbacks:', String(browserError?.message || browserError).slice(0, 1400));
   }
-
-  const resolved = await resolvePublicMuxed(videoId);
   const out = path.join('/tmp', `rubyclips-auto-${videoId}-${Math.round(start)}-${Date.now()}.mp4`);
   const commonOut = [
     '-t', String(duration),
