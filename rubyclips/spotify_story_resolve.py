@@ -236,6 +236,36 @@ def cobalt_media(url):
     return str(data['url'])
 
 
+PIPED_APIS = (
+    'https://pipedapi.wireway.ch',
+    'https://pipedapi.r4fo.com',
+    'https://pipedapi.qdi.fi',
+)
+
+
+def piped_hls(video_id):
+    """Resolve public HLS media when Spotify/YouTube runner transports are challenged."""
+    errors = []
+    for base in PIPED_APIS:
+        try:
+            req = urllib.request.Request(
+                f'{base}/streams/{video_id}',
+                headers={'User-Agent': UA, 'Accept': 'application/json'},
+            )
+            with urllib.request.urlopen(req, timeout=35) as resp:
+                data = json.loads(resp.read().decode('utf-8', 'replace'))
+            hls = str(data.get('hls') or '')
+            duration = float(data.get('duration') or 0)
+            if hls.startswith('http') and duration > 15:
+                print(f'Piped fallback resolved source through {base}.', flush=True)
+                return hls, duration, base
+            errors.append(f'{base}: missing hls/duration')
+        except Exception as exc:
+            errors.append(f'{base}: {exc}')
+    raise RuntimeError('No Piped HLS transport available: ' + '; '.join(errors))
+
+
+
 def copy_cover(url):
     if not url:
         return None
@@ -491,9 +521,24 @@ def make_cut(transport, start, clip_len, out):
             ], timeout=1800)
             strategy = 'spotify-catalog:cobalt-public-transport'
         except Exception as exc:
-            print(f'Cobalt transport unavailable, falling back to resilient YouTube acquisition: {exc}', flush=True)
-            yt_strategy = youtube_section_download(transport['url'], start, clip_len, raw)
-            strategy = f'spotify-catalog:{yt_strategy}'
+            print(f'Cobalt transport unavailable; trying public Piped HLS: {exc}', flush=True)
+            try:
+                hls_url, piped_duration, piped_base = piped_hls(transport['id'])
+                piped_clip_len = min(float(clip_len), max(1.0, piped_duration - float(start)))
+                run([
+                    'ffmpeg', '-y', '-hide_banner', '-loglevel', 'warning',
+                    '-ss', f'{start:.3f}', '-i', hls_url, '-t', f'{piped_clip_len:.3f}',
+                    '-map', '0:v:0', '-map', '0:a:0?',
+                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '22', '-pix_fmt', 'yuv420p',
+                    '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-movflags', '+faststart', str(raw)
+                ], timeout=1800)
+                if not raw.exists() or raw.stat().st_size < 500000:
+                    raise RuntimeError('Piped HLS returned an unusable cut.')
+                strategy = f'spotify-catalog:piped-hls:{piped_base}'
+            except Exception as piped_exc:
+                print(f'Piped HLS unavailable, falling back to resilient YouTube acquisition: {piped_exc}', flush=True)
+                yt_strategy = youtube_section_download(transport['url'], start, clip_len, raw)
+                strategy = f'spotify-catalog:{yt_strategy}'
 
     if not raw.exists() or raw.stat().st_size < 500000:
         raise RuntimeError('Media transport did not create a usable source cut.')
