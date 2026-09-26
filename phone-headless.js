@@ -13,6 +13,8 @@ const TOTAL_PARTS = Number(process.env.STORY_TOTAL_PARTS || 11);
 const SOURCE_DURATION = Number(process.env.SOURCE_DURATION_SECONDS || 6372);
 const SEGMENT_SECONDS = Number(process.env.SEGMENT_SECONDS || 595);
 const PROFILE = '/tmp/youtube-browser';
+const GUEST_PROFILE = '/tmp/youtube-guest-browser';
+const GUEST_COOKIE_FILE = '/tmp/rubyclips-youtube-guest.cookies.txt';
 const SOURCE_DIR = '/tmp/rubyclips-source';
 const STATUS = path.join(SOURCE_DIR, 'status.json');
 const FULL = path.join(SOURCE_DIR, 'full.mp4');
@@ -52,6 +54,146 @@ async function fetchJson(url, opts = {}, timeoutMs = 25000) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+
+function netscapeCookieLine(c) {
+  const domain = String(c.domain || '.youtube.com');
+  const includeSubdomains = domain.startsWith('.') ? 'TRUE' : 'FALSE';
+  const cookiePath = String(c.path || '/');
+  const secure = c.secure ? 'TRUE' : 'FALSE';
+  const expires = Number.isFinite(Number(c.expires)) && Number(c.expires) > 0 ? Math.floor(Number(c.expires)) : 0;
+  return [domain, includeSubdomains, cookiePath, secure, expires, String(c.name || ''), String(c.value || '')].join('\t');
+}
+
+async function exportYouTubeCookies(browserContext, dest = GUEST_COOKIE_FILE) {
+  const cookies = await browserContext.cookies([
+    'https://www.youtube.com/',
+    'https://youtube.com/',
+    'https://accounts.google.com/'
+  ]);
+  if (!cookies.length) throw new Error('Browser session produced no YouTube cookies.');
+  const lines = ['# Netscape HTTP Cookie File', '# Generated from the live Rubaradaclips browser session.'];
+  for (const c of cookies) {
+    if (!c.name || !c.value) continue;
+    lines.push(netscapeCookieLine(c));
+  }
+  fs.writeFileSync(dest, lines.join('\n') + '\n', { mode: 0o600 });
+  console.log('Exported YouTube browser cookies:', cookies.map(c => c.name).join(', '));
+  return dest;
+}
+
+async function prepareGuestCookies() {
+  let guestContext = null;
+  try {
+    fs.mkdirSync(GUEST_PROFILE, { recursive: true });
+    guestContext = await chromium.launchPersistentContext(GUEST_PROFILE, {
+      headless: true,
+      executablePath: CHROME,
+      userAgent: TV_UA,
+      viewport: { width: 1280, height: 720 },
+      args: [
+        '--no-sandbox','--disable-dev-shm-usage','--password-store=basic','--no-first-run','--no-default-browser-check',
+        '--disable-features=TranslateUI','--disable-background-networking','--disable-component-update','--disable-sync',
+        '--disable-extensions','--disable-renderer-backgrounding','--renderer-process-limit=1'
+      ]
+    });
+    const guestPage = guestContext.pages()[0] || await guestContext.newPage();
+    await guestPage.goto(TV_URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
+    await guestPage.waitForTimeout(5000);
+
+    const clickText = async regex => {
+      const loc = guestPage.getByText(regex).first();
+      if (!await loc.count()) return false;
+      if (!await loc.isVisible({ timeout: 1800 }).catch(() => false)) return false;
+      await loc.click({ timeout: 5000 }).catch(() => {});
+      return true;
+    };
+
+    let body = (await guestPage.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
+    console.log('YouTube guest bootstrap initial:', body.slice(0, 700));
+
+    await clickText(/get started/i);
+    await guestPage.waitForTimeout(2200);
+    body = (await guestPage.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
+
+    if (/watch as guest/i.test(body)) {
+      await clickText(/watch as guest/i);
+      await guestPage.waitForTimeout(4500);
+    }
+
+    body = (await guestPage.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
+    console.log('YouTube guest bootstrap final:', body.slice(0, 900));
+    return await exportYouTubeCookies(guestContext);
+  } finally {
+    if (guestContext) await guestContext.close().catch(() => {});
+  }
+}
+
+async function buildBrowserSessionCut(videoId, start, duration) {
+  const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const cookieFile = await prepareGuestCookies();
+  const out = path.join('/tmp', `rubyclips-browser-${videoId}-${Math.round(start)}-${Date.now()}.mp4`);
+  const template = out.replace(/\.mp4$/i, '.%(ext)s');
+  const end = start + duration;
+
+  const args = [
+    '--ffmpeg-location', ffmpegPath,
+    '--cookies', cookieFile,
+    '--no-playlist',
+    '--no-progress',
+    '--retries', '20',
+    '--fragment-retries', '20',
+    '--retry-sleep', 'fragment:2',
+    '--concurrent-fragments', '2',
+    '--js-runtimes', 'node',
+    '--remote-components', 'ejs:github',
+    '--extractor-args', 'youtube:player_client=tv,web_safari,web;formats=missing_pot,duplicate',
+    '--add-header', 'Referer:https://www.youtube.com/',
+    '--add-header', 'Origin:https://www.youtube.com',
+    '--download-sections', `*${start.toFixed(3)}-${end.toFixed(3)}`,
+    '-f', 'bv*[height<=720][vcodec^=avc1]+ba[acodec^=mp4a]/b[height<=720][ext=mp4]/bv*[height<=720]+ba/b[height<=720]',
+    '--merge-output-format', 'mp4',
+    '--remux-video', 'mp4',
+    '-o', template,
+    watchUrl
+  ];
+
+  console.log('Public proxy path failed; trying live YouTube guest-browser session.');
+  try {
+    await run(YTDLP, args);
+  } catch (firstError) {
+    console.log('Guest-browser tv/web clients failed; retrying with web creator/mweb clients:', String(firstError?.message || firstError));
+    await run(YTDLP, [
+      ...args.slice(0, args.indexOf('--extractor-args')),
+      '--extractor-args', 'youtube:player_client=web_creator,mweb;formats=missing_pot,duplicate',
+      ...args.slice(args.indexOf('--extractor-args') + 2)
+    ]);
+  }
+
+  const base = path.basename(out, '.mp4');
+  const dir = path.dirname(out);
+  const candidates = fs.readdirSync(dir)
+    .filter(x => x === path.basename(out) || x.startsWith(base + '.'))
+    .map(x => path.join(dir, x))
+    .filter(x => fs.existsSync(x) && fs.statSync(x).size > 250000)
+    .sort((a,b) => fs.statSync(b).size - fs.statSync(a).size);
+
+  if (!candidates.length) throw new Error('Browser-session yt-dlp did not create a usable media cut.');
+  const src = candidates[0];
+  if (src !== out) {
+    await run(ffmpegPath, [
+      '-y','-hide_banner','-loglevel','error','-i',src,'-t',String(duration),
+      '-map','0:v:0','-map','0:a:0?',
+      '-c:v','libx264','-preset','veryfast','-crf','21','-pix_fmt','yuv420p',
+      '-c:a','aac','-b:a','160k','-ar','48000','-movflags','+faststart',out
+    ]);
+    try { fs.unlinkSync(src); } catch {}
+  }
+  if (!fs.existsSync(out) || fs.statSync(out).size < 250000) {
+    throw new Error('Browser-session media cut was unexpectedly small.');
+  }
+  return { out, source: 'youtube-live-guest-browser', title: '' };
 }
 
 async function resolvePublicMuxed(videoId) {
@@ -171,7 +313,14 @@ async function resolvePublicMuxed(videoId) {
 }
 
 async function buildAutomaticCut(videoId, start, duration) {
-  const resolved = await resolvePublicMuxed(videoId);
+  let resolved;
+  try {
+    resolved = await resolvePublicMuxed(videoId);
+  } catch (publicError) {
+    console.warn('Public media APIs unavailable:', String(publicError?.message || publicError).slice(0, 1400));
+    return await buildBrowserSessionCut(videoId, start, duration);
+  }
+
   const out = path.join('/tmp', `rubyclips-auto-${videoId}-${Math.round(start)}-${Date.now()}.mp4`);
   const commonOut = [
     '-t', String(duration),
@@ -179,30 +328,36 @@ async function buildAutomaticCut(videoId, start, duration) {
     '-c:a','aac','-b:a','160k','-ar','48000','-movflags','+faststart', out
   ];
 
-  if (resolved.videoUrl && resolved.audioUrl) {
-    await run(ffmpegPath, [
-      '-y','-hide_banner','-loglevel','warning',
-      '-rw_timeout','30000000',
-      '-reconnect','1','-reconnect_streamed','1','-reconnect_delay_max','5',
-      '-ss', String(start), '-i', resolved.videoUrl,
-      '-ss', String(start), '-i', resolved.audioUrl,
-      '-map','0:v:0','-map','1:a:0?',
-      ...commonOut
-    ]);
-  } else {
-    await run(ffmpegPath, [
-      '-y','-hide_banner','-loglevel','warning',
-      '-rw_timeout','30000000',
-      '-reconnect','1','-reconnect_streamed','1','-reconnect_delay_max','5',
-      '-ss', String(start), '-i', resolved.url,
-      '-map','0:v:0','-map','0:a:0?',
-      ...commonOut
-    ]);
+  try {
+    if (resolved.videoUrl && resolved.audioUrl) {
+      await run(ffmpegPath, [
+        '-y','-hide_banner','-loglevel','warning',
+        '-rw_timeout','30000000',
+        '-reconnect','1','-reconnect_streamed','1','-reconnect_delay_max','5',
+        '-ss', String(start), '-i', resolved.videoUrl,
+        '-ss', String(start), '-i', resolved.audioUrl,
+        '-map','0:v:0','-map','1:a:0?',
+        ...commonOut
+      ]);
+    } else {
+      await run(ffmpegPath, [
+        '-y','-hide_banner','-loglevel','warning',
+        '-rw_timeout','30000000',
+        '-reconnect','1','-reconnect_streamed','1','-reconnect_delay_max','5',
+        '-ss', String(start), '-i', resolved.url,
+        '-map','0:v:0','-map','0:a:0?',
+        ...commonOut
+      ]);
+    }
+  } catch (streamError) {
+    try { fs.unlinkSync(out); } catch {}
+    console.warn('Resolved public stream failed during ffmpeg; switching to live browser session:', String(streamError?.message || streamError));
+    return await buildBrowserSessionCut(videoId, start, duration);
   }
 
   if (!fs.existsSync(out) || fs.statSync(out).size < 250000) {
     try { fs.unlinkSync(out); } catch {}
-    throw new Error('Automatic cut was not created or was unexpectedly small');
+    return await buildBrowserSessionCut(videoId, start, duration);
   }
   return { out, source: resolved.source, title: resolved.title };
 }
