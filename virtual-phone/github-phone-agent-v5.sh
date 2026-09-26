@@ -117,6 +117,15 @@ execute_command() {
       text=$(printf '%s' "$text64" | base64 -d 2>/dev/null || true)
       text=${text// /%s}
       "$ADB" -s "$SERIAL" shell input text "$text" ;;
+    install_apk)
+      refresh_serial
+      apk_path=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("path","/sdcard/Download/tiktok-45.5.4.apk"))' <<<"$json")
+      host_apk="$ROOT/manual-install.apk"
+      "$ADB" -s "$SERIAL" pull "$apk_path" "$host_apk" >/dev/null 2>&1 || true
+      if [ -s "$host_apk" ]; then
+        "$ADB" -s "$SERIAL" install -r "$host_apk" >/tmp/takarada-install.log 2>&1 || true
+      fi
+      ;;
     screen|report) : ;;
     *) publish_state "$seq" "unknown_action:$action"; return ;;
   esac
