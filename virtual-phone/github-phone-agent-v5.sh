@@ -119,9 +119,6 @@ execute_command() {
   publish_state "$seq" "$action"
 }
 
-bash virtual-phone/github-phone-agent-v4.sh &
-BASE_PID=$!
-
 for _ in $(seq 1 45); do
   refresh_serial
   if [ -n "$SERIAL" ] && "$ADB" -s "$SERIAL" get-state >/dev/null 2>&1; then break; fi
@@ -148,5 +145,3 @@ while [ $SECONDS -lt $END ]; do
   sleep 2
 done
 
-kill "$BASE_PID" >/dev/null 2>&1 || true
-wait "$BASE_PID" 2>/dev/null || true
