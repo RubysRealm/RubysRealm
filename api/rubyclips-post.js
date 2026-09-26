@@ -11,9 +11,10 @@ const TIKTOK_STORY_PLATFORM = 'rubyclips-tiktok-story-v1';
 const CREATOR_CHANNEL = '@bushcraftinthewildforest';
 const TIKTOK_STORY_CHANNEL = '@muffindrama_us';
 const YOUTUBE_STORY_CHANNEL = '@muffindrama-uvu';
+const SPOTIFY_STORY_CHANNEL = 'babyjamie1';
 const MAX_AUTO_SECONDS = 599;
 const MIN_STORY_RESTART_GENERATION = 5;
-const REQUIRED_STORY_PIPELINE_REVISION = 'avsync-v3-idempotent';
+const REQUIRED_STORY_PIPELINE_REVISION = 'avsync-v4-direct-builder';
 const PUBLISHER_VERSION = 'existing-video-parts-v13-wide-frame-title-card';
 const CONTINUITY_SERIES_ID = '7682993954661553173';
 const CONTINUITY_RESTART = 2;
@@ -106,6 +107,9 @@ function validateTikTokStory(m, tag) {
   if (provider === 'youtube') {
     if (!/^[A-Za-z0-9_-]{11}$/.test(seriesId)) throw new Error('Blocked: invalid YouTube story id.');
     if (sourceChannel !== YOUTUBE_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: YouTube story channel mismatch.');
+  } else if (provider === 'spotify-show') {
+    if (!/^[A-Za-z0-9]{22}$/.test(seriesId)) throw new Error('Blocked: invalid Spotify episode id.');
+    if (sourceChannel !== SPOTIFY_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: Spotify story channel mismatch.');
   } else if (provider === 'dailymotion-muffindrama-mirror') {
     if (!/^[A-Za-z0-9_-]{6,25}$/.test(seriesId)) throw new Error('Blocked: invalid mirror-backed story id.');
     if (sourceChannel !== TIKTOK_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: mirror-backed MuffinDrama channel mismatch.');
@@ -135,6 +139,9 @@ function validateTikTokStory(m, tag) {
   } else if (provider === 'youtube') {
     if (ids.length !== 1 || ids[0] !== seriesId) throw new Error('Blocked: invalid YouTube source id.');
     if (urls.length !== 1 || !urls[0].includes('youtube.com/watch')) throw new Error('Blocked: invalid YouTube source URL.');
+  } else if (provider === 'spotify-show') {
+    if (ids.length !== 1 || ids[0] !== seriesId) throw new Error('Blocked: invalid Spotify source id.');
+    if (urls.length !== 1 || !urls[0].startsWith('https://open.spotify.com/episode/')) throw new Error('Blocked: invalid Spotify source URL.');
   } else {
     throw new Error('Blocked: TikTok story provider mismatch.');
   }
