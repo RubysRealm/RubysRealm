@@ -104,7 +104,7 @@ jobs:
           force-avd-creation: false
           disable-animations: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader -feature -Vulkan -noaudio -no-boot-anim -camera-back none -camera-front none -no-metrics
-          script: bash virtual-phone/github-phone-agent-v4.sh
+          script: bash virtual-phone/github-phone-agent-v5.sh
 
       - name: Package Android phone state
         id: package_phone_state
@@ -136,7 +136,7 @@ jobs:
           name: takarada-phone-state
           path: /tmp/takarada-phone-state.tar.zst
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
           compression-level: 0
 
       - name: Verify persisted Android phone state
