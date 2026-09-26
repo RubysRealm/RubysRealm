@@ -213,7 +213,8 @@ else
   fi
 fi
 
-LAST_SEQ=1
+LAST_SEQ=$(gh api "repos/$GITHUB_REPOSITORY/issues/$TRIGGER_ISSUE" --jq '.body // ""' 2>/dev/null | awk -F'|' '/^TAKARADA_CMD\|[0-9]+\|/ {print $2}' || true)
+LAST_SEQ=${LAST_SEQ:-1}
 END=$((SECONDS + 18600))
 while [ $SECONDS -lt $END ]; do
   refresh_serial
