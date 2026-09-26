@@ -19,16 +19,21 @@ refresh_serial() {
 
 
 write_repo_file() {
-  local path="$1" file="$2" msg="$3" sha content
-  content=$(base64 -w0 "$file")
+  local path="$1" file="$2" msg="$3" sha payload
   sha=$(gh api "repos/$GITHUB_REPOSITORY/contents/$path?ref=$BRANCH" --jq '.sha // empty' 2>/dev/null || true)
-  if [ -n "$sha" ]; then
-    gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/$path"       -f message="$msg" -f content="$content" -f branch="$BRANCH" -f sha="$sha" >/dev/null
-  else
-    gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/$path"       -f message="$msg" -f content="$content" -f branch="$BRANCH" >/dev/null
-  fi
+  payload="$ROOT/payload.json"
+  python3 - "$file" "$msg" "$BRANCH" "$sha" > "$payload" <<'PY'
+import base64, json, sys
+file_path, msg, branch, sha = sys.argv[1:5]
+with open(file_path,'rb') as f:
+    content=base64.b64encode(f.read()).decode()
+obj={"message":msg,"content":content,"branch":branch}
+if sha:
+    obj["sha"]=sha
+json.dump(obj,sys.stdout,separators=(',',':'))
+PY
+  gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/$path" --input "$payload" >/dev/null
 }
-
 capture_screen() {
   refresh_serial
   local hostdir="$ROOT/hostshot" shot
