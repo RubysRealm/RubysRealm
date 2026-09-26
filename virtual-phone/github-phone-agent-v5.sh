@@ -236,6 +236,31 @@ PY
         return
       fi
       ;;
+    tiktok_diag)
+      refresh_serial
+      {
+        echo "SERIAL=$SERIAL"
+        echo "PM_PATH=$("$ADB" -s "$SERIAL" shell pm path com.zhiliaoapp.musically 2>&1 | tr -d '\r')"
+        echo "LAUNCHER=$("$ADB" -s "$SERIAL" shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER com.zhiliaoapp.musically 2>&1 | tr -d '\r')"
+        echo "SDK=$("$ADB" -s "$SERIAL" shell getprop ro.build.version.sdk 2>&1 | tr -d '\r')"
+        echo "ABI=$("$ADB" -s "$SERIAL" shell getprop ro.product.cpu.abi 2>&1 | tr -d '\r')"
+        "$ADB" -s "$SERIAL" shell am force-stop com.zhiliaoapp.musically >/dev/null 2>&1 || true
+        ACT=$("$ADB" -s "$SERIAL" shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER com.zhiliaoapp.musically 2>/dev/null | tr -d '\r' | tail -1)
+        echo "RESOLVED=$ACT"
+        if [[ "$ACT" == */* ]]; then
+          echo "START_OUTPUT_BEGIN"
+          "$ADB" -s "$SERIAL" shell am start -W -n "$ACT" 2>&1 | tr -d '\r' || true
+          echo "START_OUTPUT_END"
+          sleep 5
+        fi
+        echo "FOCUS=$("$ADB" -s "$SERIAL" shell dumpsys window windows 2>/dev/null | grep -m1 'mCurrentFocus' | tr -d '\r' || true)"
+        echo "PROCESS=$("$ADB" -s "$SERIAL" shell pidof com.zhiliaoapp.musically 2>/dev/null | tr -d '\r' || true)"
+        echo "LOGCAT_BEGIN"
+        "$ADB" -s "$SERIAL" logcat -d -t 500 2>/dev/null | grep -Ei 'musically|aweme|FATAL EXCEPTION|AndroidRuntime|crash' | tail -120 | tr -d '\r' || true
+        echo "LOGCAT_END"
+      } > "$ROOT/ui.txt"
+      write_repo_file "$UI_PATH" "$ROOT/ui.txt" "Takarada TikTok diagnostic seq $seq"
+      ;;
     probe)
       refresh_serial
       {
