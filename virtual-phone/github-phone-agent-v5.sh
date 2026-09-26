@@ -26,16 +26,16 @@ capture_screen() {
   local hostdir="$ROOT/hostshot" shot
   mkdir -p "$hostdir"
   rm -f "$hostdir"/*.png >/dev/null 2>&1 || true
-  if "$ADB" -s "$SERIAL" emu screenrecord screenshot "$hostdir" >/dev/null 2>&1; then
+  if timeout 20s "$ADB" -s "$SERIAL" emu screenrecord screenshot "$hostdir" >/dev/null 2>&1; then
     shot=$(find "$hostdir" -maxdepth 1 -type f -name '*.png' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2- || true)
     if [ -n "$shot" ] && [ -s "$shot" ]; then cp "$shot" "$ROOT/screen.png"; return 0; fi
   fi
-  "$ADB" -s "$SERIAL" exec-out screencap -p > "$ROOT/screen.png"
+  timeout 20s "$ADB" -s "$SERIAL" exec-out screencap -p > "$ROOT/screen.png" || true
 }
 
 capture_ui() {
-  "$ADB" -s "$SERIAL" shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
-  "$ADB" -s "$SERIAL" pull /sdcard/window.xml "$ROOT/window.xml" >/dev/null 2>&1 || true
+  timeout 20s "$ADB" -s "$SERIAL" shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
+  timeout 20s "$ADB" -s "$SERIAL" pull /sdcard/window.xml "$ROOT/window.xml" >/dev/null 2>&1 || true
   python3 - "$ROOT/window.xml" > "$ROOT/ui.txt" <<'PY'
 import sys, xml.etree.ElementTree as ET
 try: root=ET.parse(sys.argv[1]).getroot()
@@ -58,12 +58,12 @@ PY
 
 publish_state() {
   local seq="$1" note="${2:-ok}"
+  printf 'seq=%s\nnote=%s\nrun=%s\nutc=%s\n' "$seq" "$note" "${GITHUB_RUN_ID:-unknown}" "$(date -u +%FT%TZ)" > "$ROOT/status.txt"
+  write_repo_file "$STATUS_PATH" "$ROOT/status.txt" "Takarada assistant status seq $seq"
   capture_screen || true
   capture_ui || true
-  printf 'seq=%s\nnote=%s\nrun=%s\nutc=%s\n' "$seq" "$note" "${GITHUB_RUN_ID:-unknown}" "$(date -u +%FT%TZ)" > "$ROOT/status.txt"
   [ -s "$ROOT/screen.png" ] && write_repo_file "$SCREEN_PATH" "$ROOT/screen.png" "Takarada assistant screen seq $seq"
   [ -s "$ROOT/ui.txt" ] && write_repo_file "$UI_PATH" "$ROOT/ui.txt" "Takarada assistant UI seq $seq"
-  write_repo_file "$STATUS_PATH" "$ROOT/status.txt" "Takarada assistant status seq $seq"
 }
 
 execute_command() {
