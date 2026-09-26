@@ -12,6 +12,22 @@ TIKTOK_PACKAGE='com.zhiliaoapp.musically'
 TIKTOK_CERT_SHA256='9041803e91bcb814b4b4399fb5c85a91640b755e5e8ba76813814bf4cf2ab5ba'
 mkdir -p "$ROOT"
 
+refresh_serial() {
+  local found
+  found=$($ADB devices 2>/dev/null | awk '$2=="device" && $1 ~ /^emulator-/ {print $1; exit}')
+  if [ -n "$found" ]; then SERIAL="$found"; export ANDROID_SERIAL="$SERIAL"; fi
+}
+
+adb_ready() {
+  for _ in $(seq 1 45); do
+    refresh_serial
+    if [ -n "$SERIAL" ] && $ADB -s "$SERIAL" get-state >/dev/null 2>&1; then return 0; fi
+    sleep 2
+  done
+  return 1
+}
+
+
 if [ -z "${GH_TOKEN:-}" ] || [ -z "${GITHUB_REPOSITORY:-}" ] || [ -z "${TRIGGER_ISSUE:-}" ]; then
   echo 'Missing required GitHub session variables' >&2
   exit 2
@@ -22,7 +38,7 @@ post_comment() {
   gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$TRIGGER_ISSUE/comments" -f body="$body" >/dev/null
 }
 
-$ADB -s "$SERIAL" wait-for-device
+adb_ready || { echo "No Android emulator became ready" >&2; exit 3; }
 $ADB -s "$SERIAL" shell wm size 720x1280 || true
 $ADB -s "$SERIAL" shell wm density 320 || true
 $ADB -s "$SERIAL" shell settings put system screen_off_timeout 2147483647 || true
@@ -107,12 +123,14 @@ PY
 }
 
 report_state() {
+  refresh_serial
   local seq=${1:-0}
   publish_ui "$seq" || true
   detect_qr "$seq" || true
 }
 
 install_tiktok() {
+  adb_ready || { post_comment "TAKARADA_AGENT_ERROR|adb_unavailable_before_tiktok_install"; return 1; }
   local apk="$ROOT/tiktok.apk" bt apksigner aapt signer package actual_sha out cert_out
   post_comment 'TAKARADA_STATUS|tiktok_download_started|source=verified_mirror'
   if ! curl -fL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 30 --max-time 1500 \
@@ -160,9 +178,16 @@ install_tiktok() {
     return 1
   fi
   post_comment "TAKARADA_STATUS|tiktok_identity_verified|package=$package|cert=$signer|sha256=$actual_sha"
-  if ! out=$($ADB -s "$SERIAL" install -r "$apk" 2>&1); then
+  local installed=0 attempt
+  for attempt in 1 2 3; do
+    adb_ready || true
+    if out=$($ADB -s "$SERIAL" install -r "$apk" 2>&1); then installed=1; break; fi
+    post_comment "TAKARADA_STATUS|tiktok_install_retry|attempt=$attempt|serial=$SERIAL"
+    sleep 4
+  done
+  if [ "$installed" != "1" ]; then
     out=$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-700)
-    post_comment "TAKARADA_AGENT_ERROR|tiktok_install_failed|$out"
+    post_comment "TAKARADA_AGENT_ERROR|tiktok_install_failed|serial=$SERIAL|$out"
     return 1
   fi
   post_comment 'TAKARADA_STATUS|tiktok_verified_installed'
@@ -191,6 +216,7 @@ fi
 LAST_SEQ=1
 END=$((SECONDS + 18600))
 while [ $SECONDS -lt $END ]; do
+  refresh_serial
   BODY=$(gh api "repos/$GITHUB_REPOSITORY/issues/$TRIGGER_ISSUE" --jq '.body // ""' 2>/dev/null || true)
   if [[ "$BODY" == TAKARADA_CMD\|* ]]; then
     IFS='|' read -r marker seq action a b c d e <<< "$BODY"
