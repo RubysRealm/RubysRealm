@@ -277,11 +277,27 @@ async function buildBrowserInterceptCut(videoId, start, duration) {
     tvBody = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g,' ');
     console.log('YouTube TV media capture guest state:', tvBody.slice(0,1000));
 
-    const tvWatch = TV_URL + '#/watch?v=' + encodeURIComponent(videoId);
-    await page.goto(tvWatch, { waitUntil: 'domcontentloaded', timeout: 90000 });
-    await page.waitForTimeout(2500);
-    await page.keyboard.press('Enter').catch(() => {});
-    await page.waitForTimeout(1200);
+    // Keep the signed-out TV guest session alive. A full page.goto() here
+    // resets Leanback back into the account picker. Change only the SPA hash.
+    await page.evaluate(id => {
+      window.location.hash = '/watch?v=' + encodeURIComponent(id);
+    }, videoId);
+    await page.waitForTimeout(4500);
+
+    // If Leanback ignored direct hash navigation, use its signed-out Search UI
+    // without reloading the page.
+    if (!urls.length) {
+      const search = page.getByText(/^Search$/i).first();
+      if (await search.count().catch(() => 0)) {
+        await search.click({timeout:3000,force:true}).catch(() => {});
+        await page.waitForTimeout(900);
+        await page.keyboard.type(videoId, {delay:35}).catch(() => {});
+        await page.keyboard.press('Enter').catch(() => {});
+        await page.waitForTimeout(3000);
+        await page.keyboard.press('Enter').catch(() => {});
+        await page.waitForTimeout(2200);
+      }
+    }
 
     for (let i = 0; i < 16; i++) {
       await page.waitForTimeout(750);
