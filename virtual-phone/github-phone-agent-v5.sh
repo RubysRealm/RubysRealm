@@ -6,6 +6,7 @@ SERIAL=${ANDROID_SERIAL:-emulator-5554}
 BRANCH=takarada-virtual-phone
 CMD_PATH=virtual-phone/assistant-command.json
 SCREEN_PATH=virtual-phone/runtime/assistant-screen.png
+SCREEN_B64_PATH=virtual-phone/runtime/assistant-screen.b64
 UI_PATH=virtual-phone/runtime/assistant-ui.txt
 STATUS_PATH=virtual-phone/runtime/assistant-status.txt
 ROOT=/tmp/takarada-assistant-control
@@ -76,7 +77,11 @@ publish_state() {
   write_repo_file "$STATUS_PATH" "$ROOT/status.txt" "Takarada assistant status seq $seq"
   capture_screen || true
   capture_ui || true
-  [ -s "$ROOT/screen.png" ] && write_repo_file "$SCREEN_PATH" "$ROOT/screen.png" "Takarada assistant screen seq $seq"
+  if [ -s "$ROOT/screen.png" ]; then
+    write_repo_file "$SCREEN_PATH" "$ROOT/screen.png" "Takarada assistant screen seq $seq"
+    base64 -w0 "$ROOT/screen.png" > "$ROOT/screen.b64"
+    write_repo_file "$SCREEN_B64_PATH" "$ROOT/screen.b64" "Takarada assistant screen base64 seq $seq"
+  fi
   [ -s "$ROOT/ui.txt" ] && write_repo_file "$UI_PATH" "$ROOT/ui.txt" "Takarada assistant UI seq $seq" || true
   return 0
 }
