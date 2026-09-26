@@ -11,6 +11,13 @@ STATUS_PATH=virtual-phone/runtime/assistant-status.txt
 ROOT=/tmp/takarada-assistant-control
 mkdir -p "$ROOT"
 
+refresh_serial() {
+  local found
+  found=$($ADB devices 2>/dev/null | awk '$2=="device" && $1 ~ /^emulator-/ {print $1; exit}')
+  if [ -n "$found" ]; then SERIAL="$found"; export ANDROID_SERIAL="$SERIAL"; fi
+}
+
+
 write_repo_file() {
   local path="$1" file="$2" msg="$3" sha content
   content=$(base64 -w0 "$file")
@@ -23,6 +30,7 @@ write_repo_file() {
 }
 
 capture_screen() {
+  refresh_serial
   local hostdir="$ROOT/hostshot" shot
   mkdir -p "$hostdir"
   rm -f "$hostdir"/*.png >/dev/null 2>&1 || true
@@ -34,6 +42,7 @@ capture_screen() {
 }
 
 capture_ui() {
+  refresh_serial
   timeout 20s "$ADB" -s "$SERIAL" shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1 || true
   timeout 20s "$ADB" -s "$SERIAL" pull /sdcard/window.xml "$ROOT/window.xml" >/dev/null 2>&1 || true
   python3 - "$ROOT/window.xml" > "$ROOT/ui.txt" <<'PY'
@@ -67,6 +76,7 @@ publish_state() {
 }
 
 execute_command() {
+  refresh_serial
   local json="$1" seq action x y x2 y2 duration key app text64 text
   seq=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("seq",0))' <<<"$json")
   action=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("action","screen"))' <<<"$json")
@@ -107,12 +117,17 @@ execute_command() {
 bash virtual-phone/github-phone-agent-v4.sh &
 BASE_PID=$!
 
-"$ADB" -s "$SERIAL" wait-for-device
+for _ in $(seq 1 45); do
+  refresh_serial
+  if [ -n "$SERIAL" ] && "$ADB" -s "$SERIAL" get-state >/dev/null 2>&1; then break; fi
+  sleep 2
+done
 sleep 8
 publish_state 0 boot
 
 LAST_SEQ=0
 while kill -0 "$BASE_PID" >/dev/null 2>&1; do
+  refresh_serial
   RAW=$(gh api "repos/$GITHUB_REPOSITORY/contents/$CMD_PATH?ref=$BRANCH" --jq '.content // empty' 2>/dev/null || true)
   if [ -n "$RAW" ]; then
     printf '%s' "$RAW" | tr -d '\n' | base64 -d > "$ROOT/command.json" 2>/dev/null || true
