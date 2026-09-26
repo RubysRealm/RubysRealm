@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   build-and-publish:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -64,36 +64,19 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install tools
+      - name: Install video tools
         if: steps.state.outputs.ready == 'true'
         run: |
-          command -v ffmpeg >/dev/null 2>&1 || brew install ffmpeg
-          python -m pip install --quiet --upgrade yt-dlp votify
-          npm init -y >/dev/null 2>&1
-          npm install --silent puppeteer-core @tobyg74/tiktok-api-dl
-          FONT_SRC="$(fc-match -f '%{file}\n' 'Arial:style=Bold' | head -1)"
-          if [ -z "$FONT_SRC" ] || [ ! -f "$FONT_SRC" ]; then
-            FONT_SRC="$(fc-match -f '%{file}\n' 'Helvetica:style=Bold' | head -1)"
-          fi
-          test -n "$FONT_SRC" && test -f "$FONT_SRC"
-          python - "$FONT_SRC" <<'PY'
-          import sys
-          from pathlib import Path
-          p=Path('rubyclips/muffin_story_build.py')
-          s=p.read_text()
-          old="FONT = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'"
-          new=f"FONT = {sys.argv[1]!r}"
-          if old not in s:
-              raise SystemExit('Expected builder font setting not found')
-          p.write_text(s.replace(old,new,1))
-          print('Using font:', sys.argv[1])
-          PY
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          python -m pip install --quiet --upgrade pip yt-dlp votify
 
-      - name: Resolve upcoming episodes
+      - name: Resolve next BabyJamie Spotify part
         if: steps.state.outputs.ready == 'true'
         run: |
-          echo 'Resolving the next authorized Rubaradaclips story part.'
-          node rubyclips/muffin_story_resolve_tikwm.cjs
+          set -euo pipefail
+          echo 'Using the BabyJamie Spotify show as the Rubaradaclips source.'
+          python rubyclips/spotify_story_resolve.py
 
       - name: Build and verify corrected part
         if: steps.state.outputs.ready == 'true'
