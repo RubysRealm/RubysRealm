@@ -171,8 +171,139 @@ async function prepareGuestCookies() {
   }
 }
 
+
+function normalizeGoogleVideoUrl(raw) {
+  try {
+    const u = new URL(raw);
+    for (const k of ['range','rn','rbuf','sq','ump','alr','cpn']) u.searchParams.delete(k);
+    return u.href;
+  } catch {
+    return raw;
+  }
+}
+
+function youtubeItagKind(url) {
+  try {
+    const u = new URL(url);
+    const itag = Number(u.searchParams.get('itag') || 0);
+    const mime = String(u.searchParams.get('mime') || '').toLowerCase();
+    if (itag === 18 || itag === 22) return 'muxed';
+    if (mime.startsWith('audio/')) return 'audio';
+    if (mime.startsWith('video/')) return 'video';
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+async function buildBrowserInterceptCut(videoId, start, duration) {
+  const profile = path.join('/tmp', 'rubyclips-intercept-' + Date.now());
+  let browserContext = null;
+  try {
+    browserContext = await chromium.launchPersistentContext(profile, {
+      headless: true,
+      executablePath: CHROME,
+      viewport: { width: 960, height: 540 },
+      args: [
+        '--no-sandbox','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check',
+        '--disable-gpu','--no-zygote','--single-process','--disable-software-rasterizer',
+        '--disable-background-networking','--disable-component-update','--disable-sync',
+        '--disable-extensions','--disable-renderer-backgrounding','--renderer-process-limit=1',
+        '--mute-audio','--autoplay-policy=no-user-gesture-required'
+      ]
+    });
+
+    const urls = [];
+    browserContext.on('request', req => {
+      const raw = req.url();
+      if (!/googlevideo\.com\/videoplayback/i.test(raw)) return;
+      const clean = normalizeGoogleVideoUrl(raw);
+      if (!urls.includes(clean)) {
+        urls.push(clean);
+        const kind = youtubeItagKind(clean);
+        let itag = '';
+        try { itag = new URL(clean).searchParams.get('itag') || ''; } catch {}
+        console.log('Captured YouTube browser media URL', {kind, itag});
+      }
+    });
+
+    const page = browserContext.pages()[0] || await browserContext.newPage();
+    const embed = 'https://www.youtube-nocookie.com/embed/' + videoId + '?autoplay=1&mute=1&playsinline=1&rel=0';
+    await page.goto(embed, { waitUntil: 'domcontentloaded', timeout: 90000 });
+
+    const tryText = async regex => {
+      const loc = page.getByText(regex);
+      const count = await loc.count().catch(() => 0);
+      for (let i = 0; i < count; i++) {
+        const x = loc.nth(i);
+        if (!await x.isVisible({timeout:800}).catch(() => false)) continue;
+        if (await x.click({timeout:2500,force:true}).then(()=>true).catch(()=>false)) return true;
+      }
+      return false;
+    };
+
+    await tryText(/reject all/i);
+    await tryText(/accept all/i);
+    await page.evaluate(() => {
+      const v = document.querySelector('video');
+      if (v) {
+        v.muted = true;
+        v.play().catch(() => {});
+      }
+    }).catch(() => {});
+    await page.locator('.ytp-large-play-button').click({timeout:2500,force:true}).catch(() => {});
+
+    for (let i = 0; i < 16; i++) {
+      await page.waitForTimeout(750);
+      const kinds = new Set(urls.map(youtubeItagKind));
+      if (kinds.has('muxed') || (kinds.has('video') && kinds.has('audio'))) break;
+    }
+
+    const muxed = urls.find(x => youtubeItagKind(x) === 'muxed');
+    const video = urls.find(x => youtubeItagKind(x) === 'video');
+    const audio = urls.find(x => youtubeItagKind(x) === 'audio');
+    if (!muxed && !(video && audio)) {
+      const body = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g,' ').slice(0,900);
+      throw new Error('Browser did not expose usable YouTube media streams. Page: ' + body);
+    }
+
+    const out = path.join('/tmp', 'rubyclips-intercept-' + videoId + '-' + Math.round(start) + '-' + Date.now() + '.mp4');
+    if (muxed) {
+      await run(ffmpegPath, [
+        '-y','-hide_banner','-loglevel','warning',
+        '-rw_timeout','30000000','-reconnect','1','-reconnect_streamed','1','-reconnect_delay_max','5',
+        '-ss',String(start),'-i',muxed,'-t',String(duration),
+        '-map','0:v:0','-map','0:a:0?',
+        '-c:v','libx264','-preset','veryfast','-crf','21','-pix_fmt','yuv420p',
+        '-c:a','aac','-b:a','160k','-ar','48000','-movflags','+faststart',out
+      ]);
+    } else {
+      await run(ffmpegPath, [
+        '-y','-hide_banner','-loglevel','warning',
+        '-rw_timeout','30000000','-reconnect','1','-reconnect_streamed','1','-reconnect_delay_max','5',
+        '-ss',String(start),'-i',video,'-ss',String(start),'-i',audio,'-t',String(duration),
+        '-map','0:v:0','-map','1:a:0',
+        '-c:v','libx264','-preset','veryfast','-crf','21','-pix_fmt','yuv420p',
+        '-c:a','aac','-b:a','160k','-ar','48000','-movflags','+faststart',out
+      ]);
+    }
+    if (!fs.existsSync(out) || fs.statSync(out).size < 250000) {
+      throw new Error('Browser-intercept source cut was unexpectedly small.');
+    }
+    return { out, source: 'youtube-browser-media-intercept', title: '' };
+  } finally {
+    if (browserContext) await browserContext.close().catch(() => {});
+    try { fs.rmSync(profile, {recursive:true, force:true}); } catch {}
+  }
+}
+
 async function buildBrowserSessionCut(videoId, start, duration) {
   const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  try {
+    return await buildBrowserInterceptCut(videoId, start, duration);
+  } catch (interceptError) {
+    console.warn('Browser media interception failed; trying cookie/yt-dlp path:', String(interceptError?.message || interceptError).slice(0,1200));
+  }
   const cookieFile = await prepareGuestCookiesOnce();
   const out = path.join('/tmp', `rubyclips-browser-${videoId}-${Math.round(start)}-${Date.now()}.mp4`);
   const template = out.replace(/\.mp4$/i, '.%(ext)s');
