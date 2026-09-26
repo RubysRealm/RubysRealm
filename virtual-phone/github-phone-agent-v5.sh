@@ -221,7 +221,7 @@ if not nodes: print(""); raise SystemExit
 nodes.sort(key=lambda z:(not z[0],z[1]))
 _,_,x1,y1,x2,y2,label=nodes[0]
 sx=(pw/maxx) if pw and maxx else 1.0
-sy=(ph/maxy) if ph and maxy else 1.0
+sy=sx
 x=round(((x1+x2)/2)*sx); y=round(((y1+y2)/2)*sy)
 print(f"{x} {y} {label}")
 PY
