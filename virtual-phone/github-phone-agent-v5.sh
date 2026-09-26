@@ -72,7 +72,8 @@ publish_state() {
   capture_screen || true
   capture_ui || true
   [ -s "$ROOT/screen.png" ] && write_repo_file "$SCREEN_PATH" "$ROOT/screen.png" "Takarada assistant screen seq $seq"
-  [ -s "$ROOT/ui.txt" ] && write_repo_file "$UI_PATH" "$ROOT/ui.txt" "Takarada assistant UI seq $seq"
+  [ -s "$ROOT/ui.txt" ] && write_repo_file "$UI_PATH" "$ROOT/ui.txt" "Takarada assistant UI seq $seq" || true
+  return 0
 }
 
 execute_command() {
