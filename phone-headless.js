@@ -204,6 +204,10 @@ async function buildBrowserInterceptCut(videoId, start, duration) {
       headless: true,
       executablePath: CHROME,
       viewport: { width: 960, height: 540 },
+      extraHTTPHeaders: {
+        'Referer': 'https://www.youtube.com/',
+        'Origin': 'https://www.youtube.com'
+      },
       args: [
         '--no-sandbox','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check',
         '--disable-gpu','--no-zygote','--single-process','--disable-software-rasterizer',
@@ -228,8 +232,12 @@ async function buildBrowserInterceptCut(videoId, start, duration) {
     });
 
     const page = browserContext.pages()[0] || await browserContext.newPage();
-    const embed = 'https://www.youtube-nocookie.com/embed/' + videoId + '?autoplay=1&mute=1&playsinline=1&rel=0';
-    await page.goto(embed, { waitUntil: 'domcontentloaded', timeout: 90000 });
+    const embed = 'https://www.youtube.com/embed/' + videoId + '?autoplay=1&mute=1&playsinline=1&rel=0';
+    await page.goto(embed, {
+      waitUntil: 'domcontentloaded',
+      timeout: 90000,
+      referer: 'https://www.youtube.com/'
+    });
 
     const tryText = async regex => {
       const loc = page.getByText(regex);
