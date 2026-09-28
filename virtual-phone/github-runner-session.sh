@@ -70,6 +70,10 @@ EOF
   gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$TRIGGER_ISSUE/comments" -f body="$BODY" >/dev/null || echo 'WARNING: could not post phone access callback'
 fi
 
+# Keep the assistant controller alive beside the browser-controlled phone.
+bash virtual-phone/github-phone-agent-v5.sh >"$ROOT/assistant-agent.log" 2>&1 &
+ASSISTANT_AGENT_PID=$!
+
 # Optional first-time app-store setup. Never kill the phone if this fails;
 # once the tunnel exists we can install/repair apps interactively.
 AURORA_APK="$ROOT/aurora.apk"
