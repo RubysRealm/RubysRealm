@@ -614,21 +614,18 @@ transport = {
     'uploader': creator or fallback_creator or 'spotify',
     'matchScore': 1.0,
 }
-try:
-    native = spotify_native_video(episode_id, start, CHUNK_SECONDS, out)
-    full_duration = float(native['fullDuration'])
-    clip_len = float(native['clipLength'])
-    strategy = str(native['strategy'])
-    print(f'Spotify-native podcast video acquired at {native["videoHeight"]}p.', flush=True)
-except Exception as spotify_exc:
-    print(f'Spotify-native video acquisition unavailable; using compatibility transport: {spotify_exc}', flush=True)
-    channel_handle = str(state.get('youtubeChannelHandle') or 'babynojamie')
-    transport = choose_transport(title, creator, channel_handle)
-    full_duration = float(transport['duration'])
-    if start >= full_duration - 2.0:
-        raise SystemExit(f'No source content remains for Part {part}; source is {full_duration:.2f}s.')
-    clip_len = min(CHUNK_SECONDS, full_duration - start)
-    strategy = make_cut(transport, start, clip_len, out)
+# Spotify's anonymous playback API currently rejects GitHub-hosted sessions with
+# INVALID_USER. Keep Spotify as the catalog/source of truth, but acquire the
+# exact creator-matched public video transport instead of burning a failed
+# Spotify-native attempt on every hourly run.
+print('Using Spotify catalog with verified creator-matched public video transport.', flush=True)
+channel_handle = str(state.get('youtubeChannelHandle') or 'babynojamie')
+transport = choose_transport(title, creator, channel_handle)
+full_duration = float(transport['duration'])
+if start >= full_duration - 2.0:
+    raise SystemExit(f'No source content remains for Part {part}; source is {full_duration:.2f}s.')
+clip_len = min(CHUNK_SECONDS, full_duration - start)
+strategy = make_cut(transport, start, clip_len, out)
 
 story_total_parts = max(1, math.ceil(full_duration / CHUNK_SECONDS))
 end = start + clip_len
