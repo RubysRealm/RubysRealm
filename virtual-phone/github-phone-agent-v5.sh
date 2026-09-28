@@ -283,6 +283,30 @@ PY
       } > "$ROOT/ui.txt"
       write_repo_file "$UI_PATH" "$ROOT/ui.txt" "Takarada assistant probe seq $seq"
       ;;
+    allow_unknown_chrome)
+      refresh_serial
+      "$ADB" -s "$SERIAL" shell appops set com.android.chrome REQUEST_INSTALL_PACKAGES allow >/dev/null 2>&1 || true
+      ;;
+    url)
+      refresh_serial
+      url_b64=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("url_b64",""))' <<<"$json")
+      target_url=$(printf '%s' "$url_b64" | base64 -d 2>/dev/null || true)
+      "$ADB" -s "$SERIAL" shell am start -a android.intent.action.VIEW -d "$target_url" >/dev/null 2>&1 || true
+      ;;
+    package_check)
+      refresh_serial
+      pkg=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("package","com.zhiliaoapp.musically"))' <<<"$json")
+      if "$ADB" -s "$SERIAL" shell pm path "$pkg" >"$ROOT/pkg.txt" 2>/dev/null; then
+        note="package_present:$pkg"
+      else
+        note="package_missing:$pkg"
+      fi
+      ;;
+    install_device_apk)
+      refresh_serial
+      apk_path=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("path","/sdcard/Download/tiktok-45.5.4.apk"))' <<<"$json")
+      "$ADB" -s "$SERIAL" shell pm install -r "$apk_path" >"$ROOT/device-install.txt" 2>&1 || true
+      ;;
     install_apk)
       refresh_serial
       apk_path=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("path","/sdcard/Download/tiktok-45.5.4.apk"))' <<<"$json")
