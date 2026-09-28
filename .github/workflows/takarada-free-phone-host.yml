@@ -47,7 +47,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pil curl unzip zbar-tools zstd
+          sudo apt-get install -y python3-pil curl unzip zbar-tools zstd xvfb fluxbox x11vnc novnc websockify scrcpy openssl
 
       - name: Restore latest persisted Android phone state
         id: restore_phone_state
@@ -104,7 +104,7 @@ jobs:
           force-avd-creation: false
           disable-animations: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader -feature -Vulkan -noaudio -no-boot-anim -camera-back none -camera-front none -no-metrics
-          script: bash virtual-phone/github-phone-agent-v5.sh
+          script: bash virtual-phone/github-runner-session.sh
 
       - name: Package Android phone state
         id: package_phone_state
