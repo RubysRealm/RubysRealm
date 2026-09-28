@@ -1,0 +1,30 @@
+name: RubyClips Spotify APK probe
+on:
+  push:
+    paths:
+      - 'rubyclips/spotify_apk_probe.trigger'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch Spotify APK candidates
+        shell: bash
+        run: |
+          set -euxo pipefail
+          url='https://d.apkpure.com/b/APK/com.spotify.music?version=latest'
+          curl -fL --retry 3 --connect-timeout 20 --max-time 180             -A 'Mozilla/5.0 (Linux; Android 15; Pixel 7 Pro) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36'             -o /tmp/spotify.bin "$url"
+          ls -lh /tmp/spotify.bin
+          file /tmp/spotify.bin
+          sha256sum /tmp/spotify.bin
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/spotify.bin')
+          b=p.read_bytes()[:8]
+          print('MAGIC',b.hex())
+          assert p.stat().st_size > 5_000_000
+          assert b[:2] == b'PK', 'not APK/ZIP'
+          PY
