@@ -29,7 +29,33 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
 
-      - name: Validate Rubaradaclips pipeline scripts
+      - name: Enforce Rubarataclips posting cadence
+        id: cadence
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from datetime import datetime, timezone, timedelta
+          from pathlib import Path
+
+          p=Path('rubyclips/muffin_state.json')
+          s=json.loads(p.read_text()) if p.exists() else {}
+          last=s.get('lastPostAt')
+          allowed=True
+          next_ok=None
+          if last:
+              last_dt=datetime.fromisoformat(str(last).replace('Z','+00:00'))
+              next_ok=last_dt + timedelta(hours=6)
+              allowed=datetime.now(timezone.utc) >= next_ok
+          with open(os.environ['GITHUB_OUTPUT'],'a') as fh:
+              fh.write(f"allowed={'true' if allowed else 'false'}\n")
+          if allowed:
+              print('Rubarataclips cadence gate: publish allowed.')
+          else:
+              print(f'Rubarataclips cadence gate: too soon. Next eligible at {next_ok.isoformat()}.')
+          PY
+
+      - name: Validate Rubarataclips pipeline scripts
+        if: steps.cadence.outputs.allowed == 'true'
         run: |
           python3 -m py_compile \
             rubyclips/spotify_story_sync.py \
@@ -37,18 +63,22 @@ jobs:
             rubyclips/muffin_story_build.py
 
       - name: Set up Spotify queue client
+        if: steps.cadence.outputs.allowed == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: Install Spotify queue client
+        if: steps.cadence.outputs.allowed == 'true'
         run: python -m pip install --quiet --upgrade votify
 
       - name: Sync Spotify source catalog oldest to newest
+        if: steps.cadence.outputs.allowed == 'true'
         run: python3 rubyclips/spotify_story_sync.py
 
       - name: Check story state
         id: state
+        if: steps.cadence.outputs.allowed == 'true'
         run: |
           python3 - <<'PY'
           import json, os
@@ -235,6 +265,11 @@ jobs:
           p=Path('rubyclips/muffin_state.json')
           s=json.loads(p.read_text())
           info=json.load(open('rubyclips/muffin_output/part-info.json'))
+          sent=json.load(open('rubyclips/muffin_output/sent-status.json'))
+          post=sent.get('post') or {}
+          sent_at=str(post.get('sentAt') or '').strip()
+          if not sent_at:
+              raise SystemExit('Refusing to advance without confirmed TikTok sentAt timestamp')
           total=info.get('totalParts')
           if total:
               s['currentSeriesEpisodeCount']=int(total)
@@ -260,6 +295,23 @@ jobs:
           s['lastStoryHashtag']=info.get('storyHashtag')
           s['pipelineRevision']=info.get('pipelineRevision')
           s['lastLogicalPostKey']=info.get('logicalPostKey')
+          s['lastPostAt']=sent_at
+          continuation_path=Path('rubyclips/muffin_work/continuation.json')
+          if continuation_path.exists():
+              continuation=json.loads(continuation_path.read_text())
+              transport_url=str(continuation.get('mediaTransportUrl') or '').strip()
+              transport_id=str(continuation.get('mediaTransportVideoId') or '').strip()
+              if transport_url.startswith('https://www.facebook.com/'):
+                  s['transportProvider']='facebook-public-copy'
+                  s['transportUrl']=transport_url
+                  s['transportVideoId']=transport_id
+              elif transport_url:
+                  s['transportProvider']='creator-public-copy'
+                  s['transportUrl']=transport_url
+                  s['transportVideoId']=transport_id
+              full_duration=continuation.get('fullDurationSeconds')
+              if full_duration:
+                  s['sourceDurationSeconds']=float(full_duration)
           if info.get('storyComplete'):
               sid=str(s['currentSeriesId'])
               done=[str(x) for x in s.get('completedSeriesIds',[])]
