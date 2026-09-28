@@ -11,20 +11,31 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch Spotify APK candidates
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Google Play downloader
+        run: |
+          python -m pip install --quiet --upgrade gplaycli
+          gplaycli --version || true
+      - name: Download Spotify from Google Play
         shell: bash
         run: |
           set -euxo pipefail
-          url='https://d.apkpure.com/b/APK/com.spotify.music?version=latest'
-          curl -fL --retry 3 --connect-timeout 20 --max-time 180             -A 'Mozilla/5.0 (Linux; Android 15; Pixel 7 Pro) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36'             -o /tmp/spotify.bin "$url"
-          ls -lh /tmp/spotify.bin
-          file /tmp/spotify.bin
-          sha256sum /tmp/spotify.bin
-          python - <<'PY'
+          mkdir -p /tmp/spotify-apk
+          gplaycli -d com.spotify.music -f /tmp/spotify-apk -y
+          find /tmp/spotify-apk -maxdepth 1 -type f -printf '%f %s bytes\n'
+          apk=$(find /tmp/spotify-apk -maxdepth 1 -type f -name '*.apk' -print -quit)
+          test -n "$apk"
+          test -s "$apk"
+          file "$apk"
+          sha256sum "$apk"
+          python - "$apk" <<'PY'
           from pathlib import Path
-          p=Path('/tmp/spotify.bin')
+          import sys
+          p=Path(sys.argv[1])
           b=p.read_bytes()[:8]
           print('MAGIC',b.hex())
           assert p.stat().st_size > 5_000_000
-          assert b[:2] == b'PK', 'not APK/ZIP'
+          assert b[:2] == b'PK'
           PY
