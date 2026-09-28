@@ -1,0 +1,41 @@
+name: RubyClips Part 2 source validation
+on:
+  push:
+    paths:
+      - 'rubyclips/part2_source_test.trigger'
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install --quiet --upgrade yt-dlp votify
+      - name: Resolve Part 2 only
+        run: python rubyclips/spotify_story_resolve.py
+      - name: Verify Part 2 source cut
+        run: |
+          python - <<'PY'
+          import json,subprocess
+          eps=json.load(open('rubyclips/muffin_work/episodes.json'))
+          assert len(eps)==1
+          e=eps[0]
+          assert int(e['episode'])==2
+          assert e['sourceProvider']=='spotify-show'
+          assert e['transportUrl'].startswith('https://www.facebook.com/')
+          p=e['file']
+          d=float(subprocess.check_output(['ffprobe','-v','error','-show_entries','format=duration','-of','default=nw=1:nk=1',p],text=True).strip())
+          assert 575 <= d <= 585, d
+          c=json.load(open('rubyclips/muffin_work/continuation.json'))
+          assert int(c['part'])==2
+          assert int(c['storyTotalParts'])==5
+          assert 579 <= float(c['startSeconds']) <= 581
+          print('PART2_SOURCE_OK',d,c['startSeconds'],c['endSeconds'],c['sourceStrategy'])
+          PY
