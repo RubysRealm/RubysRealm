@@ -1,4 +1,4 @@
-reason=spotify-show-babyjamie1-parser-proxy-fix
-retry=27
+reason=spotify-show-babyjamie1-final-parser-proxy-path
+retry=28
 generation=7
-triggered_at_utc=2026-09-28T12:56:00Z
+triggered_at_utc=2026-09-28T13:00:00Z
