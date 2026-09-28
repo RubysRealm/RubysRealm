@@ -1,0 +1,14 @@
+name: RubyClips exact transport search probe
+on:
+  push:
+    paths:
+      - 'rubyclips/search_transport_probe.trigger'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python rubyclips/search_transport_probe.py
