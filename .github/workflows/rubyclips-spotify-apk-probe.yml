@@ -16,7 +16,7 @@ jobs:
           python-version: '3.11'
       - name: Install Google Play downloader
         run: |
-          python -m pip install --quiet --upgrade gplaycli
+          python -m pip install --quiet 'protobuf==3.20.*' gplaycli
           gplaycli --version || true
       - name: Download Spotify from Google Play
         shell: bash
