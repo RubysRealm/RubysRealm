@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, math, re, subprocess
+import json, math, re, shutil, subprocess
 from pathlib import Path
 
 BASE=Path('rubyclips')
@@ -65,20 +65,17 @@ except Exception as exc:
 raw=WORK/'source-cut.mp4'
 run([
     'yt-dlp','--no-playlist','--no-progress','--socket-timeout','30','--retries','4',
-    '--download-sections',f'*{start:.3f}-{end:.3f}','--force-keyframes-at-cuts',
-    '-f','bestvideo*+bestaudio/best','--merge-output-format','mp4',
+    '--download-sections',f'*{start:.3f}-{end:.3f}',
+    '-f','best[height<=1080]/best','--merge-output-format','mp4',
     '-o',str(raw),SOURCE_URL
 ],timeout=2400)
 if not raw.exists() or raw.stat().st_size<2_000_000:
     raise SystemExit('Source cut was not produced or is unexpectedly small.')
 
 out=WORK/'ep1.mp4'
-run([
-    'ffmpeg','-y','-hide_banner','-loglevel','error','-i',str(raw),
-    '-map','0:v:0','-map','0:a:0',
-    '-c:v','libx264','-preset','veryfast','-crf','19','-pix_fmt','yuv420p',
-    '-c:a','aac','-b:a','160k','-ar','48000','-movflags','+faststart',str(out)
-],timeout=2400)
+# Keep the resolver fast: the final TikTok renderer performs the one required encode.
+# This source segment only needs to be a valid A/V MP4.
+shutil.copyfile(raw,out)
 actual=duration(out)
 if not (575 <= actual <= 585):
     raise SystemExit(f'Part 1 source cut duration invalid: {actual:.3f}s')
