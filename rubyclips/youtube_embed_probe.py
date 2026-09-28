@@ -3,7 +3,7 @@ import asyncio,json
 from pathlib import Path
 from playwright.async_api import async_playwright
 
-URL="https://www.youtube.com/embed/-5JOZTSztgc?autoplay=1&playsinline=1&controls=1"
+URL="https://www.youtube.com/embed/yGFMn5-D5nU?autoplay=1&playsinline=1&controls=1"
 OUT=Path("rubyclips/youtube_embed_probe")
 OUT.mkdir(parents=True,exist_ok=True)
 
