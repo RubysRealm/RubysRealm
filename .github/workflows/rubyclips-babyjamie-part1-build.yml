@@ -5,6 +5,9 @@ on:
       - 'rubyclips/babyjamie_part1_build.trigger'
 permissions:
   contents: read
+concurrency:
+  group: rubyclips-oldest-part1-build
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-latest
