@@ -1,0 +1,14 @@
+name: RubyClips Facebook search probe
+on:
+  push:
+    paths:
+      - 'rubyclips/facebook_search_probe.trigger'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python rubyclips/facebook_search_probe.py
