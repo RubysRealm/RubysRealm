@@ -166,6 +166,7 @@ async def main():
         state['lastPostedEpisodes'] = []
         state['currentSeriesComplete'] = False
         state['storyTotalParts'] = 1
+        state['currentSeriesEpisodeCount'] = 1
         state['sourceDurationSeconds'] = 0
         state['lastLogicalPostKey'] = None
         state.pop('transportProvider', None)
