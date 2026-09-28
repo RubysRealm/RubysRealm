@@ -16,12 +16,42 @@ $ADB -s "$SERIAL" shell svc power stayon true || true
 # Expose Android immediately through scrcpy -> Xvfb -> password-protected noVNC.
 # Optional app-store/TikTok installation happens only after control is available.
 export DISPLAY=:99
+export SDL_VIDEODRIVER=x11
+export SDL_RENDER_DRIVER=software
+export LIBGL_ALWAYS_SOFTWARE=1
+
 Xvfb :99 -screen 0 720x1280x24 -nolisten tcp >"$ROOT/xvfb.log" 2>&1 &
 sleep 1
 fluxbox >"$ROOT/fluxbox.log" 2>&1 &
 sleep 1
-scrcpy --serial "$SERIAL" --no-audio --stay-awake --window-borderless --window-x=0 --window-y=0 --window-width=720 --window-height=1280 >"$ROOT/scrcpy.log" 2>&1 &
-sleep 3
+
+start_scrcpy() {
+  : >"$ROOT/scrcpy.log"
+  scrcpy -s "$SERIAL" --stay-awake --window-title TAKARADA_PHONE >"$ROOT/scrcpy.log" 2>&1 &
+  SCRCPY_PID=$!
+  sleep 5
+  kill -0 "$SCRCPY_PID" >/dev/null 2>&1
+}
+
+if ! start_scrcpy; then
+  cat "$ROOT/scrcpy.log" >"$ROOT/scrcpy-first-failure.log" || true
+  : >"$ROOT/scrcpy.log"
+  scrcpy -s "$SERIAL" --window-title TAKARADA_PHONE >"$ROOT/scrcpy.log" 2>&1 &
+  SCRCPY_PID=$!
+  sleep 5
+fi
+
+if kill -0 "$SCRCPY_PID" >/dev/null 2>&1; then
+  wmctrl -r TAKARADA_PHONE -t 0 >/dev/null 2>&1 || true
+  wmctrl -r TAKARADA_PHONE -e 0,0,0,720,1240 >/dev/null 2>&1 || true
+  wmctrl -r TAKARADA_PHONE -b add,above >/dev/null 2>&1 || true
+else
+  if [ -n "${GH_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ] && [ -n "${TRIGGER_ISSUE:-}" ]; then
+    SCRCPY_VERSION=$(scrcpy --version 2>&1 | head -3 | tr '\n' ' ')
+    SCRCPY_ERR=$(tail -30 "$ROOT/scrcpy.log" 2>/dev/null | tr '\n' ' ' | head -c 1800)
+    gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$TRIGGER_ISSUE/comments"       -f body="TAKARADA_STATUS|scrcpy_failed|version=$SCRCPY_VERSION|log=$SCRCPY_ERR" >/dev/null || true
+  fi
+fi
 
 VNC_PASSWORD=$(openssl rand -hex 12)
 x11vnc -storepasswd "$VNC_PASSWORD" "$ROOT/vnc.pass" >/dev/null
