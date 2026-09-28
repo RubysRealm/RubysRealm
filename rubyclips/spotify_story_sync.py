@@ -9,6 +9,7 @@ from votify.api.enums import SessionType
 
 STATE_PATH = Path('rubyclips/muffin_state.json')
 QUEUE_PATH = Path('rubyclips/spotify_episode_queue.json')
+TRANSPORT_MAP_PATH = Path('rubyclips/spotify_transport_map.json')
 
 
 def now_iso():
@@ -105,10 +106,36 @@ async def main():
     completed = {str(x) for x in old_queue.get('completedEpisodeIds', []) if str(x) in catalog_ids}
     prior_current = str(old_queue.get('currentEpisodeId') or '')
 
+    transport_entries = {}
+    if TRANSPORT_MAP_PATH.exists():
+        try:
+            transport_entries = (json.loads(TRANSPORT_MAP_PATH.read_text()).get('entries') or {})
+        except Exception as exc:
+            print(f'Could not read transport map for duplicate detection: {exc}')
+
     # Once the active episode has actually completed, mark it complete before advancing.
     state_current = str(state.get('currentSeriesId') or '')
     if old_queue and bool(state.get('currentSeriesComplete')) and state_current in catalog_ids:
         completed.add(state_current)
+
+    # If two Spotify entries resolve to the exact same verified transport URL, they are
+    # duplicate catalog entries for the same underlying video. Once one is complete,
+    # mark the duplicate complete too so Rubarataclips never reposts the same story.
+    completed_transport_urls = {
+        str((transport_entries.get(eid) or {}).get('facebookUrl') or '').strip()
+        for eid in completed
+    }
+    completed_transport_urls.discard('')
+    if completed_transport_urls:
+        duplicate_ids = {
+            ep['id'] for ep in catalog
+            if str((transport_entries.get(ep['id']) or {}).get('facebookUrl') or '').strip()
+            in completed_transport_urls
+        }
+        newly_skipped = duplicate_ids - completed
+        if newly_skipped:
+            print('Skipping duplicate Spotify entries with already-completed transport:', sorted(newly_skipped))
+        completed.update(duplicate_ids)
 
     # First migration intentionally starts from the oldest episode. Later syncs preserve
     # an unfinished queue item and append newly discovered episodes at the back.
