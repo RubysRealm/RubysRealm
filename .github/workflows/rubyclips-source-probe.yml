@@ -1,93 +1,52 @@
-name: Rubaradaclips Spotify audio-native probe
+name: Rubaradaclips Spotify public metadata probe
 on:
   push:
     paths:
       - 'rubyclips/source_probe.trigger'
+      - '.github/workflows/rubyclips-source-probe.yml'
 permissions:
   contents: read
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install Votify and ffmpeg
+      - name: Install Spotify client
+        run: python -m pip install --quiet --upgrade votify
+      - name: Inspect public episode media metadata
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
-          python -m pip install --quiet --upgrade votify
-      - name: Probe anonymous Spotify episode audio path
-        shell: bash
-        run: |
-          set -euo pipefail
           python - <<'PY'
-          import asyncio,json,pathlib,urllib.request
+          import asyncio, json
+          from votify.api.api import SpotifyApi
+          from votify.api.enums import SessionType
           EP='2GIOjWw1E90bvEXGCPoEWA'
+
+          def walk(obj, path='root'):
+              if isinstance(obj, dict):
+                  for k,v in obj.items():
+                      p=f'{path}.{k}'
+                      kl=str(k).lower()
+                      if isinstance(v,(str,int,float,bool)) and any(x in kl for x in ('url','uri','video','audio','image','rss','feed','file','media','duration')):
+                          print('FIELD',p,'=',str(v)[:1600])
+                      walk(v,p)
+              elif isinstance(obj,list):
+                  for i,v in enumerate(obj):
+                      walk(v,f'{path}[{i}]')
+              elif isinstance(obj,str) and ('http://' in obj or 'https://' in obj):
+                  print('URL',path,'=',obj[:1600])
+
           async def main():
-              from votify.api.api import SpotifyApi
-              from votify.api.enums import SessionType
               api=await SpotifyApi.create(session_type=SessionType.WEB)
               try:
                   d=await api.get_episode(EP)
-                  e=d['data']['episodeUnionV2']
-                  items=((e.get('audio') or {}).get('items') or [])
-                  print('EPISODE',e.get('name'))
+                  e=d.get('data',{}).get('episodeUnionV2',{})
+                  print('TOP_KEYS',sorted(e.keys()))
                   print('MEDIA_TYPES',e.get('mediaTypes'))
-                  print('AUDIO_ITEMS',json.dumps(items,indent=2)[:12000])
-                  if not items: raise RuntimeError('No audio items in public episode metadata')
-                  successes=[]
-                  for item in items:
-                      u=str(item.get('url') or '')
-                      fmt=str(item.get('format') or '')
-                      file_id=u.rstrip('/').split('/')[-1]
-                      if not file_id: continue
-                      # Map common public podcast formats used by votify.
-                      format_id={'OGG_VORBIS_96':'0','OGG_VORBIS_160':'1','OGG_VORBIS_320':'2',
-                                 'MP3_96':'6','MP3_160':'5','MP3_256':'3','MP3_320':'4'}.get(fmt)
-                      if format_id is None: continue
-                      try:
-                          s=await api.get_audio_stream_urls(format_id,file_id)
-                          cdn=(s.get('cdnurl') or [None])[0]
-                          if not cdn: continue
-                          print('CDN_OK',fmt,cdn[:180])
-                          req=urllib.request.Request(cdn,headers={'User-Agent':'Mozilla/5.0','Range':'bytes=0-1048575'})
-                          with urllib.request.urlopen(req,timeout=45) as r:
-                              b=r.read(1048576)
-                              print('READ_OK',r.status,r.headers.get('content-type'),len(b),'HEAD',b[:32].hex())
-                          if len(b)>200000:
-                              full_req=urllib.request.Request(cdn,headers={'User-Agent':'Mozilla/5.0','Accept':'*/*'})
-                              with urllib.request.urlopen(full_req,timeout=180) as r, open('/tmp/spotify-audio.bin','wb') as out:
-                                  total=0
-                                  while True:
-                                      chunk=r.read(1024*1024)
-                                      if not chunk: break
-                                      out.write(chunk); total += len(chunk)
-                              print('FULL_DOWNLOAD_OK',total)
-                              if total < 1000000: raise RuntimeError('Full Spotify audio download was unexpectedly small')
-                              pathlib.Path('/tmp/audio-url.txt').write_text(cdn)
-                              pathlib.Path('/tmp/audio-format.txt').write_text(fmt)
-                              successes.append((fmt,total))
-                              break
-                      except Exception as ex:
-                          print('AUDIO_ROUTE_FAIL',fmt,repr(ex))
-                  if not successes: raise RuntimeError('No anonymous Spotify audio CDN route succeeded')
-                  print('SPOTIFY_AUDIO_NATIVE_OK',successes)
+                  walk(e,'episode')
               finally:
                   await api.client.aclose()
           asyncio.run(main())
-          PY
-      - name: Verify ffmpeg can read source
-        shell: bash
-        run: |
-          set -euo pipefail
-          file /tmp/spotify-audio.bin || true
-          xxd -l 64 /tmp/spotify-audio.bin || true
-          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 /tmp/spotify-audio.bin | tee /tmp/duration.txt
-          python - <<'PY'
-          d=float(open('/tmp/duration.txt').read().strip())
-          assert d>60,d
-          print('AUDIO_DURATION_OK',d)
           PY
