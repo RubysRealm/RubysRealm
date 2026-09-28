@@ -63,12 +63,12 @@ def spotify_episode_meta(episode_id, fallback_title, fallback_creator):
     m = re.search(r'<title[^>]*>(.*?)</title>', page, re.I | re.S)
     if m:
         raw = html.unescape(re.sub(r'<[^>]+>', '', m.group(1))).strip()
-        suffix = re.match(r'^(.*?)\s+-\s+(.+?)\s+\|\s+Spotify\s*, raw)
+        suffix = re.match(r'^(.*?)\\s+-\\s+(.+?)\\s+\\|\\s+Spotify\\s*$', raw)
         if suffix:
             title = suffix.group(1).strip() or title
             creator = suffix.group(2).strip() or creator
         else:
-            title = re.sub(r'\s*\|\s*Spotify\s*, '', raw).strip() or title
+            title = re.sub(r'\\s*\\|\\s*Spotify\\s*$', '', raw).strip() or title
 
     image = None
     for pattern in (
@@ -689,7 +689,7 @@ print(json.dumps(continuation, indent=2))
             title = suffix.group(1).strip() or title
             creator = suffix.group(2).strip() or creator
         else:
-            title = re.sub(r'\s*\\|\s*Spotify\s*$', '', raw).strip() or title
+            title = re.sub(r'\\s*\\|\\s*Spotify\\s*$', '', raw).strip() or title
 
     image = None
     for pattern in (
@@ -1896,7 +1896,7 @@ print(json.dumps(continuation, indent=2))
             title = suffix.group(1).strip() or title
             creator = suffix.group(2).strip() or creator
         else:
-            title = re.sub(r'\s*\|\s*Spotify\s*, '', raw).strip() or title
+            title = re.sub(r'\\s*\\|\\s*Spotify\\s*$', '', raw).strip() or title
 
     image = None
     for pattern in (
