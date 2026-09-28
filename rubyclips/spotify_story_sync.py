@@ -168,6 +168,10 @@ async def main():
         state['storyTotalParts'] = 1
         state['sourceDurationSeconds'] = 0
         state['lastLogicalPostKey'] = None
+        state.pop('transportProvider', None)
+        state.pop('transportUrl', None)
+        state.pop('transportVideoId', None)
+        state.pop('sourceDurationSeconds', None)
 
     state['currentSeriesId'] = current_id
     state['currentSeriesTitle'] = current['title']
