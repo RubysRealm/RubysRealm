@@ -1,0 +1,133 @@
+name: Rubarataclips Free Phone Host
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  phone:
+    concurrency:
+      group: rubaradaclips-free-phone-host
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 335
+    env:
+      RUBARADACLIPS_SPOTIFY_URL: https://open.spotify.com/show/2lxmtcbizlC4eKhEa5HZ4I
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout isolated Rubarataclips phone branch
+        uses: actions/checkout@v4
+        with:
+          ref: rubaradaclips-virtual-phone
+
+      - name: Enable KVM
+        shell: bash
+        run: |
+          if [ -e /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm || true
+            sudo chmod 666 /dev/kvm || true
+          fi
+
+      - name: Install phone helpers
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pil curl unzip zbar-tools zstd
+
+      - name: Restore latest persisted Rubarataclips Android phone state
+        id: restore_phone_state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          ARTIFACT_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=rubaradaclips-phone-state&per_page=100"             --jq '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | last | .id // empty')
+          if [ -z "$ARTIFACT_ID" ]; then
+            echo 'restored=false' >> "$GITHUB_OUTPUT"
+            echo 'No persisted Rubarataclips phone state exists yet; starting fresh.'
+            exit 0
+          fi
+
+          rm -rf /tmp/rubaradaclips-phone-restore /tmp/rubaradaclips-phone-state.zip
+          mkdir -p /tmp/rubaradaclips-phone-restore
+          gh api -H 'Accept: application/vnd.github+json'             "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" > /tmp/rubaradaclips-phone-state.zip
+          unzip -q /tmp/rubaradaclips-phone-state.zip -d /tmp/rubaradaclips-phone-restore
+          ARCHIVE=$(find /tmp/rubaradaclips-phone-restore -type f -name 'rubaradaclips-phone-state.tar.zst' -print -quit)
+          test -n "$ARCHIVE"
+          test -s "$ARCHIVE"
+
+          rm -rf "$HOME/.android/avd/test.avd" "$HOME/.android/avd/test.ini"
+          tar --zstd -xf "$ARCHIVE" -C "$HOME"
+          test -s "$HOME/.android/avd/test.avd/userdata-qemu.img"
+          test -s "$HOME/.android/avd/test.ini"
+          echo 'restored=true' >> "$GITHUB_OUTPUT"
+          echo "artifact_id=$ARTIFACT_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Use compatible software graphics
+        shell: bash
+        run: |
+          mkdir -p ~/.android
+          cat > ~/.android/advancedFeatures.ini <<'EOF'
+          Vulkan = off
+          GLDirectMem = on
+          EOF
+
+      - name: Run Rubarataclips Android virtual phone
+        uses: ReactiveCircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          avd-name: test
+          force-avd-creation: false
+          disable-animations: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader -feature -Vulkan -noaudio -no-boot-anim -camera-back none -camera-front none -no-metrics
+          script: bash virtual-phone/rubaradaclips-phone-agent-v1.sh
+
+      - name: Package Rubarataclips Android phone state
+        id: package_phone_state
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          STATE_DIR="$HOME/.android/avd/test.avd"
+          STATE_INI="$HOME/.android/avd/test.ini"
+          test -s "$STATE_DIR/userdata-qemu.img"
+          test -s "$STATE_INI"
+          rm -f /tmp/rubaradaclips-phone-state.tar.zst
+          tar --zstd -cf /tmp/rubaradaclips-phone-state.tar.zst -C "$HOME"             .android/avd/test.avd             .android/avd/test.ini
+          test -s /tmp/rubaradaclips-phone-state.tar.zst
+          SHA256=$(sha256sum /tmp/rubaradaclips-phone-state.tar.zst | awk '{print $1}')
+          BYTES=$(stat -c '%s' /tmp/rubaradaclips-phone-state.tar.zst)
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "bytes=$BYTES" >> "$GITHUB_OUTPUT"
+
+      - name: Upload persisted Rubarataclips Android phone state
+        id: upload_phone_state
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubaradaclips-phone-state
+          path: /tmp/rubaradaclips-phone-state.tar.zst
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Verify persisted Rubarataclips Android phone state
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ steps.upload_phone_state.outputs.artifact-id }}
+          STATE_SHA256: ${{ steps.package_phone_state.outputs.sha256 }}
+          STATE_BYTES: ${{ steps.package_phone_state.outputs.bytes }}
+        run: |
+          set -euo pipefail
+          test -n "$ARTIFACT_ID"
+          REMOTE_BYTES=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID" --jq '.size_in_bytes')
+          test "${REMOTE_BYTES:-0}" -gt 0
+          echo "RUBARADACLIPS_PHONE_STATE|artifact=$ARTIFACT_ID|sha256=$STATE_SHA256|archive_bytes=$STATE_BYTES|artifact_bytes=$REMOTE_BYTES"
