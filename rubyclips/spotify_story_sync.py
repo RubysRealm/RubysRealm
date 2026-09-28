@@ -15,24 +15,35 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
 
-def episode_id_from_item(item):
+def episode_from_item(item):
     entity = (item or {}).get('entity') or {}
-    uri = str(entity.get('_uri') or entity.get('uri') or '')
-    return uri.rsplit(':', 1)[-1] if uri.startswith('spotify:episode:') else ''
-
-
-async def fetch_episode(api, episode_id, feed_index, sem):
-    async with sem:
-        response = await api.get_episode(episode_id)
-    data = response['data']['episodeUnionV2']
+    data = entity.get('data') or {}
+    uri = str(entity.get('_uri') or entity.get('uri') or data.get('uri') or '')
+    episode_id = uri.rsplit(':', 1)[-1] if uri.startswith('spotify:episode:') else ''
     release = data.get('releaseDate') or {}
-    release_iso = str(release.get('isoString') or '')
+    return episode_id, {
+        'title': str(data.get('name') or entity.get('name') or '').strip(),
+        'releaseDate': str(release.get('isoString') or data.get('releaseDate') or ''),
+    }
+
+
+async def fetch_episode(api, episode_id, feed_index, hints, sem):
+    data = {}
+    try:
+        async with sem:
+            response = await api.get_episode(episode_id)
+        data = response['data']['episodeUnionV2']
+    except Exception as exc:
+        print(f'Episode metadata fallback for {episode_id}: {exc}')
+    release = data.get('releaseDate') or {}
+    release_iso = str(release.get('isoString') or hints.get('releaseDate') or '')
+    title = str(data.get('name') or hints.get('title') or f'Spotify episode {episode_id}').strip()
     return {
         'id': episode_id,
-        'title': str(data.get('name') or f'Spotify episode {episode_id}').strip(),
+        'title': title,
         'releaseDate': release_iso,
         'url': f'https://open.spotify.com/episode/{episode_id}',
-        'feedIndexNewestFirst': int(feed_index),
+        'sourceFeedIndexNewestFirst': int(feed_index),
     }
 
 
@@ -53,24 +64,22 @@ async def load_catalog(show_id):
         ids = []
         seen = set()
         for idx, item in enumerate(items):
-            eid = episode_id_from_item(item)
+            eid, hints = episode_from_item(item)
             if eid and eid not in seen:
                 seen.add(eid)
-                ids.append((eid, idx))
+                ids.append((eid, idx, hints))
 
         if not ids:
             raise RuntimeError('Spotify show returned no episode ids.')
 
         sem = asyncio.Semaphore(8)
-        episodes = await asyncio.gather(*(fetch_episode(api, eid, idx, sem) for eid, idx in ids))
-        episodes.sort(key=lambda e: (
-            e.get('releaseDate') or '9999-12-31T23:59:59Z',
-            -int(e.get('feedIndexNewestFirst', 0)),
-            e['id'],
-        ))
+        episodes = await asyncio.gather(*(fetch_episode(api, eid, idx, hints, sem) for eid, idx, hints in ids))
+        # Spotify's show feed is newest-first. Reversing that source order is the
+        # authoritative chronological queue and remains correct even when an
+        # individual episode has missing/partial release-date metadata.
+        episodes.sort(key=lambda e: -int(e.get('sourceFeedIndexNewestFirst', 0)))
         for position, ep in enumerate(episodes, start=1):
             ep['position'] = position
-            ep.pop('feedIndexNewestFirst', None)
         return show_data, episodes
     finally:
         await api.client.aclose()
