@@ -1,0 +1,58 @@
+name: RubyClips oldest BabyJamie Part 1 build
+on:
+  push:
+    paths:
+      - 'rubyclips/babyjamie_part1_build.trigger'
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install media tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          python -m pip install --quiet --upgrade yt-dlp
+      - name: Resolve oldest episode Part 1
+        run: python rubyclips/babyjamie_part1_probe_resolve.py
+      - name: Build final Rubarataclips MP4
+        run: python rubyclips/muffin_story_build.py
+      - name: Verify final TikTok asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=$(find rubyclips/muffin_output -maxdepth 1 -name 'muffindrama-2m4ncEaJmzwA9ucqrACTOH-r8-part-01.mp4' -print -quit)
+          test -n "$file"
+          test -s "$file"
+          ffprobe -v error -show_entries stream=index,codec_type,codec_name,width,height,r_frame_rate,duration             -show_entries format=duration,size,format_name -of json "$file" | tee rubyclips/muffin_output/verification.json
+          python - "$file" <<'PY'
+          import json,subprocess,sys
+          p=sys.argv[1]
+          info=json.loads(subprocess.check_output([
+            'ffprobe','-v','error','-show_streams','-show_format','-of','json',p
+          ],text=True))
+          vids=[x for x in info['streams'] if x['codec_type']=='video']
+          auds=[x for x in info['streams'] if x['codec_type']=='audio']
+          assert len(vids)==1 and len(auds)==1
+          v,a=vids[0],auds[0]
+          dur=float(info['format']['duration'])
+          assert v['codec_name']=='h264'
+          assert a['codec_name']=='aac'
+          assert int(v['width'])==1080 and int(v['height'])==1920
+          assert 575 <= dur <= 590, dur
+          assert int(info['format']['size']) > 5_000_000
+          print('FINAL_ASSET_OK',p,'duration=',dur,'size=',info['format']['size'])
+          PY
+          ffmpeg -y -hide_banner -loglevel error -ss 3 -i "$file" -frames:v 1 rubyclips/muffin_output/part1-preview.jpg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rubaradaclips-oldest-part1-final
+          path: |
+            rubyclips/muffin_output/*.mp4
+            rubyclips/muffin_output/*.json
+            rubyclips/muffin_output/*.jpg
+          if-no-files-found: error
+          retention-days: 3
