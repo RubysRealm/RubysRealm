@@ -56,11 +56,20 @@ jobs:
                           req=urllib.request.Request(cdn,headers={'User-Agent':'Mozilla/5.0','Range':'bytes=0-1048575'})
                           with urllib.request.urlopen(req,timeout=45) as r:
                               b=r.read(1048576)
-                              print('READ_OK',r.status,r.headers.get('content-type'),len(b))
+                              print('READ_OK',r.status,r.headers.get('content-type'),len(b),'HEAD',b[:32].hex())
                           if len(b)>200000:
+                              full_req=urllib.request.Request(cdn,headers={'User-Agent':'Mozilla/5.0','Accept':'*/*'})
+                              with urllib.request.urlopen(full_req,timeout=180) as r, open('/tmp/spotify-audio.bin','wb') as out:
+                                  total=0
+                                  while True:
+                                      chunk=r.read(1024*1024)
+                                      if not chunk: break
+                                      out.write(chunk); total += len(chunk)
+                              print('FULL_DOWNLOAD_OK',total)
+                              if total < 1000000: raise RuntimeError('Full Spotify audio download was unexpectedly small')
                               pathlib.Path('/tmp/audio-url.txt').write_text(cdn)
                               pathlib.Path('/tmp/audio-format.txt').write_text(fmt)
-                              successes.append((fmt,len(b)))
+                              successes.append((fmt,total))
                               break
                       except Exception as ex:
                           print('AUDIO_ROUTE_FAIL',fmt,repr(ex))
@@ -74,8 +83,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          URL="$(cat /tmp/audio-url.txt)"
-          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$URL" | tee /tmp/duration.txt
+          file /tmp/spotify-audio.bin || true
+          xxd -l 64 /tmp/spotify-audio.bin || true
+          ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 /tmp/spotify-audio.bin | tee /tmp/duration.txt
           python - <<'PY'
           d=float(open('/tmp/duration.txt').read().strip())
           assert d>60,d
