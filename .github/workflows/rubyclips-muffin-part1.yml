@@ -36,7 +36,15 @@ jobs:
             rubyclips/spotify_story_resolve.py \
             rubyclips/muffin_story_build.py
 
-      - name: Sync Spotify source catalog
+      - name: Set up Spotify queue client
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Spotify queue client
+        run: python -m pip install --quiet --upgrade votify
+
+      - name: Sync Spotify source catalog oldest to newest
         run: python3 rubyclips/spotify_story_sync.py
 
       - name: Check story state
