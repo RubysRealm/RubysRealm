@@ -1,0 +1,40 @@
+name: RubyClips current next part probe
+on:
+  push:
+    paths:
+      - 'rubyclips/current_next_part_probe.trigger'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          python -m pip install --quiet --upgrade yt-dlp
+      - name: Resolve current queued Part 2 only
+        run: |
+          set -euo pipefail
+          python rubyclips/spotify_story_resolve.py
+          python - <<'PY'
+          import json
+          c=json.load(open('rubyclips/muffin_work/continuation.json'))
+          e=json.load(open('rubyclips/muffin_work/episodes.json'))[0]
+          assert c['part']==2
+          assert abs(float(c['startSeconds'])-580.0)<0.1
+          assert abs(float(c['endSeconds'])-1160.0)<2.0
+          assert 'facebook.com/' in c['mediaTransportUrl']
+          assert e['episode']==2
+          print('CURRENT_PART2_SOURCE_OK')
+          print(json.dumps(c,indent=2))
+          PY
