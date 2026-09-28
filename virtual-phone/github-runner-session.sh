@@ -13,53 +13,28 @@ $ADB -s "$SERIAL" shell wm density 320 || true
 $ADB -s "$SERIAL" shell settings put system screen_off_timeout 2147483647 || true
 $ADB -s "$SERIAL" shell svc power stayon true || true
 
-# Expose Android immediately through scrcpy -> Xvfb -> password-protected noVNC.
-# Optional app-store/TikTok installation happens only after control is available.
-export DISPLAY=:99
-export SDL_VIDEODRIVER=x11
-export SDL_RENDER_DRIVER=software
-export LIBGL_ALWAYS_SOFTWARE=1
+# Expose Android directly through the secure ADB-backed web controller.
+# This avoids scrcpy/X11/noVNC entirely.
+REMOTE_SECRET=$(openssl rand -hex 12)
+export TAKARADA_REMOTE_SECRET="$REMOTE_SECRET"
+export TAKARADA_REMOTE_PORT=8765
 
-Xvfb :99 -screen 0 720x1280x24 -nolisten tcp >"$ROOT/xvfb.log" 2>&1 &
-sleep 1
-fluxbox >"$ROOT/fluxbox.log" 2>&1 &
-sleep 1
+python3 virtual-phone/secure_phone_remote.py >"$ROOT/direct-phone.log" 2>&1 &
+DIRECT_PID=$!
 
-start_scrcpy() {
-  : >"$ROOT/scrcpy.log"
-  scrcpy -s "$SERIAL" --stay-awake --window-title TAKARADA_PHONE >"$ROOT/scrcpy.log" 2>&1 &
-  SCRCPY_PID=$!
-  sleep 5
-  kill -0 "$SCRCPY_PID" >/dev/null 2>&1
-}
-
-if ! start_scrcpy; then
-  cat "$ROOT/scrcpy.log" >"$ROOT/scrcpy-first-failure.log" || true
-  : >"$ROOT/scrcpy.log"
-  scrcpy -s "$SERIAL" --window-title TAKARADA_PHONE >"$ROOT/scrcpy.log" 2>&1 &
-  SCRCPY_PID=$!
-  sleep 5
-fi
-
-if kill -0 "$SCRCPY_PID" >/dev/null 2>&1; then
-  wmctrl -r TAKARADA_PHONE -t 0 >/dev/null 2>&1 || true
-  wmctrl -r TAKARADA_PHONE -e 0,0,0,720,1240 >/dev/null 2>&1 || true
-  wmctrl -r TAKARADA_PHONE -b add,above >/dev/null 2>&1 || true
-else
-  if [ -n "${GH_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ] && [ -n "${TRIGGER_ISSUE:-}" ]; then
-    SCRCPY_VERSION=$(scrcpy --version 2>&1 | head -3 | tr '\n' ' ')
-    SCRCPY_ERR=$(tail -30 "$ROOT/scrcpy.log" 2>/dev/null | tr '\n' ' ' | head -c 1800)
-    gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$TRIGGER_ISSUE/comments"       -f body="TAKARADA_STATUS|scrcpy_failed|version=$SCRCPY_VERSION|log=$SCRCPY_ERR" >/dev/null || true
+for _ in $(seq 1 30); do
+  if curl -fsS http://127.0.0.1:8765/ >/dev/null 2>&1; then
+    break
   fi
-fi
+  if ! kill -0 "$DIRECT_PID" >/dev/null 2>&1; then
+    echo 'ERROR: direct phone controller exited.'
+    cat "$ROOT/direct-phone.log" || true
+    exit 1
+  fi
+  sleep 1
+done
 
-VNC_PASSWORD=$(openssl rand -hex 12)
-x11vnc -storepasswd "$VNC_PASSWORD" "$ROOT/vnc.pass" >/dev/null
-x11vnc -display :99 -forever -shared -rfbauth "$ROOT/vnc.pass" -localhost -rfbport 5900 >"$ROOT/x11vnc.log" 2>&1 &
-sleep 2
-websockify --web=/usr/share/novnc 6080 localhost:5900 >"$ROOT/novnc.log" 2>&1 &
-sleep 2
-cloudflared tunnel --no-autoupdate --url http://127.0.0.1:6080 >"$ROOT/tunnel.log" 2>&1 &
+cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8765 >"$ROOT/tunnel.log" 2>&1 &
 
 PHONE_URL=""
 for _ in $(seq 1 60); do
@@ -74,25 +49,17 @@ if [ -z "$PHONE_URL" ]; then
   exit 1
 fi
 
-FULL_URL="${PHONE_URL}/vnc.html?autoconnect=true&resize=scale&quality=6&compression=6"
-PASSWORD_CIPHER=$(printf '%s' "$VNC_PASSWORD" | openssl pkeyutl -encrypt -pubin -inkey virtual-phone/phone_access_public.pem -pkeyopt rsa_padding_mode:oaep | base64 -w0)
+SECRET_CIPHER=$(printf '%s' "$REMOTE_SECRET" | openssl pkeyutl -encrypt -pubin -inkey virtual-phone/phone_access_public.pem -pkeyopt rsa_padding_mode:oaep | base64 -w0)
 
-echo "TAKARADA_PHONE_URL=$FULL_URL"
-echo "Virtual Android phone is ready."
-echo "Android: $($ADB -s "$SERIAL" shell getprop ro.build.version.release | tr -d '\r')"
-echo "Display: $($ADB -s "$SERIAL" shell pm path com.takarada.display 2>/dev/null | head -1 | tr -d '\r')"
-
-# Hand the access URL back through the trigger issue. The VNC password is
-# RSA-OAEP encrypted, so it is safe to transport through a public issue comment.
 if [ -n "${TRIGGER_ISSUE:-}" ] && [ -n "${GH_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
   BODY=$(cat <<EOF
-TAKARADA_PHONE_READY
-URL: $FULL_URL
-PASSWORD_RSA_OAEP: $PASSWORD_CIPHER
+TAKARADA_DIRECT_PHONE_READY
+URL: $PHONE_URL
+SECRET_RSA_OAEP: $SECRET_CIPHER
 RUN_ID: ${GITHUB_RUN_ID:-unknown}
 EOF
 )
-  gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$TRIGGER_ISSUE/comments" -f body="$BODY" >/dev/null || echo 'WARNING: could not post phone access callback'
+  gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$TRIGGER_ISSUE/comments" -f body="$BODY" >/dev/null || echo 'WARNING: could not post direct phone access callback'
 fi
 
 # Keep the assistant controller alive beside the browser-controlled phone.
