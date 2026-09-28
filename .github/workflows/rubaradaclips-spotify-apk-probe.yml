@@ -1,0 +1,33 @@
+name: Rubarataclips Spotify APK probe
+on:
+  push:
+    paths:
+      - 'rubyclips/spotify_apk_probe.trigger'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe Spotify Android package
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://download.spotify.com/android/SpotifyAndroid.apk'
+          curl -fL --retry 3 --connect-timeout 20 --max-time 180 -o /tmp/SpotifyAndroid.apk "$URL"
+          test -s /tmp/SpotifyAndroid.apk
+          echo "BYTES=$(stat -c '%s' /tmp/SpotifyAndroid.apk)"
+          echo "SHA256=$(sha256sum /tmp/SpotifyAndroid.apk | awk '{print $1}')"
+          file /tmp/SpotifyAndroid.apk
+          unzip -t /tmp/SpotifyAndroid.apk >/dev/null
+          python - <<'PY'
+          import zipfile
+          p='/tmp/SpotifyAndroid.apk'
+          with zipfile.ZipFile(p) as z:
+              names=set(z.namelist())
+              print('HAS_MANIFEST=', 'AndroidManifest.xml' in names)
+              print('HAS_CLASSES=', any(n.startswith('classes') and n.endswith('.dex') for n in names))
+              print('ENTRIES=', len(names))
+          PY
