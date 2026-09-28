@@ -1,0 +1,52 @@
+name: RubyClips Spotify chronological queue
+on:
+  push:
+    paths:
+      - 'rubyclips/spotify_queue.trigger'
+permissions:
+  contents: write
+jobs:
+  sync-queue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Spotify catalog client
+        run: python -m pip install --quiet --upgrade votify
+      - name: Build oldest-to-newest BabyJamie queue
+        run: python rubyclips/spotify_story_sync.py
+      - name: Verify chronological queue
+        run: |
+          python - <<'PY'
+          import json
+          q=json.load(open('rubyclips/spotify_episode_queue.json'))
+          s=json.load(open('rubyclips/muffin_state.json'))
+          eps=q['episodes']
+          assert q['order']=='oldest-to-newest'
+          assert eps, 'empty Spotify queue'
+          dates=[str(e.get('releaseDate') or '') for e in eps]
+          assert dates == sorted(dates), 'episode dates are not ascending'
+          current=next(e for e in eps if e['status']=='current')
+          assert current['id']==q['currentEpisodeId']==s['currentSeriesId']
+          assert current['position']==1 or all(e['status']=='completed' for e in eps[:current['position']-1])
+          print('QUEUE_OK')
+          print('COUNT=',len(eps))
+          print('OLDEST=',eps[0]['releaseDate'],eps[0]['title'],eps[0]['id'])
+          print('CURRENT=',current['position'],current['releaseDate'],current['title'],current['id'])
+          print('NEWEST=',eps[-1]['releaseDate'],eps[-1]['title'],eps[-1]['id'])
+          PY
+      - name: Persist verified queue
+        run: |
+          git config user.name 'rubyclips-queue-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add rubyclips/spotify_episode_queue.json rubyclips/muffin_state.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'Initialize BabyJamie chronological Spotify queue [skip ci]'
+            git pull --rebase origin main
+            git push
+          fi
