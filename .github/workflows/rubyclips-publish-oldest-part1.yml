@@ -1,0 +1,166 @@
+name: RubyClips publish verified oldest Part 1
+on:
+  push:
+    paths:
+      - 'rubyclips/publish_oldest_part1.trigger'
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download verified Part 1 artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/part1
+          mkdir -p /tmp/part1
+          gh run download 36472191816 -n rubaradaclips-oldest-part1-final -D /tmp/part1
+          find /tmp/part1 -maxdepth 2 -type f -printf '%p %s bytes\n'
+          test -s /tmp/part1/muffindrama-2m4ncEaJmzwA9ucqrACTOH-r8-part-01.mp4
+          test -s /tmp/part1/manifest.json
+
+      - name: Authorize manifest as Spotify queue source
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/tmp/part1/manifest.json')
+          m=json.loads(p.read_text())
+          assert m['sourceSeriesId']=='2m4ncEaJmzwA9ucqrACTOH'
+          assert m['segmentIndex']==1
+          assert m['segmentTotal']==5
+          assert m['logicalPostKey']=='rubyclips:2m4ncEaJmzwA9ucqrACTOH:r8:p1'
+          assert m['targetChannel']=='rubaradaclips'
+          assert m['pipelineRevision']=='avsync-v4-direct-builder'
+          m['sourceProvider']='spotify-show'
+          m['sourceChannel']='babyjamie1'
+          m['sourceVideoIds']=['2m4ncEaJmzwA9ucqrACTOH']
+          m['sourceUrls']=['https://open.spotify.com/episode/2m4ncEaJmzwA9ucqrACTOH']
+          m['transportProvider']='facebook-public-copy'
+          m['transportUrl']='https://www.facebook.com/100092703608304/posts/981343818299063/'
+          p.write_text(json.dumps(m,indent=2)+'\n')
+          print(json.dumps({
+            'platform':m['platform'],
+            'sourceProvider':m['sourceProvider'],
+            'sourceChannel':m['sourceChannel'],
+            'sourceSeriesId':m['sourceSeriesId'],
+            'segmentIndex':m['segmentIndex'],
+            'segmentTotal':m['segmentTotal'],
+            'targetChannel':m['targetChannel'],
+            'logicalPostKey':m['logicalPostKey']
+          },indent=2))
+          PY
+
+      - name: Verify final MP4 again
+        run: |
+          set -euo pipefail
+          file=/tmp/part1/muffindrama-2m4ncEaJmzwA9ucqrACTOH-r8-part-01.mp4
+          python - "$file" <<'PY'
+          import json,subprocess,sys
+          p=sys.argv[1]
+          info=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-show_format','-of','json',p],text=True))
+          v=[x for x in info['streams'] if x['codec_type']=='video']
+          a=[x for x in info['streams'] if x['codec_type']=='audio']
+          assert len(v)==1 and len(a)==1
+          assert v[0]['codec_name']=='h264' and a[0]['codec_name']=='aac'
+          assert int(v[0]['width'])==1080 and int(v[0]['height'])==1920
+          dur=float(info['format']['duration'])
+          assert 581 <= dur <= 583
+          print('VERIFIED',dur,info['format']['size'])
+          PY
+
+      - name: Create deterministic release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG='rubyclips-tt-2m4ncEaJmzwA9ucqrACTOH-r8-p1'
+          VIDEO='/tmp/part1/muffindrama-2m4ncEaJmzwA9ucqrACTOH-r8-part-01.mp4'
+          MANIFEST='/tmp/part1/manifest.json'
+          echo "$TAG" > /tmp/tag
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$VIDEO" "$MANIFEST" --clobber
+          else
+            gh release create "$TAG" "$VIDEO" "$MANIFEST"               --title 'RubyClips BabyJamie Part 1'               --notes 'Verified BabyJamie oldest episode Part 1 of 5.'
+          fi
+
+      - name: Wait for Rubarataclips publisher
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            code=$(curl -sS -o /tmp/health.json -w '%{http_code}' 'https://rubys-realm.vercel.app/api/rubyclips-post?health=1' || true)
+            cat /tmp/health.json || true
+            if [ "$code" = 200 ]; then
+              python - <<'PY' && exit 0 || true
+          import json
+          d=json.load(open('/tmp/health.json'))
+          assert d.get('ok') is True
+          assert d.get('channelName')=='rubaradaclips'
+          PY
+            fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Publish Part 1 to Rubarataclips
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=$(cat /tmp/tag)
+          url="https://rubys-realm.vercel.app/api/rubyclips-post?tag=$TAG"
+          code=$(curl -sS --max-time 180 -o /tmp/post.json -w '%{http_code}' "$url" || true)
+          cat /tmp/post.json
+          test "$code" = 200
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/post.json'))
+          assert d.get('ok') is True
+          assert d.get('postId')
+          assert d.get('channelName')=='rubaradaclips'
+          assert d.get('sourceSeriesId')=='2m4ncEaJmzwA9ucqrACTOH'
+          assert d.get('segmentIndex')==1
+          print('BUFFER_POST_ID',d['postId'])
+          PY
+          cp /tmp/post.json /tmp/publish.json
+          gh release upload "$TAG" /tmp/publish.json --clobber
+
+      - name: Confirm TikTok send
+        run: |
+          set -euo pipefail
+          post_id=$(python -c "import json; print(json.load(open('/tmp/post.json'))['postId'])")
+          url="https://rubys-realm.vercel.app/api/buffer-status?post_id=$post_id"
+          for i in $(seq 1 40); do
+            code=$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}' "$url" || true)
+            if [ "$code" = 200 ]; then
+              cat /tmp/status.json
+              rc=0
+              python - <<'PY' || rc=$?
+          import json
+          d=json.load(open('/tmp/status.json'))
+          assert d.get('ok') is True
+          p=d.get('post') or {}
+          assert str((p.get('channel') or {}).get('id'))=='6a9f6ff1cd8b9c702c2897e1'
+          if p.get('error'):
+              print('ERROR',p['error'])
+              raise SystemExit(2)
+          if str(p.get('status','')).lower()!='sent':
+              raise SystemExit(1)
+          link=str(p.get('externalLink') or '')
+          assert 'tiktok.com/@rubaradaclips/video/' in link
+          assert p.get('sentAt')
+          print('TIKTOK_CONFIRMED',link,p['sentAt'])
+          PY
+              if [ "$rc" -eq 0 ]; then exit 0; fi
+              if [ "$rc" -eq 2 ]; then exit 1; fi
+            fi
+            sleep 15
+          done
+          echo 'Timed out waiting for TikTok send'
+          cat /tmp/status.json || true
+          exit 1
