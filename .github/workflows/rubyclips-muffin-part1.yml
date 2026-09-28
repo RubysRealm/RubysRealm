@@ -29,6 +29,13 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
 
+      - name: Validate Rubaradaclips pipeline scripts
+        run: |
+          python3 -m py_compile \
+            rubyclips/spotify_story_sync.py \
+            rubyclips/spotify_story_resolve.py \
+            rubyclips/muffin_story_build.py
+
       - name: Sync Spotify source catalog
         run: python3 rubyclips/spotify_story_sync.py
 
