@@ -14,6 +14,7 @@ from pathlib import Path
 BASE = Path('rubyclips')
 WORK = BASE / 'muffin_work'
 STATE_PATH = BASE / 'muffin_state.json'
+TRANSPORT_MAP_PATH = BASE / 'spotify_transport_map.json'
 COBALT_API = 'https://rubyclips-cobalt-3.onrender.com/'
 PHONE_MEDIA_API = 'https://rubyclips-phone-host.onrender.com/api/auto-cut'
 PIPED_PROXY = 'https://rubys-realm.vercel.app/api/rubyclips-post'
@@ -660,6 +661,16 @@ out = WORK / f'ep{next_ep}.mp4'
 # public video transport directly and use the edge-proxied media path.
 persisted_transport_url = str(state.get('transportUrl') or '').strip()
 persisted_transport_provider = str(state.get('transportProvider') or '').strip().lower()
+mapped_transport_url = ''
+if TRANSPORT_MAP_PATH.exists():
+    try:
+        transport_map = json.loads(TRANSPORT_MAP_PATH.read_text())
+        mapped_transport_url = str(
+            ((transport_map.get('entries') or {}).get(episode_id) or {}).get('facebookUrl') or ''
+        ).strip()
+    except Exception as exc:
+        print(f'Could not read Spotify transport map: {exc}', flush=True)
+
 if persisted_transport_url and persisted_transport_provider == 'facebook-public-copy':
     print('Using persisted verified Facebook public-copy transport for this Spotify story.', flush=True)
     transport = probe_public_copy_transport(persisted_transport_url)
@@ -670,8 +681,20 @@ if persisted_transport_url and persisted_transport_provider == 'facebook-public-
             f'{transport.get("title")!r} score={score:.3f}'
         )
     transport['matchScore'] = score
+elif mapped_transport_url:
+    print('Using mapped exact-title Facebook public-copy transport for this Spotify story.', flush=True)
+    transport = probe_public_copy_transport(mapped_transport_url)
+    score = similarity(title, transport.get('title') or '')
+    if score < 0.72:
+        raise SystemExit(
+            f'Mapped public-copy title does not match Spotify story: '
+            f'{transport.get("title")!r} score={score:.3f}'
+        )
+    transport['matchScore'] = score
+    persisted_transport_url = mapped_transport_url
+    persisted_transport_provider = 'facebook-public-copy'
 else:
-    print('Using Spotify catalog with verified creator-matched public video transport.', flush=True)
+    print('No mapped Facebook transport; trying creator-matched public video fallback.', flush=True)
     channel_handle = str(state.get('youtubeChannelHandle') or 'babynojamie')
     transport = choose_transport(title, creator, channel_handle)
 
