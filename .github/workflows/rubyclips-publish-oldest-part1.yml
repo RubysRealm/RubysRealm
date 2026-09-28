@@ -56,6 +56,11 @@ jobs:
           },indent=2))
           PY
 
+      - name: Install ffprobe for final verification
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+
       - name: Verify final MP4 again
         run: |
           set -euo pipefail
