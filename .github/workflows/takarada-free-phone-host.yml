@@ -47,7 +47,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pil curl unzip zbar-tools zstd xvfb fluxbox x11vnc novnc websockify scrcpy openssl
+          sudo apt-get install -y python3-pil curl unzip zbar-tools zstd xvfb fluxbox x11vnc novnc websockify scrcpy openssl wmctrl
           curl -fsSL -o /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i /tmp/cloudflared.deb || sudo apt-get -f install -y
 
