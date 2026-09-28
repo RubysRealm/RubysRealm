@@ -1,0 +1,32 @@
+name: RubyClips public transport probe
+on:
+  push:
+    paths:
+      - 'rubyclips/public_transport_probe.trigger'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install video tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install --quiet --upgrade yt-dlp
+      - name: Probe exact oldest BabyJamie Facebook copy
+        shell: bash
+        run: |
+          set -euxo pipefail
+          url='https://www.facebook.com/100092703608304/posts/981343818299063/'
+          yt-dlp --no-playlist --no-progress --socket-timeout 30 --retries 3             --download-sections '*0-20' --force-keyframes-at-cuts             -f 'bestvideo*+bestaudio/best' --merge-output-format mp4             -o '/tmp/babyjamie-oldest.%(ext)s' "$url"
+          test -s /tmp/babyjamie-oldest.mp4
+          ffprobe -v error -show_entries stream=codec_type,codec_name,width,height -show_entries format=duration,size             -of json /tmp/babyjamie-oldest.mp4
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: babyjamie-oldest-public-transport
+          path: /tmp/babyjamie-oldest.mp4
+          retention-days: 1
