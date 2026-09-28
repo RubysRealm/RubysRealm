@@ -1,0 +1,28 @@
+name: RubyClips immediate Part 1 status
+on:
+  push:
+    paths:
+      - 'rubyclips/check_part1_status.trigger'
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read publish marker and query Buffer once
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/statuscheck && mkdir -p /tmp/statuscheck
+          gh release download rubyclips-tt-2m4ncEaJmzwA9ucqrACTOH-r8-p1 --pattern publish.json --dir /tmp/statuscheck
+          echo '--- PUBLISH ---'
+          cat /tmp/statuscheck/publish.json
+          post_id=$(python -c "import json; print(json.load(open('/tmp/statuscheck/publish.json'))['postId'])")
+          echo
+          echo '--- BUFFER STATUS ---'
+          code=$(curl -sS --max-time 30 -o /tmp/buffer.json -w '%{http_code}' "https://rubys-realm.vercel.app/api/buffer-status?post_id=$post_id" || true)
+          echo "HTTP=$code"
+          cat /tmp/buffer.json
