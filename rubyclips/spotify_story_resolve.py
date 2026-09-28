@@ -146,6 +146,46 @@ def probe_transport(url):
         return {}
 
 
+def probe_public_copy_transport(url):
+    cmd = [
+        'yt-dlp', '--no-playlist', '--skip-download', '--dump-single-json', '--no-warnings',
+        '--socket-timeout', '30', '--retries', '3', url
+    ]
+    proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=180)
+    rows = [x.strip() for x in proc.stdout.splitlines() if x.strip().startswith('{')]
+    if not rows:
+        raise RuntimeError(f'Public-copy probe failed: {proc.stdout[-1200:]}')
+    data = json.loads(rows[-1])
+    duration = float(data.get('duration') or 0)
+    if duration < 15:
+        raise RuntimeError('Public-copy transport has no usable duration.')
+    return {
+        'url': url,
+        'id': str(data.get('id') or ''),
+        'title': str(data.get('title') or ''),
+        'thumbnail': str(data.get('thumbnail') or ''),
+        'duration': duration,
+        'uploader': str(data.get('uploader') or data.get('channel') or 'public-copy'),
+        'matchScore': 1.0,
+    }
+
+
+def make_public_copy_cut(transport, start, clip_len, out):
+    out.unlink(missing_ok=True)
+    run([
+        'yt-dlp', '--no-playlist', '--no-progress', '--socket-timeout', '30', '--retries', '4',
+        '--download-sections', f'*{start:.3f}-{start + clip_len:.3f}',
+        '-f', 'best[height<=1080]/best', '--merge-output-format', 'mp4',
+        '-o', str(out), transport['url']
+    ], timeout=1800)
+    if not out.exists() or out.stat().st_size < 500000:
+        raise RuntimeError('Verified public-copy transport did not create a usable source cut.')
+    actual = media_duration(out)
+    if actual < 10 or actual > HARD_MAX_SECONDS:
+        raise RuntimeError(f'Public-copy source cut duration invalid: {actual:.3f}s')
+    return 'spotify-catalog:verified-facebook-public-copy'
+
+
 def choose_transport(title, creator, channel_handle):
     # Search both the pinned creator channel and normal YouTube discovery.
     # The old flow stopped at the pinned channel whenever it returned any rows,
@@ -618,14 +658,31 @@ out = WORK / f'ep{next_ep}.mp4'
 # Spotify remains the catalog/source of truth. GitHub-hosted anonymous Spotify
 # playback currently returns INVALID_USER, so acquire the exact creator-matched
 # public video transport directly and use the edge-proxied media path.
-print('Using Spotify catalog with verified creator-matched public video transport.', flush=True)
-channel_handle = str(state.get('youtubeChannelHandle') or 'babynojamie')
-transport = choose_transport(title, creator, channel_handle)
+persisted_transport_url = str(state.get('transportUrl') or '').strip()
+persisted_transport_provider = str(state.get('transportProvider') or '').strip().lower()
+if persisted_transport_url and persisted_transport_provider == 'facebook-public-copy':
+    print('Using persisted verified Facebook public-copy transport for this Spotify story.', flush=True)
+    transport = probe_public_copy_transport(persisted_transport_url)
+    score = similarity(title, transport.get('title') or '')
+    if score < 0.72:
+        raise SystemExit(
+            f'Persisted public-copy title no longer matches Spotify story: '
+            f'{transport.get("title")!r} score={score:.3f}'
+        )
+    transport['matchScore'] = score
+else:
+    print('Using Spotify catalog with verified creator-matched public video transport.', flush=True)
+    channel_handle = str(state.get('youtubeChannelHandle') or 'babynojamie')
+    transport = choose_transport(title, creator, channel_handle)
+
 full_duration = float(transport['duration'])
 if start >= full_duration - 2.0:
     raise SystemExit(f'No source content remains for Part {part}; source is {full_duration:.2f}s.')
 clip_len = min(CHUNK_SECONDS, full_duration - start)
-strategy = make_cut(transport, start, clip_len, out)
+if persisted_transport_url and persisted_transport_provider == 'facebook-public-copy':
+    strategy = make_public_copy_cut(transport, start, clip_len, out)
+else:
+    strategy = make_cut(transport, start, clip_len, out)
 
 story_total_parts = max(1, math.ceil(full_duration / CHUNK_SECONDS))
 end = start + clip_len
