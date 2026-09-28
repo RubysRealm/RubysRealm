@@ -1,0 +1,57 @@
+name: RubyClips mapped next story probe
+on:
+  push:
+    paths:
+      - 'rubyclips/mapped_next_story_probe.trigger'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          python -m pip install --quiet --upgrade yt-dlp
+      - name: Verify story 2 mapped Facebook transport
+        run: |
+          set -euo pipefail
+          cp rubyclips/muffin_state.json /tmp/state.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('rubyclips/muffin_state.json')
+          s=json.loads(p.read_text())
+          s['currentSeriesId']='4nWgQ6Ip3CzUKsNODjYiuM'
+          s['currentSeriesTitle']='reading your MOST honest stories and playing minecraft'
+          s['spotifyEpisodeUrl']='https://open.spotify.com/episode/4nWgQ6Ip3CzUKsNODjYiuM'
+          s['nextPart']=1
+          s['nextEpisode']=1
+          s['currentSeriesComplete']=False
+          s.pop('transportProvider',None)
+          s.pop('transportUrl',None)
+          s.pop('transportVideoId',None)
+          p.write_text(json.dumps(s,indent=2)+'\n')
+          PY
+          python rubyclips/spotify_story_resolve.py
+          python - <<'PY'
+          import json
+          c=json.load(open('rubyclips/muffin_work/continuation.json'))
+          e=json.load(open('rubyclips/muffin_work/episodes.json'))[0]
+          assert c['sourceProvider']=='spotify-show'
+          assert 'facebook.com/' in c['mediaTransportUrl']
+          assert e['sourceProvider']=='spotify-show'
+          assert 'facebook.com/' in e['transportUrl']
+          print('MAPPED_NEXT_STORY_OK')
+          print(json.dumps(c,indent=2))
+          PY
+          mv /tmp/state.json rubyclips/muffin_state.json
