@@ -1,0 +1,61 @@
+name: RubyClips next-story source validation
+on:
+  push:
+    paths:
+      - 'rubyclips/next_story_source_test.trigger'
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install --quiet --upgrade yt-dlp votify
+      - name: Stage next-oldest Spotify story in working copy only
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          q=json.load(open('rubyclips/spotify_episode_queue.json'))
+          nxt=next(e for e in q['episodes'] if int(e['position'])==2)
+          p=Path('rubyclips/muffin_state.json')
+          s=json.loads(p.read_text())
+          s['currentSeriesId']=nxt['id']
+          s['currentSeriesTitle']=nxt['title']
+          s['spotifyEpisodeUrl']=nxt['url']
+          s['spotifyQueuePosition']=2
+          s['nextPart']=1
+          s['nextEpisode']=1
+          s['currentSeriesEpisodeCount']=1
+          s['storyTotalParts']=1
+          s['currentSeriesComplete']=False
+          s['restartGeneration']=int(s.get('restartGeneration') or 8)+1
+          s.pop('transportProvider',None)
+          s.pop('transportUrl',None)
+          s.pop('transportVideoId',None)
+          s.pop('sourceDurationSeconds',None)
+          p.write_text(json.dumps(s,indent=2)+'\n')
+          print('NEXT_STORY',nxt)
+          PY
+      - name: Resolve next-oldest story Part 1 without publishing
+        run: python rubyclips/spotify_story_resolve.py
+      - name: Verify next-story source
+        run: |
+          python - <<'PY'
+          import json,subprocess
+          c=json.load(open('rubyclips/muffin_work/continuation.json'))
+          eps=json.load(open('rubyclips/muffin_work/episodes.json'))
+          assert int(c['part'])==1
+          assert c['sourceProvider']=='spotify-show'
+          assert eps and eps[0]['sourceProvider']=='spotify-show'
+          d=float(subprocess.check_output(['ffprobe','-v','error','-show_entries','format=duration','-of','default=nw=1:nk=1',eps[0]['file']],text=True).strip())
+          assert d>10
+          print('NEXT_STORY_SOURCE_OK',c['sourceTitle'],d,c.get('mediaTransportUrl'),c.get('sourceStrategy'))
+          PY
