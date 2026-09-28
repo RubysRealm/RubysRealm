@@ -11,31 +11,34 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install Google Play downloader
-        run: |
-          python -m pip install --quiet 'protobuf==3.20.*' gplaycli
-          gplaycli --version || true
-      - name: Download Spotify from Google Play
+      - name: Probe official Spotify APK endpoints
         shell: bash
         run: |
-          set -euxo pipefail
-          mkdir -p /tmp/spotify-apk
-          gplaycli -d com.spotify.music -f /tmp/spotify-apk -y
-          find /tmp/spotify-apk -maxdepth 1 -type f -printf '%f %s bytes\n'
-          apk=$(find /tmp/spotify-apk -maxdepth 1 -type f -name '*.apk' -print -quit)
-          test -n "$apk"
-          test -s "$apk"
-          file "$apk"
-          sha256sum "$apk"
-          python - "$apk" <<'PY'
-          from pathlib import Path
-          import sys
-          p=Path(sys.argv[1])
-          b=p.read_bytes()[:8]
-          print('MAGIC',b.hex())
-          assert p.stat().st_size > 5_000_000
-          assert b[:2] == b'PK'
-          PY
+          set -u
+          urls=(
+            'https://download.scdn.co/SpotifyAndroid.apk'
+            'https://download.spotify.com/android/SpotifyAndroid.apk'
+            'https://www.spotify.com/download/android/SpotifyAndroid.apk'
+            'https://download.scdn.co/Spotify.apk'
+          )
+          ok=0
+          for url in "${urls[@]}"; do
+            echo "=== $url ==="
+            rm -f /tmp/spotify.bin /tmp/headers
+            code=$(curl -L -sS -A 'Mozilla/5.0 (Linux; Android 15; Pixel 7 Pro)'               --connect-timeout 15 --max-time 90 -D /tmp/headers -o /tmp/spotify.bin               -w '%{http_code}' "$url" || true)
+            echo "HTTP=$code"
+            grep -Ei '^(content-type|content-length|location):' /tmp/headers | tail -10 || true
+            if [ -s /tmp/spotify.bin ]; then
+              bytes=$(stat -c '%s' /tmp/spotify.bin)
+              echo "BYTES=$bytes"
+              file /tmp/spotify.bin || true
+              head -c 8 /tmp/spotify.bin | od -An -tx1
+              if [ "$bytes" -gt 5000000 ] && head -c2 /tmp/spotify.bin | grep -q $'PK'; then
+                echo "OFFICIAL_APK_OK=$url"
+                sha256sum /tmp/spotify.bin
+                ok=1
+                break
+              fi
+            fi
+          done
+          test "$ok" = 1
