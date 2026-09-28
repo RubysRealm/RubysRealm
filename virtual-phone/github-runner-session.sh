@@ -13,11 +13,6 @@ $ADB -s "$SERIAL" shell wm density 320 || true
 $ADB -s "$SERIAL" shell settings put system screen_off_timeout 2147483647 || true
 $ADB -s "$SERIAL" shell svc power stayon true || true
 
-# Install the verified Takarada full-screen feed app first.
-$ADB -s "$SERIAL" install -r virtual-phone/prebuilt/takarada-display.apk
-$ADB -s "$SERIAL" shell am start -n com.takarada.display/.MainActivity --es url "$FEED_URL" || true
-sleep 2
-
 # Expose Android immediately through scrcpy -> Xvfb -> password-protected noVNC.
 # Optional app-store/TikTok installation happens only after control is available.
 export DISPLAY=:99
@@ -74,15 +69,8 @@ fi
 bash virtual-phone/github-phone-agent-v5.sh >"$ROOT/assistant-agent.log" 2>&1 &
 ASSISTANT_AGENT_PID=$!
 
-# Optional first-time app-store setup. Never kill the phone if this fails;
-# once the tunnel exists we can install/repair apps interactively.
-AURORA_APK="$ROOT/aurora.apk"
-if curl -fL --retry 2 --connect-timeout 15 --max-time 90 -o "$AURORA_APK" https://f-droid.org/repo/com.aurora.store_76.apk; then
-  $ADB -s "$SERIAL" install -r "$AURORA_APK" || true
-  $ADB -s "$SERIAL" shell monkey -p com.aurora.store -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
-else
-  echo 'WARNING: Aurora Store download failed; phone remains available for interactive repair.'
-fi
+$ADB -s "$SERIAL" shell monkey -p com.zhiliaoapp.musically -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
+sleep 2
 
 # Keep the free runner alive while the virtual phone is being used.
 END=$((SECONDS + 18600))
