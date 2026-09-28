@@ -1,4 +1,4 @@
-name: Rubaradaclips Spotify public metadata probe
+name: Rubaradaclips Invidious media probe
 on:
   push:
     paths:
@@ -11,42 +11,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install Spotify client
-        run: python -m pip install --quiet --upgrade votify
-      - name: Inspect public episode media metadata
+      - name: Probe current Invidious playback routes
+        shell: bash
         run: |
-          python - <<'PY'
-          import asyncio, json
-          from votify.api.api import SpotifyApi
-          from votify.api.enums import SessionType
-          EP='2GIOjWw1E90bvEXGCPoEWA'
-
-          def walk(obj, path='root'):
-              if isinstance(obj, dict):
-                  for k,v in obj.items():
-                      p=f'{path}.{k}'
-                      kl=str(k).lower()
-                      if isinstance(v,(str,int,float,bool)) and any(x in kl for x in ('url','uri','video','audio','image','rss','feed','file','media','duration')):
-                          print('FIELD',p,'=',str(v)[:1600])
-                      walk(v,p)
-              elif isinstance(obj,list):
-                  for i,v in enumerate(obj):
-                      walk(v,f'{path}[{i}]')
-              elif isinstance(obj,str) and ('http://' in obj or 'https://' in obj):
-                  print('URL',path,'=',obj[:1600])
-
-          async def main():
-              api=await SpotifyApi.create(session_type=SessionType.WEB)
-              try:
-                  d=await api.get_episode(EP)
-                  e=d.get('data',{}).get('episodeUnionV2',{})
-                  print('TOP_KEYS',sorted(e.keys()))
-                  print('MEDIA_TYPES',e.get('mediaTypes'))
-                  walk(e,'episode')
-              finally:
-                  await api.client.aclose()
-          asyncio.run(main())
-          PY
+          set +e
+          VIDEO='jXkBF-MCjEA'
+          for BASE in \
+            'https://inv.nadeko.net' \
+            'https://invidious.nerdvpn.de' \
+            'https://yt.chocolatemoo53.com' \
+            'https://invidious.tiekoetter.com'
+          do
+            echo "=== $BASE ==="
+            URL="$BASE/latest_version?id=$VIDEO&itag=18&local=true"
+            rm -f /tmp/iv.bin /tmp/iv.headers
+            CODE=$(curl -L --max-time 25 -A 'Mozilla/5.0' -r 0-1048575 -D /tmp/iv.headers -o /tmp/iv.bin -sS -w '%{http_code}' "$URL")
+            echo "HTTP=$CODE SIZE=$(wc -c </tmp/iv.bin 2>/dev/null || echo 0)"
+            tail -20 /tmp/iv.headers || true
+            file /tmp/iv.bin || true
+            xxd -l 24 /tmp/iv.bin || true
+          done
