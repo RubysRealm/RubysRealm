@@ -107,9 +107,18 @@ button{min-width:82px}input{width:min(88vw,360px)}#status{min-height:18px;font-s
 </main><script>
 const img=document.getElementById('phone'),st=document.getElementById('status'),txt=document.getElementById('txt');let start=null;
 function say(x){st.textContent=x}async function post(path,obj){try{let r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(obj||{})});if(!r.ok)throw new Error(await r.text());say('Sent');setTimeout(refresh,350)}catch(e){say('Error: '+e.message)}}
-function coords(ev){const r=img.getBoundingClientRect();return{x:Math.round((ev.clientX-r.left)/r.width*720),y:Math.round((ev.clientY-r.top)/r.height*1280)}}
+function coords(ev){
+  const r=img.getBoundingClientRect();
+  const nw=img.naturalWidth||720, nh=img.naturalHeight||1280;
+  const scale=Math.min(r.width/nw,r.height/nh);
+  const dw=nw*scale, dh=nh*scale;
+  const left=r.left+(r.width-dw)/2, top=r.top+(r.height-dh)/2;
+  const px=Math.max(0,Math.min(nw-1,(ev.clientX-left)/scale));
+  const py=Math.max(0,Math.min(nh-1,(ev.clientY-top)/scale));
+  return{x:Math.round(px/nw*720),y:Math.round(py/nh*1280)}
+}
 img.addEventListener('pointerdown',e=>{e.preventDefault();img.setPointerCapture(e.pointerId);start={...coords(e),t:Date.now()}});
-img.addEventListener('pointerup',e=>{e.preventDefault();if(!start)return;let q=coords(e),dx=q.x-start.x,dy=q.y-start.y,d=Math.hypot(dx,dy);if(d>45)post('/swipe',{x1:start.x,y1:start.y,x2:q.x,y2:q.y,duration:Math.max(180,Math.min(700,Date.now()-start.t))});else post('/tap',{x:q.x,y:q.y});start=null});
+img.addEventListener('pointerup',e=>{e.preventDefault();if(!start)return;let q=coords(e),dx=q.x-start.x,dy=q.y-start.y,d=Math.hypot(dx,dy);if(d>45){say('Swipe '+start.x+','+start.y+' → '+q.x+','+q.y);post('/swipe',{x1:start.x,y1:start.y,x2:q.x,y2:q.y,duration:Math.max(180,Math.min(700,Date.now()-start.t))})}else{say('Tap '+q.x+','+q.y);post('/tap',{x:q.x,y:q.y})}start=null});
 async function sendText(){let v=txt.value;if(!v)return;say('Typing…');await post('/text',{text:v});txt.value=''}function toggle(){txt.type=txt.type==='password'?'text':'password'}function key(k){post('/key',{key:k})}function refresh(){img.src='/screen.jpg?t='+Date.now()}setInterval(refresh,1200);
 </script></body></html>'''
 
