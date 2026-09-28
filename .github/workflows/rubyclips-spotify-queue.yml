@@ -29,8 +29,8 @@ jobs:
           eps=q['episodes']
           assert q['order']=='oldest-to-newest'
           assert eps, 'empty Spotify queue'
-          dates=[str(e.get('releaseDate') or '') for e in eps]
-          assert dates == sorted(dates), 'episode dates are not ascending'
+          feed=[int(e['sourceFeedIndexNewestFirst']) for e in eps]
+          assert feed == sorted(feed, reverse=True), 'Spotify source feed was not reversed oldest-to-newest'
           current=next(e for e in eps if e['status']=='current')
           assert current['id']==q['currentEpisodeId']==s['currentSeriesId']
           assert current['position']==1 or all(e['status']=='completed' for e in eps[:current['position']-1])
