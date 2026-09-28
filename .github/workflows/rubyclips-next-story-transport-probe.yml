@@ -1,0 +1,21 @@
+name: RubyClips next story transport probe
+on:
+  push:
+    paths:
+      - 'rubyclips/next_story_transport_probe.trigger'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install --quiet --upgrade yt-dlp
+      - run: python rubyclips/next_story_transport_probe.py
