@@ -24,14 +24,27 @@ const CONTINUITY_SOURCE_URL = 'https://www.dailymotion.com/video/xb2tc0i';
 const COBALT_API = 'https://rubyclips-cobalt-3.onrender.com/';
 const CURRENT_YOUTUBE_STORY_ID = '5-bO9NAhWbI';
 const PIPED_APIS = [
-  'https://pipedapi.wireway.ch',
-  'https://pipedapi.r4fo.com',
-  'https://pipedapi.qdi.fi'
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.leptons.xyz',
+  'https://pipedapi.nosebs.ru',
+  'https://pipedapi-libre.kavin.rocks',
+  'https://piped-api.privacy.com.de',
+  'https://pipedapi.adminforge.de',
+  'https://api.piped.yt',
+  'https://pipedapi.drgns.space',
+  'https://pipedapi.owo.si',
+  'https://pipedapi.ducks.party',
+  'https://piped-api.codespace.cz',
+  'https://pipedapi.reallyaweso.me',
+  'https://api.piped.private.coffee',
+  'https://pipedapi.darkness.services',
+  'https://pipedapi.orangenet.cc'
 ];
 
 async function resolvePipedHls(video) {
-  const errors = [];
-  for (const base of PIPED_APIS) {
+  const attempts = await Promise.all(PIPED_APIS.map(async (base) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 7000);
     try {
       const response = await fetch(`${base}/streams/${encodeURIComponent(video)}`, {
         headers: {
@@ -39,11 +52,11 @@ async function resolvePipedHls(video) {
           'User-Agent': 'Mozilla/5.0 (compatible; Rubaradaclips/1.0)'
         },
         redirect: 'follow',
-        cache: 'no-store'
+        cache: 'no-store',
+        signal: controller.signal
       });
       if (!response.ok) {
-        errors.push(`${base}: HTTP ${response.status}`);
-        continue;
+        return { ok: false, base, error: `HTTP ${response.status}` };
       }
       const data = await response.json();
       const hls = String(data?.hls || '');
@@ -59,12 +72,22 @@ async function resolvePipedHls(video) {
           uploader: String(data?.uploader || '')
         };
       }
-      errors.push(`${base}: missing HLS/duration`);
+      return { ok: false, base, error: 'missing HLS/duration' };
     } catch (error) {
-      errors.push(`${base}: ${String(error?.message || error).slice(0, 300)}`);
+      return { ok: false, base, error: String(error?.message || error).slice(0, 300) };
+    } finally {
+      clearTimeout(timer);
     }
-  }
-  return { ok: false, video, error: 'No Piped source available', details: errors };
+  }));
+
+  const winner = attempts.find(x => x.ok);
+  if (winner) return winner;
+  return {
+    ok: false,
+    video,
+    error: 'No Piped source available',
+    details: attempts.map(x => `${x.base}: ${x.error}`)
+  };
 }
 
 async function probeCurrentYouTubeSource() {
