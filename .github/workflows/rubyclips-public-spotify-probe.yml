@@ -1,0 +1,29 @@
+name: RubyClips public Spotify player probe
+on:
+  push:
+    paths:
+      - 'rubyclips/public_spotify_probe.trigger'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install browser capture tools
+        run: |
+          python -m pip install --quiet playwright
+          python -m playwright install --with-deps chromium
+      - name: Verify login-free playback
+        run: python rubyclips/public_spotify_probe.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rubyclips-public-spotify-probe
+          path: rubyclips/public_spotify_probe/
+          if-no-files-found: warn
+          retention-days: 1
