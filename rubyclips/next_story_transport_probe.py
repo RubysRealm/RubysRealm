@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, subprocess
+import json, subprocess, urllib.parse, urllib.request
 title='reading SCARY reddit stories while exploring an ancient city'
 query=f'ytsearch5:{title} babyjamie1'
 cmd=[
@@ -19,17 +19,23 @@ best=rows[0]
 vid=str(best.get('id') or '')
 url=str(best.get('webpage_url') or f'https://www.youtube.com/watch?v={vid}')
 print('MATCH',vid,best.get('title'),best.get('uploader') or best.get('channel'),best.get('duration'),url)
+proxy='https://rubys-realm.vercel.app/api/rubyclips-post?'+urllib.parse.urlencode({'pipedVideo':vid})
+req=urllib.request.Request(proxy,headers={'User-Agent':'Mozilla/5.0','Accept':'application/json'})
+with urllib.request.urlopen(req,timeout=60) as resp:
+    data=json.loads(resp.read().decode())
+print('PIPED',json.dumps(data)[:2000])
+if not data.get('ok') or not str(data.get('hls') or '').startswith('http'):
+    raise SystemExit('Piped proxy unavailable for next story')
+hls=data['hls']
 subprocess.run([
-  'yt-dlp','--no-playlist','--no-progress','--socket-timeout','30','--retries','4',
-  '--js-runtimes','node','--remote-components','ejs:github',
-  '--extractor-args','youtube:player_client=tv,web_safari',
-  '--download-sections','*0-20','--force-keyframes-at-cuts',
-  '-f','best[height<=720]/best','--merge-output-format','mp4',
-  '-o','/tmp/next-story-probe.mp4',url
+  'ffmpeg','-y','-hide_banner','-loglevel','error','-i',hls,'-t','20',
+  '-map','0:v:0','-map','0:a:0?','-c:v','libx264','-preset','ultrafast','-crf','22',
+  '-c:a','aac','-b:a','128k','/tmp/next-story-probe.mp4'
 ],check=True,timeout=600)
-subprocess.run([
+out=subprocess.check_output([
   'ffprobe','-v','error','-show_entries','format=duration,size',
-  '-show_entries','stream=codec_type,codec_name,width,height',
-  '-of','json','/tmp/next-story-probe.mp4'
-],check=True)
+  '-show_entries','stream=codec_type,codec_name,width,height','-of','json',
+  '/tmp/next-story-probe.mp4'
+],text=True)
+print(out)
 print('NEXT_STORY_TRANSPORT_OK')
