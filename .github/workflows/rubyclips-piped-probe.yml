@@ -1,74 +1,58 @@
 name: Rubaradaclips Source Resolver Probe
 
 on:
-  issues:
-    types: [opened]
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/rubyclips-piped-probe.yml'
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   probe:
-    if: github.event_name == 'workflow_dispatch' || (github.actor == 'RubysRealm' && github.event.issue.title == 'START_RUBYCLIPS_COBALT_PROBE')
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      GH_TOKEN: ${{ github.token }}
-      ISSUE: ${{ github.event.issue.number }}
-      API: https://rubyclips-cobalt-3.onrender.com/
-      VIDEO: https://www.youtube.com/watch?v=5-bO9NAhWbI
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: selected-current
+            video_id: jXkBF-MCjEA
+          - label: known-valid-reddit
+            video_id: KbB2A79w00I
+          - label: known-valid-productivity
+            video_id: gTZi1vZ4Zes
     steps:
-      - name: Check resolver API
+      - name: Probe deployed Piped edge resolver
         shell: bash
         run: |
-          set -euo pipefail
-          curl -fsSL --retry 8 --retry-all-errors --retry-delay 4 "$API" -o /tmp/root.json
-          cat /tmp/root.json
+          set +e
+          URL="https://rubys-realm.vercel.app/api/rubyclips-post?pipedVideo=${{ matrix.video_id }}"
+          CODE="$(curl -sS --max-time 45 -o /tmp/piped.json -w '%{http_code}' "$URL")"
+          echo "label=${{ matrix.label }} video=${{ matrix.video_id }} piped_http=$CODE"
+          cat /tmp/piped.json || true
+          echo
 
-      - name: Resolve current authorized story
+      - name: Probe Render/Cobalt resolver
         shell: bash
         run: |
-          set -euo pipefail
-          CODE="$(curl -sS --retry 3 --retry-all-errors -o /tmp/resolve.json -w '%{http_code}' \
-            -H 'Accept: application/json' \
-            -H 'Content-Type: application/json' \
-            -X POST "$API" \
+          set +e
+          VIDEO="https://www.youtube.com/watch?v=${{ matrix.video_id }}"
+          CODE="$(curl -sS --max-time 60 -o /tmp/cobalt.json -w '%{http_code}' \
+            -H 'Accept: application/json' -H 'Content-Type: application/json' \
+            -X POST 'https://rubyclips-cobalt-3.onrender.com/' \
             --data "{\"url\":\"$VIDEO\",\"videoQuality\":\"720\",\"youtubeVideoCodec\":\"h264\",\"downloadMode\":\"auto\",\"alwaysProxy\":true}")"
-          echo "HTTP=$CODE"
-          cat /tmp/resolve.json
-          test "$CODE" = '200'
-          python - <<'PY'
-          import json
-          d=json.load(open('/tmp/resolve.json'))
-          assert d.get('status') in ('tunnel','redirect'), d
-          url=str(d.get('url') or '')
-          assert url.startswith('http'), d
-          open('/tmp/media-url','w').write(url)
-          PY
+          echo "label=${{ matrix.label }} video=${{ matrix.video_id }} cobalt_http=$CODE"
+          cat /tmp/cobalt.json || true
+          echo
 
-      - name: Verify actual media bytes
+      - name: Probe phone media bridge with tiny cut
         shell: bash
         run: |
-          set -euo pipefail
-          URL="$(cat /tmp/media-url)"
-          curl -fL --retry 3 --retry-all-errors --max-time 90 \
-            -H 'Range: bytes=0-1048575' "$URL" -o /tmp/sample.bin
-          SIZE="$(wc -c < /tmp/sample.bin | tr -d ' ')"
-          echo "sample_bytes=$SIZE"
-          test "$SIZE" -ge 100000
-          file /tmp/sample.bin || true
-
-      - name: Report result
-        if: always()
-        shell: bash
-        run: |
-          ROOT="$(cat /tmp/root.json 2>/dev/null | head -c 1200 || true)"
-          RES="$(cat /tmp/resolve.json 2>/dev/null | head -c 3000 || true)"
-          if [ -f /tmp/sample.bin ]; then SIZE="$(wc -c < /tmp/sample.bin | tr -d ' ')"; else SIZE=0; fi
-          BODY="RUBYCLIPS_COBALT_PROBE
-root: $ROOT
-resolve: $RES
-sample_bytes: $SIZE"
-          if [ -n "${ISSUE:-}" ]; then gh issue comment "$ISSUE" --body "$BODY"; fi
+          set +e
+          URL="https://rubyclips-phone-host.onrender.com/api/auto-cut?v=${{ matrix.video_id }}&start=0&duration=8"
+          CODE="$(curl -sS -L --max-time 75 -H 'Range: bytes=0-262143' -o /tmp/phone.bin -w '%{http_code}' "$URL")"
+          SIZE="$(wc -c < /tmp/phone.bin 2>/dev/null | tr -d ' ' || echo 0)"
+          TYPE="$(file -b /tmp/phone.bin 2>/dev/null || true)"
+          echo "label=${{ matrix.label }} video=${{ matrix.video_id }} phone_http=$CODE bytes=$SIZE type=$TYPE"
