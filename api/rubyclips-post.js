@@ -15,7 +15,7 @@ const SPOTIFY_STORY_CHANNEL = 'babyjamie1';
 const MAX_AUTO_SECONDS = 599;
 const MIN_STORY_RESTART_GENERATION = 5;
 const REQUIRED_STORY_PIPELINE_REVISION = 'avsync-v4-direct-builder';
-const PUBLISHER_VERSION = 'existing-video-parts-v13-wide-frame-title-card';
+const PUBLISHER_VERSION = 'existing-video-parts-v14-continuous-no-trending';
 const CONTINUITY_SERIES_ID = '7682993954661553173';
 const CONTINUITY_RESTART = 2;
 const CONTINUITY_FIRST_PART = 12;
@@ -300,7 +300,8 @@ export default async function handler(req, res) {
       videoUrl,
       dueAt,
       allowDisabled: true,
-      dedupeVideoUrl: true
+      dedupeVideoUrl: true,
+      addTrendingHashtags: false
     });
 
     return res.status(200).json({
