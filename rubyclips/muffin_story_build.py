@@ -140,9 +140,24 @@ if cover_candidates:
         '-c:v','libx264','-preset','veryfast','-crf','19','-pix_fmt','yuv420p','-r',str(OUTPUT_FPS),
         '-c:a','aac','-b:a','160k','-ar','48000','-movflags','+faststart','-shortest',str(cover_intro)
     ], check=True, timeout=300)
-    if cover_intro.stat().st_size < 50000:
-        raise SystemExit('Built story cover intro is unexpectedly small.')
-    print('Embedded titled source artwork for TikTok preview:', cover_source)
+    if not cover_intro.exists() or cover_intro.stat().st_size < 5000:
+        raise SystemExit('Built story cover intro is missing or empty.')
+    cover_probe = json.loads(subprocess.check_output([
+        FFPROBE,'-v','error','-show_streams','-show_format','-of','json',str(cover_intro)
+    ], text=True))
+    cover_duration = float((cover_probe.get('format') or {}).get('duration') or 0)
+    cover_videos = [s for s in cover_probe.get('streams', []) if s.get('codec_type') == 'video']
+    cover_audios = [s for s in cover_probe.get('streams', []) if s.get('codec_type') == 'audio']
+    if not (1.5 <= cover_duration <= 2.5) or len(cover_videos) != 1 or len(cover_audios) != 1:
+        raise SystemExit(
+            f'Built story cover intro failed media validation: '
+            f'duration={cover_duration:.3f}s videoStreams={len(cover_videos)} audioStreams={len(cover_audios)}'
+        )
+    print(
+        'Embedded titled source artwork for TikTok preview:',
+        cover_source,
+        f'({cover_duration:.3f}s, {cover_intro.stat().st_size} bytes)'
+    )
 
 # Normalize every clip independently onto a solid black 1080x1920 canvas.
 render_clips = []
