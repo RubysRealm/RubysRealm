@@ -2,7 +2,7 @@ name: RubyClips MuffinDrama hourly story
 
 on:
   schedule:
-    - cron: '17,47 * * * *'
+    - cron: '7,22,37,52 * * * *'
   workflow_dispatch:
   push:
     paths:
@@ -35,18 +35,58 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os
+          from datetime import datetime, timezone
           from pathlib import Path
+
           s=json.loads(Path('rubyclips/muffin_state.json').read_text())
           key=f"rubyclips:{s.get('currentSeriesId')}:r{s.get('restartGeneration')}:p{s.get('nextPart')}"
+          now=datetime.now(timezone.utc)
+
+          def parse_ts(value):
+              if not value:
+                  return None
+              try:
+                  return datetime.fromisoformat(str(value).replace('Z','+00:00'))
+              except Exception:
+                  return None
+
+          wait_seconds=0
+          moderation_retry=False
+          reason='ready'
+
+          last_post=parse_ts(s.get('lastPostAt'))
+          if last_post:
+              elapsed=max(0,(now-last_post).total_seconds())
+              success_wait=max(0,int(1800-elapsed))
+              if success_wait > wait_seconds:
+                  wait_seconds=success_wait
+                  reason=f'30-minute posting cadence: {success_wait}s remaining'
+
           blocked=str(s.get('blockedLogicalPostKey') or '')
-          allowed = blocked != key
+          if blocked == key:
+              moderation_retry=True
+              retry_count=max(1,int(s.get('blockedRetryCount') or 1))
+              cooldown = 3600 if retry_count <= 1 else (21600 if retry_count == 2 else 86400)
+              blocked_at=parse_ts(s.get('blockedAt')) or now
+              elapsed=max(0,(now-blocked_at).total_seconds())
+              block_wait=max(0,int(cooldown-elapsed))
+              if block_wait > wait_seconds:
+                  wait_seconds=block_wait
+              reason=f'TikTok moderation cooldown attempt {retry_count}: {block_wait}s remaining'
+
+          allowed = wait_seconds <= 0
           with open(os.environ['GITHUB_OUTPUT'],'a') as fh:
               fh.write(f"allowed={'true' if allowed else 'false'}\n")
+              fh.write(f"moderation_retry={'true' if moderation_retry else 'false'}\n")
+              fh.write(f"wait_seconds={wait_seconds}\n")
+
           if allowed:
               print('Rubarataclips continuous mode: queue iteration allowed.')
+              if moderation_retry:
+                  print('Moderation cooldown elapsed; retrying the same blocked part once.')
           else:
-              print(f"Rubarataclips paused on TikTok-moderated part: {key}")
-              print(str(s.get('blockedReason') or 'TikTok moderation block'))
+              print('Rubarataclips queue is still active but waiting:', reason)
+              print('No post will be created during this check.')
           PY
 
       - name: Validate Rubarataclips pipeline scripts
@@ -189,7 +229,16 @@ jobs:
               exit 0
             fi
 
-            echo 'Cleaned post was also blocked; refusing repeated automatic retries.'
+            if [ "${{ steps.cadence.outputs.moderation_retry }}" = 'true' ]; then
+              echo 'Moderation cooldown elapsed; removing only the failed Buffer attempt and retrying this same part with the newly built simplified caption.'
+              curl -sS --max-time 30 "https://rubys-realm.vercel.app/api/buffer-status?delete_post_id=${POST_ID}" || true
+              gh release delete-asset "$TAG" publish.json -y || true
+              rm -f /tmp/post.json
+              echo 'already=false' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo 'Cleaned post was blocked and no moderation retry window is open yet.'
             cat /tmp/existing-status.json
             exit 1
           fi
@@ -312,11 +361,14 @@ jobs:
           p=Path('rubyclips/muffin_state.json')
           s=json.loads(p.read_text())
           key=f"rubyclips:{s.get('currentSeriesId')}:r{s.get('restartGeneration')}:p{s.get('nextPart')}"
+          previous_key=str(s.get('blockedLogicalPostKey') or '')
+          previous_count=int(s.get('blockedRetryCount') or 0)
           s['blockedLogicalPostKey']=key
           s['blockedReason']=err
           s['blockedAt']=datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
+          s['blockedRetryCount']=(previous_count + 1) if previous_key == key else 1
           p.write_text(json.dumps(s,indent=2)+'\n')
-          print('Recorded TikTok moderation block for', key)
+          print('Recorded TikTok moderation block for', key, 'retry count', s['blockedRetryCount'])
           PY
           git config user.name 'rubyclips-publisher-bot'
           git config user.email 'actions@users.noreply.github.com'
@@ -367,6 +419,7 @@ jobs:
           s.pop('blockedLogicalPostKey', None)
           s.pop('blockedReason', None)
           s.pop('blockedAt', None)
+          s.pop('blockedRetryCount', None)
           continuation_path=Path('rubyclips/muffin_work/continuation.json')
           if continuation_path.exists():
               continuation=json.loads(continuation_path.read_text())
@@ -402,7 +455,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo 'Launching the next Rubarataclips queue iteration immediately.'
+          echo 'Launching the next Rubarataclips queue iteration; the cadence gate will prevent burst posting.'
           gh workflow run rubyclips-muffin-part1.yml --ref main
 
       - name: Save diagnostics
