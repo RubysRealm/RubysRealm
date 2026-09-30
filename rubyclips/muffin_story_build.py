@@ -246,7 +246,7 @@ manifest = {
     'segmentDurationSeconds': round(duration, 3),
     'file': final.name,
     'storyHashtag': story_hashtag,
-    'caption': f'{series_title} — {part_label} {story_hashtag} #rubaradaclips #storytime #shortdrama',
+    'caption': f'{series_title} — {part_label} {story_hashtag}',
     'targetChannel': 'rubaradaclips',
     'titleBurnedIn': True,
     'partLabelBurnedIn': True,
