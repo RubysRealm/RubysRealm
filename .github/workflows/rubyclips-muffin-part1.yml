@@ -33,8 +33,21 @@ jobs:
       - name: Enforce Rubarataclips continuous queue
         id: cadence
         run: |
-          echo 'allowed=true' >> "$GITHUB_OUTPUT"
-          echo 'Rubarataclips continuous mode: no inter-part cadence delay.'
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          s=json.loads(Path('rubyclips/muffin_state.json').read_text())
+          key=f"rubyclips:{s.get('currentSeriesId')}:r{s.get('restartGeneration')}:p{s.get('nextPart')}"
+          blocked=str(s.get('blockedLogicalPostKey') or '')
+          allowed = blocked != key
+          with open(os.environ['GITHUB_OUTPUT'],'a') as fh:
+              fh.write(f"allowed={'true' if allowed else 'false'}\n")
+          if allowed:
+              print('Rubarataclips continuous mode: queue iteration allowed.')
+          else:
+              print(f"Rubarataclips paused on TikTok-moderated part: {key}")
+              print(str(s.get('blockedReason') or 'TikTok moderation block'))
+          PY
 
       - name: Validate Rubarataclips pipeline scripts
         if: steps.cadence.outputs.allowed == 'true'
@@ -275,6 +288,42 @@ jobs:
           cat /tmp/buffer-status.json || true
           exit 1
 
+      - name: Record TikTok moderation block
+        if: failure() && steps.state.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          if [ ! -s rubyclips/muffin_output/publish.json ]; then
+            exit 0
+          fi
+          POST_ID="$(python -c "import json; print(json.load(open('rubyclips/muffin_output/publish.json')).get('postId',''))" 2>/dev/null)"
+          [ -n "$POST_ID" ] || exit 0
+          curl -sS --max-time 30 -o /tmp/mod-status.json "https://rubys-realm.vercel.app/api/buffer-status?post_id=${POST_ID}" || exit 0
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+          d=json.load(open('/tmp/mod-status.json'))
+          post=d.get('post') or {}
+          err=(post.get('error') or {}).get('message') or ''
+          if 'potential spam' not in err.lower():
+              raise SystemExit(0)
+          p=Path('rubyclips/muffin_state.json')
+          s=json.loads(p.read_text())
+          key=f"rubyclips:{s.get('currentSeriesId')}:r{s.get('restartGeneration')}:p{s.get('nextPart')}"
+          s['blockedLogicalPostKey']=key
+          s['blockedReason']=err
+          s['blockedAt']=datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
+          p.write_text(json.dumps(s,indent=2)+'\n')
+          print('Recorded TikTok moderation block for', key)
+          PY
+          git config user.name 'rubyclips-publisher-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add rubyclips/muffin_state.json
+          git diff --cached --quiet || git commit -m 'Pause Rubarataclips on TikTok moderation block [skip ci]'
+          git push || true
+
       - name: Advance story state exactly once
         if: steps.state.outputs.ready == 'true'
         run: |
@@ -315,6 +364,9 @@ jobs:
           s['pipelineRevision']=info.get('pipelineRevision')
           s['lastLogicalPostKey']=info.get('logicalPostKey')
           s['lastPostAt']=sent_at
+          s.pop('blockedLogicalPostKey', None)
+          s.pop('blockedReason', None)
+          s.pop('blockedAt', None)
           continuation_path=Path('rubyclips/muffin_work/continuation.json')
           if continuation_path.exists():
               continuation=json.loads(continuation_path.read_text())
