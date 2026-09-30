@@ -104,6 +104,12 @@ async def main():
     catalog_ids = {ep['id'] for ep in catalog}
 
     completed = {str(x) for x in old_queue.get('completedEpisodeIds', []) if str(x) in catalog_ids}
+    # Durable story state is authoritative even if an older queue file was not committed
+    # by a previous run. This prevents a completed episode from becoming current again.
+    completed.update(
+        str(x) for x in state.get('completedSeriesIds', [])
+        if str(x) in catalog_ids
+    )
     prior_current = str(old_queue.get('currentEpisodeId') or '')
 
     transport_entries = {}
