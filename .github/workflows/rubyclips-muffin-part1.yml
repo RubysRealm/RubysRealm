@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: rubyclips-muffindrama-hourly-r2
@@ -29,30 +30,11 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
 
-      - name: Enforce Rubarataclips posting cadence
+      - name: Enforce Rubarataclips continuous queue
         id: cadence
         run: |
-          python3 - <<'PY'
-          import json, os
-          from datetime import datetime, timezone, timedelta
-          from pathlib import Path
-
-          p=Path('rubyclips/muffin_state.json')
-          s=json.loads(p.read_text()) if p.exists() else {}
-          last=s.get('lastPostAt')
-          allowed=True
-          next_ok=None
-          if last:
-              last_dt=datetime.fromisoformat(str(last).replace('Z','+00:00'))
-              next_ok=last_dt + timedelta(hours=6)
-              allowed=datetime.now(timezone.utc) >= next_ok
-          with open(os.environ['GITHUB_OUTPUT'],'a') as fh:
-              fh.write(f"allowed={'true' if allowed else 'false'}\n")
-          if allowed:
-              print('Rubarataclips cadence gate: publish allowed.')
-          else:
-              print(f'Rubarataclips cadence gate: too soon. Next eligible at {next_ok.isoformat()}.')
-          PY
+          echo 'allowed=true' >> "$GITHUB_OUTPUT"
+          echo 'Rubarataclips continuous mode: no inter-part cadence delay.'
 
       - name: Validate Rubarataclips pipeline scripts
         if: steps.cadence.outputs.allowed == 'true'
@@ -156,14 +138,51 @@ jobs:
           TAG="$(cat /tmp/rubyclips_tag)"
           rm -rf /tmp/existing-publish
           mkdir -p /tmp/existing-publish
-          if gh release download "$TAG" --pattern publish.json --dir /tmp/existing-publish >/dev/null 2>&1; then
-            cp /tmp/existing-publish/publish.json /tmp/post.json
-            python -c "import json; d=json.load(open('/tmp/post.json')); assert d.get('ok') and d.get('postId') and str(d.get('channelName','')).lstrip('@').lower()=='rubaradaclips'"
-            echo 'already=true' >> "$GITHUB_OUTPUT"
-            echo "Part already has a durable publish marker; Buffer call will be skipped."
-          else
+          if ! gh release download "$TAG" --pattern publish.json --dir /tmp/existing-publish >/dev/null 2>&1; then
             echo 'already=false' >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          cp /tmp/existing-publish/publish.json /tmp/post.json
+          POST_ID="$(python -c "import json; d=json.load(open('/tmp/post.json')); assert d.get('ok') and d.get('postId'); print(d['postId'])")"
+          CODE="$(curl -sS --max-time 30 -o /tmp/existing-status.json -w '%{http_code}' "https://rubys-realm.vercel.app/api/buffer-status?post_id=${POST_ID}" || true)"
+
+          if [ "$CODE" != '200' ]; then
+            echo 'already=true' >> "$GITHUB_OUTPUT"
+            echo 'Existing publish marker found; Buffer status is temporarily unavailable, so reuse it safely.'
+            exit 0
+          fi
+
+          STATUS="$(python -c "import json; print(str((json.load(open('/tmp/existing-status.json')).get('post') or {}).get('status','')).lower())")"
+          if [ "$STATUS" = 'sent' ] || [ "$STATUS" = 'scheduled' ] || [ "$STATUS" = 'sending' ]; then
+            echo 'already=true' >> "$GITHUB_OUTPUT"
+            echo "Existing Buffer post is $STATUS; reusing it."
+            exit 0
+          fi
+
+          if [ "$STATUS" = 'error' ]; then
+            OLD_TEXT="$(python -c "import json; print(str((json.load(open('/tmp/existing-status.json')).get('post') or {}).get('text','')))")"
+            OLD_ERROR="$(python -c "import json; print(str(((json.load(open('/tmp/existing-status.json')).get('post') or {}).get('error') or {}).get('message','')))")"
+            echo "Existing Buffer/TikTok post failed: $OLD_ERROR"
+
+            # One remediation retry is allowed only for the legacy caption that had
+            # auto-added generic trending hashtags. Cleaned posts are never loop-retried.
+            if printf '%s' "$OLD_TEXT" | grep -Eqi '#fyp|#viral'; then
+              echo 'Legacy generic hashtags detected; removing stale failed marker for one cleaned retry.'
+              curl -sS --max-time 30 "https://rubys-realm.vercel.app/api/buffer-status?delete_post_id=${POST_ID}" || true
+              gh release delete-asset "$TAG" publish.json -y || true
+              rm -f /tmp/post.json
+              echo 'already=false' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo 'Cleaned post was also blocked; refusing repeated automatic retries.'
+            cat /tmp/existing-status.json
+            exit 1
+          fi
+
+          echo 'already=true' >> "$GITHUB_OUTPUT"
+          echo "Existing Buffer post has status '$STATUS'; reusing marker rather than duplicating."
 
       - name: Wait for idempotent publisher
         if: steps.state.outputs.ready == 'true' && steps.publish_marker.outputs.already != 'true'
@@ -177,7 +196,7 @@ jobs:
               d=json.load(open('/tmp/health.json'))
               assert d.get('ok') is True
               assert str(d.get('channelName','')).lstrip('@').lower() == 'rubaradaclips'
-              assert 'wide-frame-title-card' in str(d.get('version',''))
+              assert 'continuous-no-trending' in str(d.get('version',''))
           except Exception:
               raise SystemExit(1)
           PY
@@ -322,9 +341,17 @@ jobs:
           PY
           git config user.name 'rubyclips-publisher-bot'
           git config user.email 'actions@users.noreply.github.com'
-          git add rubyclips/muffin_state.json
+          git add rubyclips/muffin_state.json rubyclips/spotify_episode_queue.json
           git diff --cached --quiet || git commit -m 'Advance Rubaradaclips story queue [skip ci]'
           git push
+
+      - name: Continue Rubarataclips queue immediately
+        if: steps.state.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo 'Launching the next Rubarataclips queue iteration immediately.'
+          gh workflow run rubyclips-muffin-part1.yml --ref main
 
       - name: Save diagnostics
         if: always() && steps.state.outputs.ready == 'true'
