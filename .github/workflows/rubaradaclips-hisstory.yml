@@ -1,0 +1,182 @@
+name: Rubarataclips His Story Spotify repurpose
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+  push:
+    paths:
+      - 'rubaradaclips_repurpose/run.trigger'
+permissions:
+  contents: write
+concurrency:
+  group: rubaradaclips-hisstory-production
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync latest Rubarataclips state
+        run: |
+          git fetch origin main
+          git reset --hard origin/main
+
+      - name: Respect Takarada six-hour cadence
+        id: gate
+        run: python3 rubaradaclips_repurpose/pipeline.py check
+
+      - name: Install media tools
+        if: steps.gate.outputs.allowed == 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          python -m pip install --quiet --upgrade yt-dlp
+
+      - name: Build exactly one next His Story part
+        if: steps.gate.outputs.allowed == 'true'
+        run: python3 rubaradaclips_repurpose/pipeline.py build
+
+      - name: Create deterministic release
+        if: steps.gate.outputs.allowed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=$(python3 -c "import json;print(json.load(open('rubaradaclips_repurpose/output/part-info.json'))['releaseTag'])")
+          NAME=$(python3 -c "import json;print(json.load(open('rubaradaclips_repurpose/output/manifest.json'))['file'])")
+          VIDEO="rubaradaclips_repurpose/output/$NAME"
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$VIDEO" rubaradaclips_repurpose/output/manifest.json --clobber
+          else
+            gh release create "$TAG" "$VIDEO" rubaradaclips_repurpose/output/manifest.json               --title "Rubarataclips His Story part"               --notes "Spotify/Anchor audio + verified official His Story video-only visual. Takarada-style deterministic publishing."
+          fi
+
+      - name: Reuse existing Buffer attempt
+        id: marker
+        if: steps.gate.outputs.allowed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/hisstory-publish
+          mkdir -p /tmp/hisstory-publish
+          if gh release download "$RELEASE_TAG" --pattern publish.json --dir /tmp/hisstory-publish >/dev/null 2>&1; then
+            cp /tmp/hisstory-publish/publish.json /tmp/post.json
+            python3 - <<'PY'
+          import json
+          p=json.load(open('/tmp/post.json'))
+          assert p.get('ok') and p.get('postId') and p.get('channelName')=='rubaradaclips'
+          print('Reusing Buffer post',p['postId'])
+          PY
+            echo 'already=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'already=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Wait for His Story publisher deployment
+        if: steps.gate.outputs.allowed == 'true' && steps.marker.outputs.already == 'false'
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 72); do
+            code=$(curl -sS --max-time 20 -o /tmp/health.json -w '%{http_code}'               'https://rubys-realm.vercel.app/api/rubyclips-post?health=1' || true)
+            if [ "$code" = 200 ] && python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/health.json'))
+          assert d.get('ok') is True
+          assert d.get('channelName')=='rubaradaclips'
+          assert 'hisstory-v16' in str(d.get('version',''))
+          PY
+            then exit 0; fi
+            sleep 5
+          done
+          cat /tmp/health.json || true
+          exit 1
+
+      - name: Send part to Buffer once
+        if: steps.gate.outputs.allowed == 'true' && steps.marker.outputs.already == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          URL="https://rubys-realm.vercel.app/api/rubyclips-post?tag=$RELEASE_TAG"
+          code=$(curl -sS --max-time 150 -o /tmp/post.json -w '%{http_code}' "$URL" || true)
+          cat /tmp/post.json
+          test "$code" = 200
+          python3 - <<'PY'
+          import json
+          p=json.load(open('/tmp/post.json'))
+          assert p.get('ok') and p.get('postId')
+          assert p.get('channelName')=='rubaradaclips'
+          PY
+          cp /tmp/post.json /tmp/publish.json
+          gh release upload "$RELEASE_TAG" /tmp/publish.json --clobber
+
+      - name: Confirm actual TikTok send
+        if: steps.gate.outputs.allowed == 'true'
+        run: |
+          set -euo pipefail
+          POST_ID=$(python3 -c "import json;print(json.load(open('/tmp/post.json'))['postId'])")
+          for i in $(seq 1 72); do
+            code=$(curl -sS --max-time 30 -o /tmp/status.json -w '%{http_code}'               "https://rubys-realm.vercel.app/api/buffer-status?post_id=$POST_ID" || true)
+            if [ "$code" = 200 ]; then
+              rc=0
+              python3 - <<'PY' || rc=$?
+          import json
+          d=json.load(open('/tmp/status.json'))
+          if d.get('ok') is not True: raise SystemExit(1)
+          p=d.get('post') or {}
+          if str((p.get('channel') or {}).get('id'))!='6a9f6ff1cd8b9c702c2897e1':
+              raise SystemExit(2)
+          if p.get('error'):
+              print('TikTok/Buffer error:',p['error']);raise SystemExit(2)
+          status=str(p.get('status') or '').lower()
+          print('Buffer state:',status)
+          if status=='error': raise SystemExit(2)
+          if status!='sent': raise SystemExit(1)
+          link=str(p.get('externalLink') or '')
+          if 'tiktok.com/@rubaradaclips/video/' not in link or not p.get('sentAt'):
+              raise SystemExit(2)
+          print('TIKTOK_CONFIRMED',link,p['sentAt'])
+          PY
+              if [ "$rc" -eq 0 ]; then
+                cp /tmp/status.json rubaradaclips_repurpose/output/sent-status.json
+                exit 0
+              fi
+              if [ "$rc" -eq 2 ]; then exit 1; fi
+            fi
+            sleep 15
+          done
+          echo 'Timed out without TikTok confirmation; queue will NOT advance.'
+          exit 1
+
+      - name: Advance only after confirmed TikTok send
+        if: steps.gate.outputs.allowed == 'true'
+        run: |
+          set -euo pipefail
+          python3 rubaradaclips_repurpose/pipeline.py advance rubaradaclips_repurpose/output/sent-status.json
+          git config user.name 'rubaradaclips-publisher-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add rubaradaclips_repurpose/state.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'Advance Rubarataclips His Story queue after TikTok confirmation [skip ci]'
+            git pull --rebase origin main
+            git push
+          fi
+
+      - name: Save diagnostics
+        if: always() && steps.gate.outputs.allowed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubaradaclips-hisstory-${{ github.run_number }}
+          path: |
+            rubaradaclips_repurpose/output/manifest.json
+            rubaradaclips_repurpose/output/part-info.json
+            rubaradaclips_repurpose/output/sent-status.json
+          if-no-files-found: warn
+          retention-days: 3
