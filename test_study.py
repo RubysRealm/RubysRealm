@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 import tempfile
 import numpy as np
-from analyze import entry, sale, crosses_first, fee, prepare_round, TP, SL
+from unittest.mock import patch
+from analyze import entry, sale, crosses_first, fee, prepare_round, top_configurations, run, TP, SL
 
 class PaperExecutionTests(unittest.TestCase):
     def test_purchase_uses_opposite_bid_and_whole_contracts(self):
@@ -48,5 +49,37 @@ class PaperExecutionTests(unittest.TestCase):
             rows=rows[:1]+rows[-1:]
             path.write_text("\n".join(json.dumps(x) for x in rows))
             self.assertEqual(prepare_round(r,root,D(1))[1],"quote_gap_over_20s")
+
+class RankingTests(unittest.TestCase):
+    def test_top_five_sorted_distinct_tied_and_no_purchase_excluded(self):
+        profits=np.array([[[100,99],[98,97],[96,95]],[[9,7],[8,8+1e-12],[6,5]]],dtype=float)
+        ranked=top_configurations(profits,np.array([0,4]))
+        self.assertEqual([x["indices"] for x in ranked],[(1,0,0),(1,1,0),(1,1,1),(1,0,1),(1,2,0)])
+        self.assertEqual([x["rank"] for x in ranked],[1,2,2,4,5])
+        self.assertEqual([x["tied_configurations"] for x in ranked],[1,2,2,1,1])
+        self.assertEqual(top_configurations(profits,np.zeros(2)),[])
+    def test_report_has_five_auditable_setups_and_no_premature_windows(self):
+        shape=(len(TP),len(SL))
+        receipts=np.ones(shape);receipts[0,0]=2
+        trade={"ticker":"KXBTC15M-TEST","open_ts":42300,"close_ts":43200,"side":"UP","entry_at":42600,"price":.30,"quantity":3,"spent":.9441,"returned":receipts,"profit":receipts-.9441,"exit_at":np.full(shape,43100),"settlement_won":True,"max_gap_seconds":5}
+        state={"study_start":0,"study_stop":144000,"last_observation":43210,"rounds":{"test":{"ticker":trade["ticker"],"open_ts":42300,"close_ts":43200,"official":{"market":{"status":"finalized","result":"yes"}}}}}
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/"state.json").write_text(json.dumps(state))
+            with patch("analyze.prepare_round",return_value=(trade,None)):
+                report=run(root,D(1))
+        period=report["periods"][0]
+        self.assertEqual(period["status"],"partial_sample")
+        self.assertEqual(period["missing_rounds"],47)
+        self.assertEqual(len(period["top_setups"]),5)
+        self.assertEqual(period["best"],period["top_setups"][0])
+        self.assertEqual([s["max_buy_cents"] for s in period["top_setups"]],[30,31,32,33,34])
+        for setup in period["top_setups"]:
+            self.assertEqual(setup["rank"],1)
+            self.assertEqual(setup["tied_configurations"],71)
+            self.assertEqual(setup["purchases"],1)
+            self.assertEqual(setup["profitable_purchases"],1)
+            self.assertAlmostEqual(setup["returned"]-setup["spent"],setup["net_profit"])
+            self.assertAlmostEqual(sum(t["net_profit"] for t in setup["trades"]),setup["net_profit"])
+        self.assertTrue(all(p["top_setups"]==[] and p["best"] is None for p in report["periods"][1:]))
 
 if __name__=="__main__":unittest.main()

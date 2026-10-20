@@ -57,6 +57,38 @@ def crosses_first(values, thresholds, greater):
     test=values[:,None]+1e-12>=thresholds[None,:] if greater else values[:,None]<=thresholds[None,:]+1e-12
     return np.where(test.any(axis=0),test.argmax(axis=0),len(values))
 
+def top_configurations(profits, counts, limit=5):
+    """Highest-profit distinct controls; equal dollar results share a rank."""
+    # Account flows have 0.0001-dollar precision. Round only floating sum noise.
+    dollars=np.round(profits,6)
+    eligible=np.broadcast_to(counts[:,None,None]>0,profits.shape)&np.isfinite(dollars)
+    flat=np.flatnonzero(eligible)
+    order=flat[np.argsort(-dollars.ravel()[flat],kind="stable")]
+    results=[]
+    for index in order[:limit]:
+        coords=tuple(int(x) for x in np.unravel_index(index,profits.shape))
+        value=float(dollars[coords])
+        results.append({"indices":coords,"rank":1+int(np.count_nonzero(eligible&(dollars>value))),"tied_configurations":int(np.count_nonzero(eligible&(dollars==value)))})
+    return results
+
+def describe_setup(config, selected, spends, counts, returned, wins):
+    ci,pi,si=config["indices"]
+    n=int(counts[ci]);spent=float(spends[ci]);got=float(returned[ci,pi,si])
+    profit=round(got-spent,6)
+    result={"rank":config["rank"],"max_buy_cents":CAPS[ci],"take_profit_gain_pct":TP[pi],"stop_loss_pct":SL[si],"purchases":n,"profitable_purchases":int(wins[ci,pi,si]),"losing_purchases":0,"spent":round(spent,6),"returned":round(got,6),"net_profit":profit,"roi_pct":round(profit/spent*100,6) if spent else None,"tied_configurations":config["tied_configurations"],"beats_no_trade":profit>0,"trades":[]}
+    hours={}
+    for t in selected:
+        if CAPS[ci] is not None and t["price"]>CAPS[ci]/100+1e-10:continue
+        trade_profit=float(t["profit"][pi,si]);result["losing_purchases"]+=int(trade_profit< -1e-9)
+        tr={k:t[k] for k in ("ticker","side","price","quantity","spent","settlement_won","max_gap_seconds")}
+        tr.update(entry_at=iso(t["entry_at"]),exit_at=iso(float(t["exit_at"][pi,si])),returned=round(float(t["returned"][pi,si]),6),net_profit=round(trade_profit,6))
+        result["trades"].append(tr)
+        local=dt.datetime.fromtimestamp(t["entry_at"],EASTERN);key=f"{local.hour//4*4:02d}:00–{local.hour//4*4+4:02d}:00 Eastern"
+        bucket=hours.setdefault(key,{"purchases":0,"profitable":0,"net_profit":0.0})
+        bucket["purchases"]+=1;bucket["profitable"]+=int(trade_profit>1e-9);bucket["net_profit"]+=trade_profit
+    result["break_even_purchases"]=n-result["profitable_purchases"]-result["losing_purchases"]
+    return result,hours
+
 def prepare_round(r,root,budget):
     call=r.get("call") or {}
     if call.get("side")=="SITOUT":return None,"sitout"
@@ -126,6 +158,7 @@ def run(root,budget):
     # Do not let the most recently closed, still-unsettled round create a spurious gap.
     end=max(finalized_closes,default=min(closed_cutoff,start))
     report={"generated_at":dt.datetime.now(dt.timezone.utc).isoformat(),"study_start":iso(start),"as_of":iso(end),"label":"SAMPLED-QUOTE PAPER SIMULATION — NOT ACTUAL ORACLE RETURNS","stake_contract_cost_dollars":float(budget),"fees_additional":True,"whole_contracts":True,"next_sample_execution":True,"grid_size":len(CAPS)*len(TP)*len(SL),"sampling_limit":"5-second target sampling can miss intrainterval triggers and does not guarantee live fills","periods":[]}
+    report.update(schema_version=2,top_n=5,ranking_metric="net_profit_after_fees",tie_order="Equal-profit controls share a competition rank. Display order only: buy cap ascending (OFF last), then take profit OFF followed by ascending percentages, then stop loss OFF followed by ascending percentages. This is not an extra performance advantage.")
     prepared={};excluded={}
     rounds=[r for r in state["rounds"].values() if r["open_ts"]>=start and r["close_ts"]<=end]
     for r in rounds:
@@ -133,7 +166,7 @@ def run(root,budget):
         if v:prepared[r["ticker"]]=v
         else:excluded[r["ticker"]]=reason
     for h in (12,24,36):
-        out={"hours":h,"start":iso(end-h*3600),"end":iso(end),"elapsed_ready":end-start>=h*3600,"no_trade_profit":0}
+        out={"hours":h,"start":iso(end-h*3600),"end":iso(end),"elapsed_ready":end-start>=h*3600,"no_trade_profit":0,"top_setups":[],"best":None}
         if not out["elapsed_ready"]:
             out["status"]="collecting";report["periods"].append(out);continue
         chosen=[r for r in rounds if r["open_ts"]>=end-h*3600]
@@ -153,23 +186,12 @@ def run(root,budget):
             lo=max(0,math.ceil(t["price"]*100-1e-10)-1)
             profits[lo:]+=t["profit"];returned[lo:]+=t["returned"];wins[lo:]+=(t["profit"]>1e-9)
             spends[lo:]+=t["spent"];counts[lo:]+=1
-        eligible=np.broadcast_to(counts[:,None,None]>0,profits.shape)
-        ranked=np.where(eligible,profits,-np.inf)
-        best=float(ranked.max());ties=np.argwhere(np.isclose(ranked,best,rtol=0,atol=1e-7))
-        ci,pi,si=map(int,ties[0]);n=int(counts[ci]);spent=float(spends[ci]);got=float(returned[ci,pi,si])
-        bestout={"max_buy_cents":CAPS[ci],"take_profit_gain_pct":TP[pi],"stop_loss_pct":SL[si],"purchases":n,"profitable_purchases":int(wins[ci,pi,si]),"losing_purchases":0,"spent":round(spent,6),"returned":round(got,6),"net_profit":round(best,6),"roi_pct":round(best/spent*100,6) if spent else None,"tied_configurations":len(ties),"beats_no_trade":best>0,"trades":[]}
-        hours={}
-        for t in selected:
-            if CAPS[ci] is not None and t["price"]>CAPS[ci]/100+1e-10:continue
-            profit=float(t["profit"][pi,si]);bestout["losing_purchases"]+=int(profit< -1e-9)
-            tr={k:t[k] for k in ("ticker","side","price","quantity","spent","settlement_won","max_gap_seconds")}
-            tr.update(entry_at=iso(t["entry_at"]),exit_at=iso(float(t["exit_at"][pi,si])),returned=round(float(t["returned"][pi,si]),6),net_profit=round(profit,6))
-            bestout["trades"].append(tr)
-            local=dt.datetime.fromtimestamp(t["entry_at"],EASTERN);key=f"{local.hour//4*4:02d}:00–{local.hour//4*4+4:02d}:00 Eastern"
-            bucket=hours.setdefault(key,{"purchases":0,"profitable":0,"net_profit":0.0})
-            bucket["purchases"]+=1;bucket["profitable"]+=int(profit>1e-9);bucket["net_profit"]+=profit
-        bestout["break_even_purchases"]=n-bestout["profitable_purchases"]-bestout["losing_purchases"]
-        out["best"]=bestout;out["exploratory_time_buckets"]=hours
+        configurations=top_configurations(profits,counts)
+        for config in configurations:
+            setup,hours=describe_setup(config,selected,spends,counts,returned,wins)
+            if not out["top_setups"]:out["exploratory_time_buckets"]=hours
+            out["top_setups"].append(setup)
+        out["best"]=out["top_setups"][0] if out["top_setups"] else None
         out["time_bucket_note"]="Descriptive only; at most 1.5 days per window, too little to establish a recurring time-of-day advantage."
         report["periods"].append(out)
     return report
