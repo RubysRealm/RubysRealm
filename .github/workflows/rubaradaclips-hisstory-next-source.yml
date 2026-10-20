@@ -1,0 +1,29 @@
+name: Rubarataclips His Story next-source verification
+on:
+  push:
+    paths:
+      - 'rubaradaclips_repurpose/next_source_test.trigger'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --quiet --upgrade yt-dlp
+      - name: Resolve second-oldest episode automatically
+        run: |
+          python - <<'PY'
+          from rubaradaclips_repurpose.pipeline import fetch_feed,resolve_visual
+          e=fetch_feed()[1]
+          assert e['title']=="My Class Ate Our Teacher's Fertility Pills"
+          r=resolve_visual(e)
+          assert 'facebook.com/HisYTStory/videos/' in r['url']
+          assert r['score']>=0.60
+          assert abs(r['duration']-e['duration'])<=max(12,e['duration']*.10)
+          print('NEXT_SOURCE_OK',e['title'],e['duration'],r)
+          PY
