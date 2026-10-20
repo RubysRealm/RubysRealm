@@ -1,29 +1,109 @@
 name: Rubarataclips His Story next-source verification
 on:
+  workflow_dispatch:
   push:
     paths:
       - 'rubaradaclips_repurpose/next_source_test.trigger'
 permissions:
   contents: read
+
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install --quiet --upgrade yt-dlp
-      - name: Resolve second-oldest episode automatically
+
+      - name: Install verified source tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          python -m pip install --quiet 'votify==1.9.9' 'yt-dlp==2026.8.19' 'numpy==2.3.5' 'scipy==1.17.0'
+
+      - name: Acquire and verify the currently queued full source
+        env:
+          RUBARATA_SPOTIFY_SP_DC: ${{ secrets.RUBARATA_SPOTIFY_SP_DC }}
         run: |
           python - <<'PY'
-          from rubaradaclips_repurpose.pipeline import fetch_feed,resolve_visual
-          e=fetch_feed()[1]
-          assert e['title']=="My Class Ate Our Teacher's Fertility Pills"
-          r=resolve_visual(e)
-          assert 'facebook.com/HisYTStory/videos/' in r['url']
-          assert r['score']>=0.60
-          assert abs(r['duration']-e['duration'])<=max(12,e['duration']*.10)
-          print('NEXT_SOURCE_OK',e['title'],e['duration'],r)
+          import json
+          import math
+          from pathlib import Path
+          import subprocess
+          import sys
+          import uuid
+
+          from rubaradaclips_repurpose.pipeline import STATE_PATH, SPOTIFY_SHOW_ID, load_state
+          from rubyclips.spotify_video_source import episode_for_rss_guid, probe
+
+          original_state = STATE_PATH.read_bytes()
+          state = load_state()
+          current = state.get('current') or {}
+          guid = str(current.get('guid') or '')
+          assert str(uuid.UUID(guid)) == guid, 'A current queued RSS episode is required'
+          assert guid not in set(state.get('completed') or []), 'The queued episode is already completed'
+          catalog_path = Path('rubyclips/spotify_video_catalog.json')
+          episode = episode_for_rss_guid(catalog_path, guid)
+          output = Path('rubaradaclips_repurpose/source-verification')
+          subprocess.run([
+              sys.executable, 'rubyclips/spotify_video_source.py', 'acquire',
+              '--rss-guid', guid, '--output-dir', str(output), '--catalog', str(catalog_path),
+          ], check=True)
+
+          source = json.loads((output / 'source-info.json').read_text())
+          assert source.get('ok') is True
+          assert source['rssGuid'] == guid
+          assert source['episodeId'] == episode['id']
+          assert source['spotifyShowId'] == SPOTIFY_SHOW_ID
+          for flag in ('sourceVideoVerified', 'sourceAudioVerified', 'fullEpisodeVerified'):
+              assert source.get(flag) is True, flag
+          duration = float(source['sourceDurationSeconds'])
+          assert math.isfinite(duration) and duration > 0
+          assert abs(duration - episode['durationMs'] / 1000) <= 0.2
+          media = source['sourceMedia']
+          assert media.get('fullEpisode') is True
+          assert media.get('videoCodec') and media.get('audioCodec')
+          full_source = (output / 'full-source.mp4').resolve()
+          assert Path(source['file']).resolve() == full_source
+          actual = probe(full_source)
+          assert actual.get('videoCodec') and actual.get('audioCodec')
+          for key in ('videoDurationSeconds', 'audioDurationSeconds'):
+              assert float(media[key]) >= duration - 0.2, key
+              assert float(actual[key]) >= duration - 0.2, key
+          assert source['sourceAccessMethod'] in (
+              'spotify-native', 'verified-creator-transport', 'verified-public-copy',
+          )
+          if source['sourceAccessMethod'] != 'spotify-native':
+              proof = source['sourceVerification']
+              assert proof['spotifyEpisodeId'] == episode['id']
+              assert proof['rssGuid'] == guid
+              assert proof['fullCoverage'] is True
+              assert proof['audioCorrelation'] >= 0.90
+              assert proof['previewFrameVerified'] is True
+              assert float(proof['audioVerifiedDurationSeconds']) >= duration - 0.2
+          assert STATE_PATH.read_bytes() == original_state, 'Source verification must not change queue state'
+          print(json.dumps({
+              'verifiedFullSource': True,
+              'guid': guid,
+              'spotifyEpisodeId': episode['id'],
+              'title': episode['title'],
+              'sourceDurationSeconds': duration,
+              'videoCodec': actual['videoCodec'],
+              'audioCodec': actual['audioCodec'],
+              'sourceAccessMethod': source['sourceAccessMethod'],
+          }, indent=2))
           PY
+
+      - name: Save full-source verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubaradaclips-hisstory-source-verification-${{ github.run_number }}
+          path: rubaradaclips_repurpose/source-verification/source-info.json
+          if-no-files-found: warn
+          retention-days: 3

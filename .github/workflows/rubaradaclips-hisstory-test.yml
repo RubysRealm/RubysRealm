@@ -1,48 +1,98 @@
 name: Rubarataclips His Story build verification
 on:
+  workflow_dispatch:
   push:
     paths:
       - 'rubaradaclips_repurpose/test.trigger'
 permissions:
   contents: read
+
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
-      - name: Install media tools
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install verified source and rendering tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
-          python -m pip install --quiet --upgrade yt-dlp
-      - name: Build oldest His Story episode
-        run: python3 rubaradaclips_repurpose/pipeline.py build
-      - name: Reverify source separation and final motion
+          python -m pip install --quiet 'votify==1.9.9' 'yt-dlp==2026.8.19' 'numpy==2.3.5' 'scipy==1.17.0'
+
+      - name: Verify queue recovery, source identity, and publisher guards
         run: |
-          python3 - <<'PY'
-          import json,subprocess,hashlib
-          from pathlib import Path
-          m=json.load(open('rubaradaclips_repurpose/output/manifest.json'))
-          i=json.load(open('rubaradaclips_repurpose/output/part-info.json'))
-          assert m['sourceProvider']=='hisstory-spotify-rss'
-          assert m['spotifyShowId']=='6alyG1Jw4KH03mXZlYtPkf'
-          assert m['transportProvider']=='facebook-official-hisstory-video-only'
-          assert m['transportAudioUsed'] is False
-          assert m['sourceSeriesTitle']=='His Mom Made Him Kneel On Broken Glass'
-          assert i['part']==1 and i['totalParts']==1
-          p=Path('rubaradaclips_repurpose/output')/m['file']
-          d=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-show_format','-of','json',str(p)],text=True))
-          v=[x for x in d['streams'] if x['codec_type']=='video'];a=[x for x in d['streams'] if x['codec_type']=='audio']
-          assert len(v)==1 and len(a)==1
-          assert v[0]['codec_name']=='h264' and a[0]['codec_name']=='aac'
-          assert (int(v[0]['width']),int(v[0]['height']))==(1080,1920)
-          dur=float(d['format']['duration'])
-          assert 160<dur<175
-          print('CLEAN_BUILD_OK',m['file'],dur,d['format']['size'])
+          python -m unittest discover -s rubaradaclips_repurpose -p test_pipeline.py -v
+          python -m unittest discover -s rubyclips -p test_spotify_video_source.py -v
+          node --test tests/rubarata-publisher.test.mjs
+
+      - name: Render the currently queued episode without publishing
+        env:
+          RUBARATA_SPOTIFY_SP_DC: ${{ secrets.RUBARATA_SPOTIFY_SP_DC }}
+        run: |
+          python - <<'PY'
+          import json
+          from rubaradaclips_repurpose.pipeline import STATE_PATH, build_verified, load_state
+
+          original_state = STATE_PATH.read_bytes()
+          state = load_state()
+          original_current = dict(state.get('current') or {})
+          built = build_verified(state)
+          assert built is not None, 'No queued episode is currently available for a build verification'
+          manifest, info = built
+          if original_current.get('guid'):
+              assert info['guid'] == original_current['guid']
+              assert info['part'] == int(original_current.get('next_part') or 1)
+          assert info['guid'] not in set(state.get('completed') or [])
+          assert STATE_PATH.read_bytes() == original_state, 'Verification must not persist or advance queue state'
+          print(json.dumps({
+              'verifiedBuild': True,
+              'guid': info['guid'],
+              'title': manifest['sourceSeriesTitle'],
+              'part': info['part'],
+              'totalParts': info['totalParts'],
+              'file': manifest['file'],
+              'durationSeconds': manifest['segmentDurationSeconds'],
+              'sourceDurationSeconds': manifest['sourceDurationSeconds'],
+          }, indent=2))
           PY
-      - uses: actions/upload-artifact@v4
+
+      - name: Validate the actual rendered manifest with production guards
+        run: |
+          node --input-type=module - <<'JS'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          import { validateSpotifyVideoManifest } from './lib/rubarata-video.js';
+
+          const manifest = JSON.parse(readFileSync('rubaradaclips_repurpose/output/manifest.json', 'utf8'));
+          const info = JSON.parse(readFileSync('rubaradaclips_repurpose/output/part-info.json', 'utf8'));
+          const verified = validateSpotifyVideoManifest(manifest, info.releaseTag);
+          assert.equal(manifest.sourceEpisodeGuid, info.guid);
+          assert.equal(manifest.logicalPostKey, info.logicalPostKey);
+          assert.equal(manifest.segmentIndex, info.part);
+          assert.equal(manifest.segmentTotal, info.totalParts);
+          console.log('ACTUAL_RENDER_PUBLISHER_GUARDS_OK', JSON.stringify(verified), info.releaseTag);
+          JS
+
+      - name: Save rendered video and source verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: rubaradaclips-hisstory-clean-build
-          path: rubaradaclips_repurpose/output/
-          retention-days: 2
+          name: rubaradaclips-hisstory-verified-build-${{ github.run_number }}
+          path: |
+            rubaradaclips_repurpose/output/*.mp4
+            rubaradaclips_repurpose/output/manifest.json
+            rubaradaclips_repurpose/output/part-info.json
+            rubaradaclips_repurpose/work/verified-source/source-info.json
+          if-no-files-found: warn
+          retention-days: 3

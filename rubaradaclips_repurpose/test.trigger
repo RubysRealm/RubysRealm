@@ -1,1 +1,1 @@
-verify 2026-10-20T19:47:50.037Z
+2026-10-20 verify full original His Story video, audio, and durable recovery

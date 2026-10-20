@@ -1,359 +1,155 @@
-// Rubaradaclips production rebuild trigger: YouTube acquisition resolver.
-import { createBufferVideoPost } from '../lib/buffer.js';
+// Rubarata uses the same Buffer video uploader as the working Takurada account.
+import { createBufferVideoPost, getBufferTikTokChannel } from '../lib/buffer.js';
+import {
+  RUBARATA_CHANNEL_ID, RUBARATA_CHANNEL, SPOTIFY_SHOW_ID, PUBLISHER_VERSION,
+  parseReleaseTag, validateSpotifyVideoManifest, validatePendingSource, postMatchesMedia
+} from '../lib/rubarata-video.js';
 
-const RELEASE_OWNER = 'RubysRealm';
-const RELEASE_REPO = 'RubysRealm';
-const RUBYCLIPS_CHANNEL_ID = '6a9f6ff1cd8b9c702c2897e1';
-const RUBYCLIPS_CHANNEL = 'rubaradaclips';
-const FACEBOOK_PLATFORM = 'rubyclips-facebook-repost-v1';
-const CREATOR_PLATFORM = 'rubyclips-creator-feed-v1';
-const TIKTOK_STORY_PLATFORM = 'rubyclips-tiktok-story-v1';
-const CREATOR_CHANNEL = '@bushcraftinthewildforest';
-const TIKTOK_STORY_CHANNEL = '@muffindrama_us';
-const YOUTUBE_STORY_CHANNEL = '@muffindrama-uvu';
-const SPOTIFY_STORY_CHANNEL = 'babyjamie1';
-const SNOOK_RSS_CHANNEL = 'snook';
-const SNOOK_RSS_FEED = 'https://feeds.megaphone.fm/QCD5686868811';
-const HISSTORY_RSS_CHANNEL = 'his story: animation stories';
-const HISSTORY_RSS_FEED = 'https://anchor.fm/s/10ff75318/podcast/rss';
-const HISSTORY_SPOTIFY_SHOW_ID = '6alyG1Jw4KH03mXZlYtPkf';
-const MAX_AUTO_SECONDS = 599;
-const MIN_STORY_RESTART_GENERATION = 5;
-const REQUIRED_STORY_PIPELINE_REVISION = 'avsync-v4-direct-builder';
-const PUBLISHER_VERSION = 'hisstory-v16-takarada-clone';
-const CONTINUITY_SERIES_ID = '7682993954661553173';
-const CONTINUITY_RESTART = 2;
-const CONTINUITY_FIRST_PART = 12;
-const CONTINUITY_SOURCE_ID = 'xb2tc0i';
-const CONTINUITY_SOURCE_URL = 'https://www.dailymotion.com/video/xb2tc0i';
-const COBALT_API = 'https://rubyclips-cobalt-3.onrender.com/';
-const CURRENT_YOUTUBE_STORY_ID = '5-bO9NAhWbI';
-const PIPED_APIS = [
-  'https://pipedapi.kavin.rocks',
-  'https://pipedapi.leptons.xyz',
-  'https://pipedapi.nosebs.ru',
-  'https://pipedapi-libre.kavin.rocks',
-  'https://piped-api.privacy.com.de',
-  'https://pipedapi.adminforge.de',
-  'https://api.piped.yt',
-  'https://pipedapi.drgns.space',
-  'https://pipedapi.owo.si',
-  'https://pipedapi.ducks.party',
-  'https://piped-api.codespace.cz',
-  'https://pipedapi.reallyaweso.me',
-  'https://api.piped.private.coffee',
-  'https://pipedapi.darkness.services',
-  'https://pipedapi.orangenet.cc'
-];
+const REPOSITORY = 'RubysRealm/RubysRealm';
 
-async function resolvePipedHls(video) {
-  const attempts = await Promise.all(PIPED_APIS.map(async (base) => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 7000);
-    try {
-      const response = await fetch(`${base}/streams/${encodeURIComponent(video)}`, {
-        headers: {
-          Accept: 'application/json',
-          'User-Agent': 'Mozilla/5.0 (compatible; Rubaradaclips/1.0)'
-        },
-        redirect: 'follow',
-        cache: 'no-store',
-        signal: controller.signal
-      });
-      if (!response.ok) {
-        return { ok: false, base, error: `HTTP ${response.status}` };
-      }
-      const data = await response.json();
-      const hls = String(data?.hls || '');
-      const duration = Number(data?.duration || 0);
-      if (/^https:\/\//i.test(hls) && duration > 15) {
-        return {
-          ok: true,
-          video,
-          hls,
-          duration,
-          source: base,
-          title: String(data?.title || ''),
-          uploader: String(data?.uploader || '')
-        };
-      }
-      return { ok: false, base, error: 'missing HLS/duration' };
-    } catch (error) {
-      return { ok: false, base, error: String(error?.message || error).slice(0, 300) };
-    } finally {
-      clearTimeout(timer);
-    }
-  }));
-
-  const winner = attempts.find(x => x.ok);
-  if (winner) return winner;
-  return {
-    ok: false,
-    video,
-    error: 'No Piped source available',
-    details: attempts.map(x => `${x.base}: ${x.error}`)
-  };
-}
-
-async function probeCurrentYouTubeSource() {
-  const sourceUrl = `https://www.youtube.com/watch?v=${CURRENT_YOUTUBE_STORY_ID}`;
-  const response = await fetch(COBALT_API, {
+async function bufferQuery(query, variables) {
+  const key = process.env.BUFFER_API_KEY;
+  if (!key) throw new Error('BUFFER_API_KEY is not configured.');
+  const response = await fetch('https://api.buffer.com', {
     method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      url: sourceUrl,
-      videoQuality: '720',
-      youtubeVideoCodec: 'h264',
-      downloadMode: 'auto',
-      alwaysProxy: true
-    }),
-    redirect: 'follow',
-    cache: 'no-store'
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    body: JSON.stringify({ query, variables }),
+    signal: AbortSignal.timeout(25000)
   });
-  const text = await response.text();
-  let resolved = null;
-  try { resolved = JSON.parse(text); } catch { resolved = { raw: text.slice(0, 2000) }; }
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    const error = new Error(`Buffer HTTP ${response.status}`);
+    error.status = response.status;
+    error.retryAfter = Number(response.headers.get('retry-after')) || 0;
+    throw error;
+  }
+  if (data?.errors?.length) throw new Error(data.errors.map(e => e.message).join('; '));
+  return data?.data;
+}
 
-  let media = null;
-  const direct = String(resolved?.url || '');
-  if (response.ok && ['tunnel', 'redirect'].includes(String(resolved?.status || '')) && /^https?:\/\//i.test(direct)) {
-    try {
-      const sample = await fetch(direct, {
-        headers: { Range: 'bytes=0-262143' },
-        redirect: 'follow',
-        cache: 'no-store'
-      });
-      const bytes = new Uint8Array(await sample.arrayBuffer());
-      media = {
-        ok: sample.ok || sample.status === 206,
-        status: sample.status,
-        contentType: sample.headers.get('content-type'),
-        contentRange: sample.headers.get('content-range'),
-        sampleBytes: bytes.byteLength
-      };
-    } catch (error) {
-      media = { ok: false, error: String(error?.message || error) };
+async function exactChannel() {
+  const found = await getBufferTikTokChannel({ channelId: RUBARATA_CHANNEL_ID, channelName: RUBARATA_CHANNEL, allowDisabled: true });
+  if (String(found?.channel?.id || '') !== RUBARATA_CHANNEL_ID ||
+      ![found?.channel?.name, found?.channel?.displayName].some(name => String(name || '').replace(/^@/, '').toLowerCase() === RUBARATA_CHANNEL)) {
+    throw new Error('Rubarata\'s exact connected TikTok account is unavailable.');
+  }
+  return found;
+}
+
+async function readQueue() {
+  const response = await fetch(`https://raw.githubusercontent.com/${REPOSITORY}/main/rubaradaclips_repurpose/state.json?at=${Date.now()}`, {
+    cache: 'no-store', signal: AbortSignal.timeout(15000)
+  });
+  if (!response.ok) throw new Error('The saved Rubarata queue is unavailable.');
+  return response.json();
+}
+
+async function findExistingPost(videoUrl, manifest, tag) {
+  const target = await exactChannel();
+  const receiptResponse = await fetch(`https://github.com/${REPOSITORY}/releases/download/${encodeURIComponent(tag)}/publish.json`, {
+    redirect: 'follow', cache: 'no-store', signal: AbortSignal.timeout(15000)
+  });
+  let postId = null;
+  if (receiptResponse.ok) {
+    const receipt = await receiptResponse.json();
+    if (receipt.ok !== true || receipt.channelName !== RUBARATA_CHANNEL || receipt.videoUrl !== videoUrl ||
+        receipt.logicalPostKey !== manifest.logicalPostKey || !/^[a-f0-9]{24}$/.test(receipt.postId || '')) {
+      throw new Error('The saved Buffer receipt does not match this episode part.');
     }
-  }
-
-  return {
-    ok: response.ok && ['tunnel', 'redirect'].includes(String(resolved?.status || '')) && media?.ok === true,
-    resolveStatus: response.status,
-    resolved,
-    media,
-    sourceVideoId: CURRENT_YOUTUBE_STORY_ID
-  };
-}
-
-function validateBase(m) {
-  if (!m?.file || !String(m.file).endsWith('.mp4')) throw new Error('Blocked: missing MP4.');
-  if (!String(m?.caption || '').trim()) throw new Error('Blocked: missing caption.');
-  if (String(m?.targetChannel || '').replace(/^@/, '').toLowerCase() !== RUBYCLIPS_CHANNEL) throw new Error('Blocked: wrong TikTok target.');
-  const segmentSeconds = Number(m?.segmentDurationSeconds || 0);
-  if (!(segmentSeconds > 0 && segmentSeconds <= MAX_AUTO_SECONDS)) throw new Error('Blocked: part is outside automatic TikTok duration limits.');
-  return segmentSeconds;
-}
-
-function validateLegacyCommon(m) {
-  validateBase(m);
-  const index = Number(m?.segmentIndex || 0);
-  const total = Number(m?.segmentTotal || 0);
-  const sourceSeconds = Number(m?.sourceDurationSeconds || 0);
-  if (!Number.isInteger(index) || !Number.isInteger(total) || index < 1 || total < 1 || index > total) throw new Error('Blocked: invalid part numbering.');
-  if (m?.titleBurnedIn !== true || m?.partLabelBurnedIn !== true) throw new Error('Blocked: title/part layout is missing.');
-  if (total > 1 && (!(sourceSeconds > MAX_AUTO_SECONDS) || m?.technicalSplitOnly !== true)) throw new Error('Blocked: unverified multipart split.');
-  if (total === 1 && m?.technicalSplitOnly === true) throw new Error('Blocked: unexpected split flag.');
-  return { index, total };
-}
-
-function validateTikTokStory(m, tag) {
-  validateBase(m);
-  const index = Number(m?.segmentIndex || 0);
-  if (!Number.isInteger(index) || index < 1) throw new Error('Blocked: invalid story part number.');
-  if (String(m?.pipelineRevision || '') !== REQUIRED_STORY_PIPELINE_REVISION) throw new Error('Blocked: stale TikTok story pipeline revision.');
-
-  const provider = String(m?.sourceProvider || '').toLowerCase();
-  const seriesId = String(m?.sourceSeriesId || '').trim();
-  const sourceChannel = String(m?.sourceChannel || '').toLowerCase();
-  if (provider === 'youtube') {
-    if (!/^[A-Za-z0-9_-]{11}$/.test(seriesId)) throw new Error('Blocked: invalid YouTube story id.');
-    if (sourceChannel !== YOUTUBE_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: YouTube story channel mismatch.');
-  } else if (provider === 'spotify-show') {
-    if (!/^[A-Za-z0-9]{22}$/.test(seriesId)) throw new Error('Blocked: invalid Spotify episode id.');
-    if (sourceChannel !== SPOTIFY_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: Spotify story channel mismatch.');
-  } else if (provider === 'snook-podcast-rss') {
-    if (!/^snook-[a-f0-9]{16}$/.test(seriesId)) throw new Error('Blocked: invalid Snook episode identity.');
-    if (sourceChannel !== SNOOK_RSS_CHANNEL) throw new Error('Blocked: Snook source channel mismatch.');
-  } else if (provider === 'hisstory-spotify-rss') {
-    if (!/^hisstory-[a-f0-9]{16}$/.test(seriesId)) throw new Error('Blocked: invalid His Story episode identity.');
-    if (sourceChannel !== HISSTORY_RSS_CHANNEL) throw new Error('Blocked: His Story source channel mismatch.');
-  } else if (provider === 'dailymotion-muffindrama-mirror') {
-    if (!/^[A-Za-z0-9_-]{6,25}$/.test(seriesId)) throw new Error('Blocked: invalid mirror-backed story id.');
-    if (sourceChannel !== TIKTOK_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: mirror-backed MuffinDrama channel mismatch.');
+    postId = receipt.postId;
+  } else if (receiptResponse.status !== 404) {
+    throw new Error(`The saved Buffer receipt could not be checked (${receiptResponse.status}).`);
   } else {
-    if (!/^\d{10,25}$/.test(seriesId)) throw new Error('Blocked: invalid TikTok series id.');
-    if (sourceChannel !== TIKTOK_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: TikTok story channel mismatch.');
+    const state = await readQueue();
+    if (state.pending?.releaseTag === tag && state.pending?.logicalPostKey === manifest.logicalPostKey) postId = state.pending.postId || null;
   }
-
-  const restart = Number(m?.restartGeneration || 0);
-  if (!Number.isInteger(restart) || restart < MIN_STORY_RESTART_GENERATION) throw new Error('Blocked: stale TikTok story generation.');
-  const expectedLogicalPostKey = `rubyclips:${seriesId}:r${restart}:p${index}`;
-  if (String(m?.logicalPostKey || '') !== expectedLogicalPostKey) throw new Error('Blocked: invalid logical post key.');
-
-  const ids = Array.isArray(m?.sourceVideoIds) ? m.sourceVideoIds.map(x => String(x).trim()) : [];
-  const urls = Array.isArray(m?.sourceUrls) ? m.sourceUrls.map(String) : [];
-  if (provider === 'tiktok') {
-    if (!ids.length || ids.some(id => !/^\d{10,25}$/.test(id))) throw new Error('Blocked: invalid TikTok episode ids.');
-    if (!urls.length || urls.some(url => !url.includes('tiktok.com/'))) throw new Error('Blocked: invalid TikTok episode URLs.');
-  } else if (provider === 'snook-podcast-rss') {
-    if (ids.length !== 1 || !/^[a-f0-9-]{36}$/.test(ids[0])) throw new Error('Blocked: invalid Snook RSS episode GUID.');
-    if (urls.length !== 1 || urls[0] !== SNOOK_RSS_FEED) throw new Error('Blocked: invalid Snook RSS source feed.');
-    if (String(m?.sourceEpisodeGuid || '') !== ids[0]) throw new Error('Blocked: episode GUID mismatch.');
-    if (String(m?.sourceMediaType || '') !== 'audio/mpeg') throw new Error('Blocked: unexpected Snook feed media type.');
-    if (String(m?.visualMode || '') !== 'animated-audio-waveform-with-podcast-art') throw new Error('Blocked: missing visual conversion declaration.');
-  } else if (provider === 'hisstory-spotify-rss') {
-    if (ids.length !== 1 || !/^[a-f0-9-]{36}$/.test(ids[0])) throw new Error('Blocked: invalid His Story RSS episode GUID.');
-    if (urls.length !== 1 || urls[0] !== HISSTORY_RSS_FEED) throw new Error('Blocked: invalid His Story RSS feed.');
-    if (String(m?.sourceEpisodeGuid || '') !== ids[0]) throw new Error('Blocked: His Story episode GUID mismatch.');
-    if (String(m?.sourceMediaType || '') !== 'audio/mpeg') throw new Error('Blocked: unexpected His Story audio media type.');
-    if (String(m?.spotifyShowId || '') !== HISSTORY_SPOTIFY_SHOW_ID) throw new Error('Blocked: wrong His Story Spotify show.');
-    if (String(m?.transportProvider || '') !== 'facebook-official-hisstory-video-only') throw new Error('Blocked: invalid His Story visual transport.');
-    if (!String(m?.transportUrl || '').startsWith('https://www.facebook.com/HisYTStory/videos/')) throw new Error('Blocked: unofficial His Story visual URL.');
-    if (m?.transportAudioUsed !== false) throw new Error('Blocked: source-platform audio must never be used.');
-  } else if (provider === 'dailymotion-muffindrama-mirror') {
-    if (ids.length !== 1 || ids.some(id => !/^[A-Za-z0-9_-]{4,32}$/.test(id))) throw new Error('Blocked: invalid mirror source id.');
-    if (urls.length !== 1 || urls.some(url => !/^https:\/\/(?:www\.)?dailymotion\.com\/video\/[A-Za-z0-9_-]+(?:[/?#].*)?$/i.test(url))) throw new Error('Blocked: invalid mirror source URL.');
-  } else if (provider === 'dailymotion') {
-    const scoped = seriesId === CONTINUITY_SERIES_ID && restart === CONTINUITY_RESTART && index >= CONTINUITY_FIRST_PART;
-    if (!scoped) throw new Error('Blocked: continuity source is not authorized for this story part.');
-    if (ids.length !== 1 || ids[0] !== CONTINUITY_SOURCE_ID) throw new Error('Blocked: invalid continuity source id.');
-    if (urls.length !== 1 || urls[0] !== CONTINUITY_SOURCE_URL) throw new Error('Blocked: invalid continuity source URL.');
-  } else if (provider === 'youtube') {
-    if (ids.length !== 1 || ids[0] !== seriesId) throw new Error('Blocked: invalid YouTube source id.');
-    if (urls.length !== 1 || !urls[0].includes('youtube.com/watch')) throw new Error('Blocked: invalid YouTube source URL.');
-  } else if (provider === 'spotify-show') {
-    if (ids.length !== 1 || ids[0] !== seriesId) throw new Error('Blocked: invalid Spotify source id.');
-    if (urls.length !== 1 || !urls[0].startsWith('https://open.spotify.com/episode/')) throw new Error('Blocked: invalid Spotify source URL.');
-  } else {
-    throw new Error('Blocked: TikTok story provider mismatch.');
+  if (postId) {
+    const data = await bufferQuery(`query RubarataPost($id: PostId!) {
+      post(input: { id: $id }) {
+        id text status dueAt sentAt externalLink assets { source }
+        channel { id name displayName service } error { message }
+      }
+    }`, { id: postId });
+    if (data?.post?.id !== postId || !postMatchesMedia(data.post, manifest, videoUrl, target.organization.id)) {
+      throw new Error('The saved Buffer post is missing or its account/media does not match; creation is paused.');
+    }
+    return data.post;
   }
-
-  const storyHashtag = String(m?.storyHashtag || '').trim();
-  if (!/^#[A-Za-z0-9]+$/.test(storyHashtag) || !String(m.caption).includes(storyHashtag)) throw new Error('Blocked: missing story-title hashtag.');
-  const expected = `rubyclips-tt-${seriesId}-r${restart}-p${index}`;
-  if (tag !== expected) throw new Error('Blocked: release tag does not match story restart/part.');
-  return { index, total: Number(m?.segmentTotal || 0) || null };
+  // Include sending/rejected posts. Never resubmit an ambiguous or rejected post.
+  const data = await bufferQuery(`query RubarataPosts($organizationId: OrganizationId!, $channelId: ChannelId!) {
+    posts(first: 60, input: {
+      organizationId: $organizationId,
+      filter: { channelIds: [$channelId] },
+      sort: [{ field: createdAt, direction: desc }]
+    }) { edges { node {
+      id text status dueAt sentAt externalLink assets { source }
+      channel { id name displayName service } error { message }
+    } } }
+  }`, { organizationId: target.organization.id, channelId: RUBARATA_CHANNEL_ID });
+  // Buffer replaces source URLs with a post-specific media URL during processing.
+  // A lost create response is recovered from the exact caption and verified
+  // account/post media path. Multiple candidates always stop automatic creation.
+  const matches = (data?.posts?.edges || []).map(edge => edge.node)
+    .filter(post => postMatchesMedia(post, manifest, videoUrl, target.organization.id));
+  if (matches.length > 1) throw new Error('Multiple existing posts match this episode part; automatic creation is paused for reconciliation.');
+  return matches[0] || null;
 }
 
-function validateManifest(m, tag) {
-  if (m?.platform === TIKTOK_STORY_PLATFORM) return validateTikTokStory(m, tag);
-
-  const { index, total } = validateLegacyCommon(m);
-  const id = String(m?.sourceVideoId || '').trim();
-
-  if (m?.platform === FACEBOOK_PLATFORM) {
-    if (m?.sourceOwnership !== 'user-provided-facebook-page') throw new Error('Blocked: source is not the configured Facebook page.');
-    if (!/^\d+$/.test(id)) throw new Error('Blocked: missing Facebook video id.');
-    if (!m?.sourceUrl || !String(m.sourceUrl).includes('facebook.com')) throw new Error('Blocked: invalid Facebook source URL.');
-    const expected = total > 1 ? `rubyclips-fb-${id}-s${index}` : `rubyclips-fb-${id}`;
-    if (tag !== expected) throw new Error('Blocked: release tag does not match Facebook part.');
-    return { index, total };
-  }
-
-  if (m?.platform === CREATOR_PLATFORM) {
-    if (String(m?.sourceProvider || '').toLowerCase() !== 'youtube') throw new Error('Blocked: creator fallback provider mismatch.');
-    if (String(m?.sourceChannel || '').toLowerCase() !== CREATOR_CHANNEL.toLowerCase()) throw new Error('Blocked: creator fallback channel mismatch.');
-    if (!/^[A-Za-z0-9_-]{6,20}$/.test(id)) throw new Error('Blocked: invalid creator source id.');
-    const src = String(m?.sourceUrl || '');
-    if (!(src.includes('youtube.com/') || src.includes('youtu.be/'))) throw new Error('Blocked: invalid creator source URL.');
-    const expected = total > 1 ? `rubyclips-src-${id}-s${index}` : `rubyclips-src-${id}`;
-    if (tag !== expected) throw new Error('Blocked: release tag does not match creator-feed part.');
-    return { index, total };
-  }
-
-  throw new Error('Blocked: invalid RubyClips manifest platform.');
+async function readRelease(tag) {
+  parseReleaseTag(tag);
+  const base = `https://github.com/${REPOSITORY}/releases/download/${encodeURIComponent(tag)}`;
+  const response = await fetch(`${base}/manifest.json`, { redirect: 'follow', cache: 'no-store', signal: AbortSignal.timeout(20000) });
+  if (!response.ok) throw new Error(`Manifest unavailable (${response.status}).`);
+  const manifest = await response.json();
+  const numbering = validateSpotifyVideoManifest(manifest, tag, { forPublish: false });
+  return { manifest, numbering, videoUrl: `${base}/${encodeURIComponent(manifest.file)}` };
 }
 
 export default async function handler(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'Method not allowed' });
-
-  const pipedVideo = String(req.query?.pipedVideo || '').trim();
-  if (pipedVideo) {
-    if (!/^[A-Za-z0-9_-]{11}$/.test(pipedVideo)) {
-      return res.status(400).json({ ok: false, error: 'Valid YouTube video id required' });
-    }
-    const result = await resolvePipedHls(pipedVideo);
-    res.setHeader('Cache-Control', 'no-store');
-    return res.status(result.ok ? 200 : 502).json(result);
-  }
-
-  if (String(req.query?.health || '') === '1') {
-    return res.status(200).json({ ok: true, version: PUBLISHER_VERSION, channelName: RUBYCLIPS_CHANNEL });
-  }
-
-  if (String(req.query?.sourceProbe || '') === '1') {
-    try {
-      const result = await probeCurrentYouTubeSource();
-      return res.status(result.ok ? 200 : 502).json(result);
-    } catch (error) {
-      return res.status(502).json({ ok: false, error: String(error?.message || error), sourceVideoId: CURRENT_YOUTUBE_STORY_ID });
-    }
-  }
-
+  if (String(req.query?.health || '') === '1') return res.status(200).json({
+    ok: true, version: PUBLISHER_VERSION, channelName: RUBARATA_CHANNEL,
+    spotifyShowId: SPOTIFY_SHOW_ID, originalVideoRequired: true,
+    originalAudioRequired: true, confirmedSendRequired: true
+  });
   try {
-    const tag = String(req.query?.tag || '').trim();
-    const legacyOk = /^rubyclips-(?:fb-\d+|src-[A-Za-z0-9_-]{6,20})(?:-s\d+)?$/.test(tag);
-    const storyOk = /^rubyclips-tt-[A-Za-z0-9_-]{6,25}-r\d+-p\d+$/.test(tag);
-    if (!legacyOk && !storyOk) {
-      return res.status(400).json({ ok: false, error: 'A valid RubyClips release tag is required.' });
-    }
-
-    const base = `https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/releases/download/${encodeURIComponent(tag)}`;
-    const manifestResponse = await fetch(`${base}/manifest.json`, { redirect: 'follow', cache: 'no-store' });
-    if (!manifestResponse.ok) throw new Error(`Manifest unavailable (${manifestResponse.status}).`);
-    const manifest = await manifestResponse.json();
-    const numbering = validateManifest(manifest, tag);
-
-    const videoUrl = `${base}/${encodeURIComponent(manifest.file)}`;
-    const head = await fetch(videoUrl, { method: 'HEAD', redirect: 'follow', cache: 'no-store' });
-    if (!head.ok) throw new Error(`MP4 unavailable (${head.status}).`);
-
-    const caption = String(manifest.caption).trim().slice(0, 2200);
-    const dueAt = new Date(Date.now() + 45 * 1000).toISOString();
-    const post = await createBufferVideoPost({
-      channelId: RUBYCLIPS_CHANNEL_ID,
-      caption,
-      videoUrl,
-      dueAt,
-      allowDisabled: true,
-      dedupeVideoUrl: true,
-      addTrendingHashtags: false
+    const lookupTag = String(req.query?.lookupTag || '').trim();
+    const tag = lookupTag || String(req.query?.tag || '').trim();
+    if (!tag) return res.status(400).json({ ok: false, error: 'A current Spotify video release tag is required.' });
+    const { manifest, numbering, videoUrl } = await readRelease(tag);
+    const existing = await findExistingPost(videoUrl, manifest, tag);
+    if (lookupTag) return res.status(200).json({ ok: true, post: existing, videoUrl, channelName: RUBARATA_CHANNEL });
+    if (existing) return res.status(200).json({
+      ok: true, postId: existing.id, post: existing, status: existing.status,
+      deduplicated: true, channelId: RUBARATA_CHANNEL_ID, channelName: RUBARATA_CHANNEL,
+      logicalPostKey: manifest.logicalPostKey, segmentIndex: numbering.index,
+      segmentTotal: numbering.total, videoUrl, renderer: PUBLISHER_VERSION
     });
 
+    validateSpotifyVideoManifest(manifest, tag);
+    const state = await readQueue();
+    validatePendingSource(state, manifest, tag);
+    if (state.pending?.postId) throw new Error('An existing Buffer attempt must be reconciled before another submission.');
+    const head = await fetch(videoUrl, { method: 'HEAD', redirect: 'follow', cache: 'no-store', signal: AbortSignal.timeout(15000) });
+    if (!head.ok || Number(head.headers.get('content-length') || 0) < 10000) throw new Error('The verified MP4 is unavailable or incomplete.');
+    const dueAt = new Date(Date.now() + 60000).toISOString();
+    const post = await createBufferVideoPost({
+      channelId: RUBARATA_CHANNEL_ID, caption: manifest.caption.trim(), videoUrl,
+      dueAt, allowDisabled: true, dedupeVideoUrl: true, addTrendingHashtags: false
+    });
     return res.status(200).json({
-      ok: true,
-      postId: post.id,
-      status: post.status,
-      deduplicated: post.deduplicated === true,
-      dueAt,
-      caption,
-      channelId: RUBYCLIPS_CHANNEL_ID,
-      channelName: RUBYCLIPS_CHANNEL,
-      platform: manifest.platform,
-      sourceVideoId: manifest.sourceVideoId ? String(manifest.sourceVideoId) : null,
-      sourceSeriesId: manifest.sourceSeriesId ? String(manifest.sourceSeriesId) : null,
-      sourceVideoIds: Array.isArray(manifest.sourceVideoIds) ? manifest.sourceVideoIds.map(String) : null,
-      logicalPostKey: manifest.logicalPostKey || null,
-      segmentIndex: numbering.index,
-      segmentTotal: numbering.total,
-      videoUrl,
-      renderer: PUBLISHER_VERSION
+      ok: true, postId: post.id, status: post.status,
+      deduplicated: post.deduplicated === true, dueAt,
+      channelId: RUBARATA_CHANNEL_ID, channelName: RUBARATA_CHANNEL,
+      sourceSeriesId: manifest.sourceSeriesId, spotifyShowId: SPOTIFY_SHOW_ID, caption: manifest.caption.trim(),
+      logicalPostKey: manifest.logicalPostKey, segmentIndex: numbering.index,
+      segmentTotal: numbering.total, videoUrl, renderer: PUBLISHER_VERSION
     });
   } catch (error) {
-    const status = Number(error?.status) === 429 || String(error?.message || '').includes('Buffer HTTP 429') ? 429 : 500;
+    const status = Number(error?.status) === 429 || String(error?.message || '').includes('Buffer HTTP 429') ? 429 : 503;
     const retryAfter = Number(error?.retryAfter) || 0;
-    if (status === 429 && retryAfter > 0) res.setHeader('Retry-After', String(Math.ceil(retryAfter)));
-    console.error('rubyclips-post failed', error);
-    return res.status(status).json({ ok: false, error: error.message, retryAfter: retryAfter || null, version: PUBLISHER_VERSION });
+    if (retryAfter > 0) res.setHeader('Retry-After', String(Math.ceil(retryAfter)));
+    return res.status(status).json({ ok: false, error: String(error.message || error), retryAfter: retryAfter || null, version: PUBLISHER_VERSION });
   }
 }
