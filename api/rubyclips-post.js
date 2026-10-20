@@ -12,10 +12,12 @@ const CREATOR_CHANNEL = '@bushcraftinthewildforest';
 const TIKTOK_STORY_CHANNEL = '@muffindrama_us';
 const YOUTUBE_STORY_CHANNEL = '@muffindrama-uvu';
 const SPOTIFY_STORY_CHANNEL = 'babyjamie1';
+const SNOOK_RSS_CHANNEL = 'snook';
+const SNOOK_RSS_FEED = 'https://feeds.megaphone.fm/QCD5686868811';
 const MAX_AUTO_SECONDS = 599;
 const MIN_STORY_RESTART_GENERATION = 5;
 const REQUIRED_STORY_PIPELINE_REVISION = 'avsync-v4-direct-builder';
-const PUBLISHER_VERSION = 'existing-video-parts-v14-continuous-no-trending';
+const PUBLISHER_VERSION = 'snook-rss-v15-continuous-no-trending';
 const CONTINUITY_SERIES_ID = '7682993954661553173';
 const CONTINUITY_RESTART = 2;
 const CONTINUITY_FIRST_PART = 12;
@@ -176,6 +178,9 @@ function validateTikTokStory(m, tag) {
   } else if (provider === 'spotify-show') {
     if (!/^[A-Za-z0-9]{22}$/.test(seriesId)) throw new Error('Blocked: invalid Spotify episode id.');
     if (sourceChannel !== SPOTIFY_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: Spotify story channel mismatch.');
+  } else if (provider === 'snook-podcast-rss') {
+    if (!/^snook-[a-f0-9]{16}$/.test(seriesId)) throw new Error('Blocked: invalid Snook episode identity.');
+    if (sourceChannel !== SNOOK_RSS_CHANNEL) throw new Error('Blocked: Snook source channel mismatch.');
   } else if (provider === 'dailymotion-muffindrama-mirror') {
     if (!/^[A-Za-z0-9_-]{6,25}$/.test(seriesId)) throw new Error('Blocked: invalid mirror-backed story id.');
     if (sourceChannel !== TIKTOK_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: mirror-backed MuffinDrama channel mismatch.');
@@ -194,6 +199,12 @@ function validateTikTokStory(m, tag) {
   if (provider === 'tiktok') {
     if (!ids.length || ids.some(id => !/^\d{10,25}$/.test(id))) throw new Error('Blocked: invalid TikTok episode ids.');
     if (!urls.length || urls.some(url => !url.includes('tiktok.com/'))) throw new Error('Blocked: invalid TikTok episode URLs.');
+  } else if (provider === 'snook-podcast-rss') {
+    if (ids.length !== 1 || !/^[a-f0-9-]{36}$/.test(ids[0])) throw new Error('Blocked: invalid Snook RSS episode GUID.');
+    if (urls.length !== 1 || urls[0] !== SNOOK_RSS_FEED) throw new Error('Blocked: invalid Snook RSS source feed.');
+    if (String(m?.sourceEpisodeGuid || '') !== ids[0]) throw new Error('Blocked: episode GUID mismatch.');
+    if (String(m?.sourceMediaType || '') !== 'audio/mpeg') throw new Error('Blocked: unexpected Snook feed media type.');
+    if (String(m?.visualMode || '') !== 'animated-audio-waveform-with-podcast-art') throw new Error('Blocked: missing visual conversion declaration.');
   } else if (provider === 'dailymotion-muffindrama-mirror') {
     if (ids.length !== 1 || ids.some(id => !/^[A-Za-z0-9_-]{4,32}$/.test(id))) throw new Error('Blocked: invalid mirror source id.');
     if (urls.length !== 1 || urls.some(url => !/^https:\/\/(?:www\.)?dailymotion\.com\/video\/[A-Za-z0-9_-]+(?:[/?#].*)?$/i.test(url))) throw new Error('Blocked: invalid mirror source URL.');
