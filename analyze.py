@@ -53,7 +53,8 @@ def sale(book,side,q,multiplier):
     return (gross-fees).quantize(D("0.0001"),rounding=ROUND_FLOOR)
 
 def crosses_first(values, thresholds, greater):
-    test=values[:,None]>=thresholds[None,:] if greater else values[:,None]<=thresholds[None,:]
+    # Quotes have finite decimal ticks; avoid binary-float equality moving a trigger.
+    test=values[:,None]+1e-12>=thresholds[None,:] if greater else values[:,None]<=thresholds[None,:]+1e-12
     return np.where(test.any(axis=0),test.argmax(axis=0),len(values))
 
 def prepare_round(r,root,budget):
@@ -119,8 +120,11 @@ def prepare_round(r,root,budget):
 def run(root,budget):
     state=json.loads((root/"state.json").read_text())
     last=min(state.get("last_observation",0),state["study_stop"])
-    end=math.floor(last/900)*900
     start=state["study_start"]
+    closed_cutoff=math.floor(last/900)*900
+    finalized_closes=[r["close_ts"] for r in state["rounds"].values() if r["close_ts"]<=closed_cutoff and r.get("official",{}).get("market",{}).get("status")=="finalized" and r["official"]["market"].get("result") in ("yes","no")]
+    # Do not let the most recently closed, still-unsettled round create a spurious gap.
+    end=max(finalized_closes,default=min(closed_cutoff,start))
     report={"generated_at":dt.datetime.now(dt.timezone.utc).isoformat(),"study_start":iso(start),"as_of":iso(end),"label":"SAMPLED-QUOTE PAPER SIMULATION — NOT ACTUAL ORACLE RETURNS","stake_contract_cost_dollars":float(budget),"fees_additional":True,"whole_contracts":True,"next_sample_execution":True,"grid_size":len(CAPS)*len(TP)*len(SL),"sampling_limit":"5-second target sampling can miss intrainterval triggers and does not guarantee live fills","periods":[]}
     prepared={};excluded={}
     rounds=[r for r in state["rounds"].values() if r["open_ts"]>=start and r["close_ts"]<=end]

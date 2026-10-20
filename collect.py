@@ -130,6 +130,7 @@ def status(state, running):
 def run(args):
     sink=Sink(args.directory,args.github)
     state=sink.read("state.json") or new_state()
+    state.setdefault("fee_sources",["https://kalshi.com/docs/kalshi-fee-schedule.pdf","https://docs.kalshi.com/getting_started/fee_rounding"])
     now=time.time()
     segment={"segment":str(args.segment),"start":now,"end":None,"errors":0}
     state["segments"].append(segment)

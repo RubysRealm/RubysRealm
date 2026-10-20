@@ -23,6 +23,7 @@ class PaperExecutionTests(unittest.TestCase):
         bids=np.array([.29,.48,.07,.8])
         self.assertEqual(crosses_first(bids,np.array([.30*1.60,np.inf]),True).tolist(),[1,4])
         self.assertEqual(crosses_first(bids,np.array([.30*.25,-np.inf]),False).tolist(),[2,4])
+        self.assertEqual(crosses_first(np.array([.77]),np.array([.70*1.10]),True).tolist(),[0])
     def test_fees_round_up_at_six_decimals(self):
         self.assertEqual(fee(D(1),D(".3333"),D(1)),D(".015555"))
     def test_full_replay_distinguishes_exit_gain_from_settlement_win(self):
