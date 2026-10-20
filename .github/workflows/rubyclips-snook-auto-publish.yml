@@ -1,11 +1,7 @@
-name: Rubarata Snook Spotify RSS automatic TikTok
+name: Rubarata Snook legacy manual-only
 on:
+  # Legacy Snook pipeline disabled while Rubarataclips uses His Story Spotify.
   workflow_dispatch:
-  schedule:
-    - cron: '17 * * * *'
-  push:
-    paths:
-      - 'rubyclips/snook_auto.trigger'
 permissions:
   contents: write
 concurrency:
