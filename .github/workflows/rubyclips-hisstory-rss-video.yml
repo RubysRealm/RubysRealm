@@ -1,0 +1,17 @@
+name: RubyClips His Story RSS video probe
+on:
+  push:
+    paths:
+      - 'rubyclips/hisstory_rss_video.trigger'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python rubyclips/probe_hisstory_rss_video.py
