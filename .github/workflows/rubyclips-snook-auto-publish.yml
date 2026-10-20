@@ -1,6 +1,8 @@
 name: Rubarata Snook Spotify RSS automatic TikTok
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
   push:
     paths:
       - 'rubyclips/snook_auto.trigger'
