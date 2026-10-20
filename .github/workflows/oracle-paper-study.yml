@@ -1,0 +1,220 @@
+name: Oracle public-call paper study
+on:
+  push:
+    branches: [oracle-paper-study-20261020]
+    paths:
+      - '.github/workflows/oracle-paper-study.yml'
+      - 'START_STUDY'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: oracle-public-paper-study-20261020
+  cancel-in-progress: false
+jobs:
+  observe_1:
+    name: Observe public calls — segment 1 of 8
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install numerical analysis dependency
+        run: python -m pip install numpy
+      - name: Validate paper execution calculations
+        run: python -m unittest -v test_study.py
+      - name: Record public calls, quotes, depth and official settlements
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -u collect.py --seconds 18360 --segment 1 --github
+      - name: Download saved study observations
+        if: ${{ !cancelled() }}
+        run: git clone --depth 1 --single-branch --branch oracle-public-study-data-20261020 https://github.com/RubysRealm/RubysRealm.git sample-data
+      - name: Compare paper settings and publish coverage
+        if: ${{ !cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python publish_analysis.py
+  observe_2:
+    name: Observe public calls — segment 2 of 8
+    needs: observe_1
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install numerical analysis dependency
+        run: python -m pip install numpy
+      - name: Validate paper execution calculations
+        run: python -m unittest -v test_study.py
+      - name: Record public calls, quotes, depth and official settlements
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -u collect.py --seconds 18360 --segment 2 --github
+      - name: Download saved study observations
+        if: ${{ !cancelled() }}
+        run: git clone --depth 1 --single-branch --branch oracle-public-study-data-20261020 https://github.com/RubysRealm/RubysRealm.git sample-data
+      - name: Compare paper settings and publish coverage
+        if: ${{ !cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python publish_analysis.py
+  observe_3:
+    name: Observe public calls — segment 3 of 8
+    needs: observe_2
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install numerical analysis dependency
+        run: python -m pip install numpy
+      - name: Validate paper execution calculations
+        run: python -m unittest -v test_study.py
+      - name: Record public calls, quotes, depth and official settlements
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -u collect.py --seconds 18360 --segment 3 --github
+      - name: Download saved study observations
+        if: ${{ !cancelled() }}
+        run: git clone --depth 1 --single-branch --branch oracle-public-study-data-20261020 https://github.com/RubysRealm/RubysRealm.git sample-data
+      - name: Compare paper settings and publish coverage
+        if: ${{ !cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python publish_analysis.py
+  observe_4:
+    name: Observe public calls — segment 4 of 8
+    needs: observe_3
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install numerical analysis dependency
+        run: python -m pip install numpy
+      - name: Validate paper execution calculations
+        run: python -m unittest -v test_study.py
+      - name: Record public calls, quotes, depth and official settlements
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -u collect.py --seconds 18360 --segment 4 --github
+      - name: Download saved study observations
+        if: ${{ !cancelled() }}
+        run: git clone --depth 1 --single-branch --branch oracle-public-study-data-20261020 https://github.com/RubysRealm/RubysRealm.git sample-data
+      - name: Compare paper settings and publish coverage
+        if: ${{ !cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python publish_analysis.py
+  observe_5:
+    name: Observe public calls — segment 5 of 8
+    needs: observe_4
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install numerical analysis dependency
+        run: python -m pip install numpy
+      - name: Validate paper execution calculations
+        run: python -m unittest -v test_study.py
+      - name: Record public calls, quotes, depth and official settlements
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -u collect.py --seconds 18360 --segment 5 --github
+      - name: Download saved study observations
+        if: ${{ !cancelled() }}
+        run: git clone --depth 1 --single-branch --branch oracle-public-study-data-20261020 https://github.com/RubysRealm/RubysRealm.git sample-data
+      - name: Compare paper settings and publish coverage
+        if: ${{ !cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python publish_analysis.py
+  observe_6:
+    name: Observe public calls — segment 6 of 8
+    needs: observe_5
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install numerical analysis dependency
+        run: python -m pip install numpy
+      - name: Validate paper execution calculations
+        run: python -m unittest -v test_study.py
+      - name: Record public calls, quotes, depth and official settlements
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -u collect.py --seconds 18360 --segment 6 --github
+      - name: Download saved study observations
+        if: ${{ !cancelled() }}
+        run: git clone --depth 1 --single-branch --branch oracle-public-study-data-20261020 https://github.com/RubysRealm/RubysRealm.git sample-data
+      - name: Compare paper settings and publish coverage
+        if: ${{ !cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python publish_analysis.py
+  observe_7:
+    name: Observe public calls — segment 7 of 8
+    needs: observe_6
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install numerical analysis dependency
+        run: python -m pip install numpy
+      - name: Validate paper execution calculations
+        run: python -m unittest -v test_study.py
+      - name: Record public calls, quotes, depth and official settlements
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -u collect.py --seconds 18360 --segment 7 --github
+      - name: Download saved study observations
+        if: ${{ !cancelled() }}
+        run: git clone --depth 1 --single-branch --branch oracle-public-study-data-20261020 https://github.com/RubysRealm/RubysRealm.git sample-data
+      - name: Compare paper settings and publish coverage
+        if: ${{ !cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python publish_analysis.py
+  observe_8:
+    name: Observe public calls — segment 8 of 8
+    needs: observe_7
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install numerical analysis dependency
+        run: python -m pip install numpy
+      - name: Validate paper execution calculations
+        run: python -m unittest -v test_study.py
+      - name: Record public calls, quotes, depth and official settlements
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -u collect.py --seconds 18360 --segment 8 --github
+      - name: Download saved study observations
+        if: ${{ !cancelled() }}
+        run: git clone --depth 1 --single-branch --branch oracle-public-study-data-20261020 https://github.com/RubysRealm/RubysRealm.git sample-data
+      - name: Compare paper settings and publish coverage
+        if: ${{ !cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python publish_analysis.py
