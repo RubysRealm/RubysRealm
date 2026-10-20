@@ -14,10 +14,13 @@ const YOUTUBE_STORY_CHANNEL = '@muffindrama-uvu';
 const SPOTIFY_STORY_CHANNEL = 'babyjamie1';
 const SNOOK_RSS_CHANNEL = 'snook';
 const SNOOK_RSS_FEED = 'https://feeds.megaphone.fm/QCD5686868811';
+const HISSTORY_RSS_CHANNEL = 'his story: animation stories';
+const HISSTORY_RSS_FEED = 'https://anchor.fm/s/10ff75318/podcast/rss';
+const HISSTORY_SPOTIFY_SHOW_ID = '6alyG1Jw4KH03mXZlYtPkf';
 const MAX_AUTO_SECONDS = 599;
 const MIN_STORY_RESTART_GENERATION = 5;
 const REQUIRED_STORY_PIPELINE_REVISION = 'avsync-v4-direct-builder';
-const PUBLISHER_VERSION = 'snook-rss-v15-continuous-no-trending';
+const PUBLISHER_VERSION = 'hisstory-v16-takarada-clone';
 const CONTINUITY_SERIES_ID = '7682993954661553173';
 const CONTINUITY_RESTART = 2;
 const CONTINUITY_FIRST_PART = 12;
@@ -181,6 +184,9 @@ function validateTikTokStory(m, tag) {
   } else if (provider === 'snook-podcast-rss') {
     if (!/^snook-[a-f0-9]{16}$/.test(seriesId)) throw new Error('Blocked: invalid Snook episode identity.');
     if (sourceChannel !== SNOOK_RSS_CHANNEL) throw new Error('Blocked: Snook source channel mismatch.');
+  } else if (provider === 'hisstory-spotify-rss') {
+    if (!/^hisstory-[a-f0-9]{16}$/.test(seriesId)) throw new Error('Blocked: invalid His Story episode identity.');
+    if (sourceChannel !== HISSTORY_RSS_CHANNEL) throw new Error('Blocked: His Story source channel mismatch.');
   } else if (provider === 'dailymotion-muffindrama-mirror') {
     if (!/^[A-Za-z0-9_-]{6,25}$/.test(seriesId)) throw new Error('Blocked: invalid mirror-backed story id.');
     if (sourceChannel !== TIKTOK_STORY_CHANNEL.toLowerCase()) throw new Error('Blocked: mirror-backed MuffinDrama channel mismatch.');
@@ -205,6 +211,15 @@ function validateTikTokStory(m, tag) {
     if (String(m?.sourceEpisodeGuid || '') !== ids[0]) throw new Error('Blocked: episode GUID mismatch.');
     if (String(m?.sourceMediaType || '') !== 'audio/mpeg') throw new Error('Blocked: unexpected Snook feed media type.');
     if (String(m?.visualMode || '') !== 'animated-audio-waveform-with-podcast-art') throw new Error('Blocked: missing visual conversion declaration.');
+  } else if (provider === 'hisstory-spotify-rss') {
+    if (ids.length !== 1 || !/^[a-f0-9-]{36}$/.test(ids[0])) throw new Error('Blocked: invalid His Story RSS episode GUID.');
+    if (urls.length !== 1 || urls[0] !== HISSTORY_RSS_FEED) throw new Error('Blocked: invalid His Story RSS feed.');
+    if (String(m?.sourceEpisodeGuid || '') !== ids[0]) throw new Error('Blocked: His Story episode GUID mismatch.');
+    if (String(m?.sourceMediaType || '') !== 'audio/mpeg') throw new Error('Blocked: unexpected His Story audio media type.');
+    if (String(m?.spotifyShowId || '') !== HISSTORY_SPOTIFY_SHOW_ID) throw new Error('Blocked: wrong His Story Spotify show.');
+    if (String(m?.transportProvider || '') !== 'facebook-official-hisstory-video-only') throw new Error('Blocked: invalid His Story visual transport.');
+    if (!String(m?.transportUrl || '').startsWith('https://www.facebook.com/HisYTStory/videos/')) throw new Error('Blocked: unofficial His Story visual URL.');
+    if (m?.transportAudioUsed !== false) throw new Error('Blocked: source-platform audio must never be used.');
   } else if (provider === 'dailymotion-muffindrama-mirror') {
     if (ids.length !== 1 || ids.some(id => !/^[A-Za-z0-9_-]{4,32}$/.test(id))) throw new Error('Blocked: invalid mirror source id.');
     if (urls.length !== 1 || urls.some(url => !/^https:\/\/(?:www\.)?dailymotion\.com\/video\/[A-Za-z0-9_-]+(?:[/?#].*)?$/i.test(url))) throw new Error('Blocked: invalid mirror source URL.');
