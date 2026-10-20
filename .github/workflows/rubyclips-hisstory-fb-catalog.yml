@@ -1,0 +1,27 @@
+name: RubyClips His Story Facebook catalog probe
+on:
+  push:
+    paths:
+      - 'rubyclips/hisstory_fb_catalog.trigger'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --quiet --upgrade yt-dlp
+      - name: Probe official His Story Facebook catalogs
+        shell: bash
+        run: |
+          set +e
+          for u in             'https://www.facebook.com/HisYTStory/videos'             'https://www.facebook.com/p/Hisytstory-61591326524232/videos'             'https://www.facebook.com/61591326524232/videos'
+          do
+            echo "=== $u ==="
+            yt-dlp --flat-playlist --playlist-end 30 --dump-json --no-warnings               --socket-timeout 30 --retries 3 "$u" | head -30
+            echo "RC=$?"
+          done
