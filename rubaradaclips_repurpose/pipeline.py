@@ -206,12 +206,27 @@ def release_video_url(tag,filename):
     return f'https://github.com/{REPO}/releases/download/{tag}/{filename}'
 
 
+def ensure_catalog_guid(guid):
+    """Refresh once when the live feed reaches an episode newer than the cache."""
+    cached=json.loads(CATALOG_PATH.read_text()) if CATALOG_PATH.exists() else {}
+    if any(row.get('rssGuid')==guid for row in cached.get('episodes',[])):
+        return
+    command=[sys.executable,str(ROOT/'rubyclips'/'spotify_video_source.py'),
+             'refresh-catalog','--catalog',str(CATALOG_PATH)]
+    result=subprocess.run(command,cwd=ROOT,text=True,capture_output=True,timeout=600)
+    require(result.returncode==0,'The new Spotify episode catalog could not be refreshed; keep this episode queued')
+    refreshed=json.loads(CATALOG_PATH.read_text())
+    require(any(row.get('rssGuid')==guid for row in refreshed.get('episodes',[])),
+            'The current RSS episode has no exact Spotify mapping after refresh; keep it queued')
+
+
 def build_verified(state):
     """Use the existing presentation with a verified full source and precise cuts."""
     entries=fetch_feed()
     ep,part=selected(state,entries)
     if ep is None:
         return None
+    ensure_catalog_guid(ep['guid'])
     WORK.mkdir(parents=True,exist_ok=True)
     OUT.mkdir(parents=True,exist_ok=True)
     # acquire writes source-info only after full audio/video identity and coverage

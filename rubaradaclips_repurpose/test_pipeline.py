@@ -1,9 +1,13 @@
 """Durable queue tests use fake APIs only; no media is published."""
 import copy
 import importlib.util
+import json
+import tempfile
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
 SPEC=importlib.util.spec_from_file_location('hisstory_pipeline',Path(__file__).with_name('pipeline.py'))
 pipeline=importlib.util.module_from_spec(SPEC)
@@ -273,6 +277,32 @@ class DurableQueueTests(unittest.TestCase):
             for index,part in enumerate(plan):
                 if index:
                     self.assertEqual(part[0],plan[index-1][1])
+
+
+class CatalogRefreshTests(unittest.TestCase):
+    def test_new_rss_episode_refreshes_once_without_changing_queue(self):
+        with tempfile.TemporaryDirectory() as directory:
+            catalog=Path(directory)/'catalog.json'
+            catalog.write_text(json.dumps({'episodes':[{'rssGuid':FIRST}]}))
+            value=state()
+            original=copy.deepcopy(value)
+            def refresh(command,**kwargs):
+                self.assertIn('refresh-catalog',command)
+                catalog.write_text(json.dumps({'episodes':[{'rssGuid':FIRST},{'rssGuid':SECOND}]}))
+                return SimpleNamespace(returncode=0)
+            with patch.object(pipeline,'CATALOG_PATH',catalog),patch.object(pipeline.subprocess,'run',side_effect=refresh) as called:
+                pipeline.ensure_catalog_guid(SECOND)
+                pipeline.ensure_catalog_guid(SECOND)
+                self.assertEqual(called.call_count,1)
+            self.assertEqual(value,original)
+
+    def test_missing_exact_mapping_after_refresh_stays_blocked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            catalog=Path(directory)/'catalog.json'
+            catalog.write_text(json.dumps({'episodes':[{'rssGuid':FIRST}]}))
+            with patch.object(pipeline,'CATALOG_PATH',catalog),patch.object(pipeline.subprocess,'run',return_value=SimpleNamespace(returncode=0)):
+                with self.assertRaisesRegex(pipeline.QueueError,'no exact Spotify mapping'):
+                    pipeline.ensure_catalog_guid(SECOND)
 
 
 if __name__=='__main__':
