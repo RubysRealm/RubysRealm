@@ -1,0 +1,36 @@
+name: RubyClips Snook Part 1 render test
+on:
+  push:
+    paths:
+      - 'rubyclips/snook_render_test.trigger'
+permissions:
+  contents: read
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install video renderer
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+      - name: Check correct Snook queue and source
+        run: python3 rubyclips/snook_rss_pipeline.py check
+      - name: Render first linked Snook episode part
+        run: python3 rubyclips/snook_rss_pipeline.py build
+      - name: Preview a frame
+        run: |
+          set -euo pipefail
+          FILE="$(find rubyclips/snook_output -name '*.mp4' -print -quit)"
+          test -n "$FILE"
+          ffmpeg -y -hide_banner -loglevel error -ss 4 -i "$FILE" -frames:v 1 rubyclips/snook_output/preview.jpg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rubarata-snook-part1-preview
+          path: |
+            rubyclips/snook_output/*.mp4
+            rubyclips/snook_output/*.json
+            rubyclips/snook_output/*.jpg
+          retention-days: 2
+          if-no-files-found: error
