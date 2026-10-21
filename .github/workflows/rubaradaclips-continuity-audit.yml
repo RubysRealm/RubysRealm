@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - '.github/workflows/rubaradaclips-continuity-audit.yml'
+      - 'rubaradaclips_repurpose/test_continuity.py'
 permissions:
   contents: read
   actions: read
@@ -31,7 +32,7 @@ jobs:
               return json.loads(p.stdout)
           repo = 'repos/RubysRealm/RubysRealm'
           workflows = []
-          for name in ['rubaradaclips-hisstory.yml','podcast-repurpose.yml','social-bot.yml']:
+          for name in ['rubaradaclips-hisstory.yml','podcast-repurpose.yml','viral-facebook-source.yml']:
               meta = get(f'{repo}/actions/workflows/{name}')
               rows = get(f'{repo}/actions/workflows/{name}/runs?event=schedule&per_page=5')['workflow_runs']
               workflows.append({'file':name, 'state':meta['state'], 'workflowId':meta['id'], 'scheduledRuns':[
@@ -45,18 +46,18 @@ jobs:
               'nextEligibleEastern':next_at.astimezone(ZoneInfo('America/New_York')).isoformat(),
               'remainingEpisodes':len(remaining), 'nextSources':[
                   {'title':r['title'],'rssGuid':r.get('rssGuid'),'seconds':r['durationMs']/1000,
-                   'verifiedTransport':bool(r.get('verifiedTransport')), 'fullSpotifyVideo':bool(r.get('verifiedSpotifyFullVideo'))}
+                   'recordedVerificationFields':[k for k in r if 'verified' in k.lower()]}
                   for r in remaining[:10]]}
           output=json.dumps(evidence,indent=2)
           print(output)
           Path('continuity-audit.json').write_text(output+'\n')
           with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
               f.write('## Read-only continuity audit\n\n```json\n'+output+'\n```\n')
-          assert workflows[0]['state']=='active', 'Rubarata production workflow is not active'
+          assert all(w['state']=='active' for w in workflows), 'A production or backup wakeup workflow is not active'
           assert not state.get('hold'), 'Rubarata queue is on hold'
           PY
       - name: Exercise cadence, restarts, pending recovery and progression with fake APIs only
-        run: python3 -m unittest discover -s rubaradaclips_repurpose -p test_pipeline.py -v
+        run: python3 -m unittest discover -s rubaradaclips_repurpose -p 'test_*.py' -v
       - name: Save scheduler evidence
         if: always()
         uses: actions/upload-artifact@v4
