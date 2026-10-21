@@ -6,7 +6,7 @@ The source adapter verifies the full original video before the existing renderer
 cuts contiguous parts from the precise Spotify duration, including the ending.
 Pending releases are reconciled before any source request or media rebuild.
 """
-import argparse, hashlib, json, math, os, re, subprocess, sys, tempfile, textwrap
+import argparse, hashlib, json, math, os, re, subprocess, sys, tempfile
 import urllib.error, urllib.parse, urllib.request, xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
@@ -24,10 +24,9 @@ TARGET_CHANNEL_ID='6a9f6ff1cd8b9c702c2897e1'
 PART_TARGET=180
 POST_HOURS=6
 GENERATION=16
-FONT='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
 ITUNES='{http://www.itunes.com/dtds/podcast-1.0.dtd}'
 UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140 Safari/537.36'
-PIPELINE_REVISION='avsync-v5-durable-verified-source'
+PIPELINE_REVISION='avsync-v6-centered-inter-title'
 CATALOG_PATH=ROOT/'rubyclips'/'spotify_video_catalog.json'
 PUBLISHER='https://rubys-realm.vercel.app/api/rubyclips-post'
 PUBLISHER_VERSION='hisstory-v17-durable-video'
@@ -124,40 +123,36 @@ def segment_plan(duration):
     return [(float(i*PART_TARGET), min(float((i+1)*PART_TARGET),duration)
              if i<count-1 else duration) for i in range(count)]
 
-def safe_title(title):
-    lines=textwrap.wrap(safe(title),width=34,break_long_words=False,break_on_hyphens=False)
-    if len(lines)>2:
-        lines=lines[:2]
-        if len(lines[-1])>3:lines[-1]=lines[-1][:-3].rstrip()+'...'
-    return '\n'.join(lines) or 'His Story'
-
 def render(visual,audio,title,index,total,dest,start=0.0,seconds=None):
+    # Keep typography dependencies out of the pre-install queue/recovery checks.
+    if __package__:
+        from .title_card import create_title_card
+    else:
+        from title_card import create_title_card
     vinfo=media_info(visual)
     vs=[s for s in vinfo['streams'] if s.get('codec_type')=='video']
     if not vs:raise RuntimeError('Resolved visual has no video stream')
     sw=max(1,int(vs[0].get('width') or 1));sh=max(1,int(vs[0].get('height') or 1))
     scale=min(1000.0/sw,1000.0/sh);fg_h=sh*scale
-    picture_top=(1920.0-fg_h)/2.0+160.0;gap_mid=picture_top/2.0
-    box_h=260;box_y=max(35,int(round(gap_mid-box_h/2.0)));title_y=box_y+34;part_y=box_y+180
-    title_file=WORK/'title.txt';part_file=WORK/'part.txt'
-    title_file.write_text(safe_title(title));part_file.write_text(f'PART {index} OF {total}')
+    picture_top=(1920.0-fg_h)/2.0+160.0
+    title_card=WORK/'title-card.png'
+    layout=create_title_card(title,index,total,picture_top,title_card)
+    (WORK/'title-layout.json').write_text(json.dumps(layout,indent=2)+'\n')
     vf=(
       '[0:v]split=2[bg0][fg0];'
       '[bg0]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=32[bg];'
       '[fg0]scale=1000:1000:force_original_aspect_ratio=decrease[fg];'
       '[bg][fg]overlay=(W-w)/2:(H-h)/2+160[base];'
-      f'[base]drawbox=x=45:y={box_y}:w=990:h={box_h}:color=black@0.60:t=fill,'
-      f'drawtext=fontfile={FONT}:textfile={title_file.as_posix()}:fontcolor=white:fontsize=44:'
-      f'line_spacing=12:x=(w-text_w)/2:y={title_y},'
-      f'drawtext=fontfile={FONT}:textfile={part_file.as_posix()}:fontcolor=white:fontsize=50:'
-      f'x=(w-text_w)/2:y={part_y}[v]'
+      '[base][2:v]overlay=0:0:eof_action=repeat:repeatlast=1:format=auto,format=yuv420p[v]'
     )
     run(['ffmpeg','-y','-hide_banner','-loglevel','error',
          '-ss',f'{start:.6f}','-i',str(visual),'-ss',f'{start:.6f}','-i',str(audio),
+         '-i',str(title_card),
          *(['-t',f'{seconds:.6f}'] if seconds is not None else []),
          '-filter_complex_threads','2','-filter_complex',vf,'-map','[v]','-map','1:a:0','-r','30',
          '-c:v','libx264','-preset','medium','-crf','20','-pix_fmt','yuv420p',
          '-c:a','aac','-b:a','192k','-ar','48000','-movflags','+faststart',str(dest)],timeout=1500)
+    return layout
 
 def verify_final(path,expected):
     info=media_info(path);vs=[s for s in info['streams'] if s.get('codec_type')=='video'];aa=[s for s in info['streams'] if s.get('codec_type')=='audio']
@@ -278,7 +273,7 @@ def build_verified(state):
     sid=series_id(ep['guid'])
     filename=f'hisstory-{sid}-r{GENERATION}-part-{part:02d}.mp4'
     dest=OUT/filename
-    render(source,source,ep['title'],part,len(segments),dest,start=start,seconds=seconds)
+    title_layout=render(source,source,ep['title'],part,len(segments),dest,start=start,seconds=seconds)
     duration=verify_final(dest,seconds)
     final=media_info(dest)
     video=next(s for s in final['streams'] if s.get('codec_type')=='video')
@@ -312,6 +307,7 @@ def build_verified(state):
         'mediaSha256':hashlib.sha256(dest.read_bytes()).hexdigest(),
         'file':filename,'targetChannel':TARGET_CHANNEL,'caption':caption,
         'storyHashtag':story_tag,'titleBurnedIn':True,'partLabelBurnedIn':True,'thumbnailOffsetMs':1000,
+        'titleLayout':title_layout,
     }
     if verification:
         manifest['sourceVerification']=verification

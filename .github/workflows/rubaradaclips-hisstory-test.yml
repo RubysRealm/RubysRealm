@@ -28,7 +28,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
-          python -m pip install --quiet 'votify==1.9.9' 'yt-dlp==2026.8.19' 'numpy==2.3.5' 'scipy==1.17.0'
+          python -m pip install --quiet 'votify==1.9.9' 'yt-dlp==2026.8.19' 'numpy==2.3.5' 'scipy==1.17.0' 'pillow==12.3.0'
 
       - name: Verify queue recovery, source identity, and publisher guards
         run: |
@@ -94,5 +94,7 @@ jobs:
             rubaradaclips_repurpose/output/manifest.json
             rubaradaclips_repurpose/output/part-info.json
             rubaradaclips_repurpose/work/verified-source/source-info.json
+            rubaradaclips_repurpose/work/title-card.png
+            rubaradaclips_repurpose/work/title-layout.json
           if-no-files-found: warn
           retention-days: 3

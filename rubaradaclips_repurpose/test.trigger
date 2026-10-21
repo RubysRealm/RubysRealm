@@ -1,1 +1,1 @@
-2026-10-20 verify full original His Story video, audio, and durable recovery
+inter-centered-v1 full video and title alignment verification
