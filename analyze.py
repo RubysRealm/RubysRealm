@@ -5,6 +5,7 @@ import datetime as dt
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 import json
 import math
+import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -149,18 +150,14 @@ def prepare_round(r,root,budget):
     returned=next_value[first]
     return {"ticker":r["ticker"],"open_ts":r["open_ts"],"close_ts":r["close_ts"],"side":call["side"],"entry_at":times[0],"price":float(price),"quantity":int(q),"spent":float(spent),"returned":returned,"profit":returned-float(spent),"exit_at":next_time[first],"settlement_won":won,"max_gap_seconds":maxgap},None
 
-def run(root,budget):
-    state=json.loads((root/"state.json").read_text())
-    last=min(state.get("last_observation",0),state["study_stop"])
+def run(root,budget,now=None,state=None):
+    state=state if state is not None else json.loads((root/"state.json").read_text())
+    end=time.time() if now is None else now
     start=state["study_start"]
-    closed_cutoff=math.floor(last/900)*900
-    finalized_closes=[r["close_ts"] for r in state["rounds"].values() if r["close_ts"]<=closed_cutoff and r.get("official",{}).get("market",{}).get("status")=="finalized" and r["official"]["market"].get("result") in ("yes","no")]
-    # Do not let the most recently closed, still-unsettled round create a spurious gap.
-    end=max(finalized_closes,default=min(closed_cutoff,start))
     report={"generated_at":dt.datetime.now(dt.timezone.utc).isoformat(),"study_start":iso(start),"as_of":iso(end),"label":"SAMPLED-QUOTE PAPER SIMULATION — NOT ACTUAL ORACLE RETURNS","stake_contract_cost_dollars":float(budget),"fees_additional":True,"whole_contracts":True,"next_sample_execution":True,"grid_size":len(CAPS)*len(TP)*len(SL),"sampling_limit":"5-second target sampling can miss intrainterval triggers and does not guarantee live fills","periods":[]}
     report.update(schema_version=2,top_n=5,ranking_metric="net_profit_after_fees",tie_order="Equal-profit controls share a competition rank. Display order only: buy cap ascending (OFF last), then take profit OFF followed by ascending percentages, then stop loss OFF followed by ascending percentages. This is not an extra performance advantage.")
     prepared={};excluded={}
-    rounds=[r for r in state["rounds"].values() if r["open_ts"]>=start and r["close_ts"]<=end]
+    rounds=[r for r in state["rounds"].values() if r["open_ts"]>=start and end-36*3600<r["close_ts"]<=end]
     for r in rounds:
         v,reason=prepare_round(r,root,budget)
         if v:prepared[r["ticker"]]=v
@@ -169,7 +166,7 @@ def run(root,budget):
         out={"hours":h,"start":iso(end-h*3600),"end":iso(end),"elapsed_ready":end-start>=h*3600,"no_trade_profit":0,"top_setups":[],"best":None}
         if not out["elapsed_ready"]:
             out["status"]="collecting";report["periods"].append(out);continue
-        chosen=[r for r in rounds if r["open_ts"]>=end-h*3600]
+        chosen=[r for r in rounds if r["close_ts"]>end-h*3600]
         selected=[prepared[r["ticker"]] for r in chosen if r["ticker"] in prepared]
         reasons={}
         for r in chosen:

@@ -66,7 +66,7 @@ class RankingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);(root/"state.json").write_text(json.dumps(state))
             with patch("analyze.prepare_round",return_value=(trade,None)):
-                report=run(root,D(1))
+                report=run(root,D(1),now=43210)
         period=report["periods"][0]
         self.assertEqual(period["status"],"partial_sample")
         self.assertEqual(period["missing_rounds"],47)

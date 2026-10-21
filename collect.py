@@ -7,6 +7,7 @@ import datetime as dt
 import hashlib
 import json
 import math
+import multiprocessing
 import os
 from pathlib import Path
 import re
@@ -124,12 +125,16 @@ def status(state, running):
     for r in sorted(rounds,key=lambda x:x["open_ts"],reverse=True)[:20]:
         m=r.get("official",{}).get("market",{})
         recent.append({"ticker":r["ticker"],"open_ts":r["open_ts"],"close_ts":r["close_ts"],"call":r.get("call"),"call_observed_at":r.get("call_observed_at"),"result":m.get("result") if m.get("status")=="finalized" else None,"samples":r.get("samples",0),"revised":r.get("call_revised",False)})
-    elapsed=max(0,min(time.time(),state["study_stop"])-state["study_start"])
-    return {"status":"recording" if running else "segment_complete","updated_at":utc(),"last_observation":state.get("last_observation"),"study_start":utc(state["study_start"]),"study_stop":utc(state["study_stop"]),"hours_elapsed":elapsed/3600,"samples":state["samples"],"errors":state["error_count"],"observed_rounds":len(rounds),"locked_calls":len(called),"verified_settled_calls":len(settled),"wins":wins,"losses":len(settled)-wins,"profit_status":"NOT YET VERIFIED — sampled-quote paper analysis required","recent":recent,"source":ORACLE,"data_branch":DATA_BRANCH,"run_url":state.get("run_url"),"periods":[{"hours":h,"elapsed_ready":elapsed>=h*3600} for h in (12,24,36)]}
+    stop=state.get("study_stop")
+    elapsed=max(0,min(time.time(),stop) - state["study_start"]) if stop else max(0,time.time()-state["study_start"])
+    return {"status":"recording" if running else "segment_complete","mode":state.get("mode","bounded"),"updated_at":utc(),"last_observation":state.get("last_observation"),"study_start":utc(state["study_start"]),"study_stop":utc(stop) if stop else None,"hours_elapsed":elapsed/3600,"samples":state["samples"],"errors":state["error_count"],"observed_rounds":len(rounds),"locked_calls":len(called),"verified_settled_calls":len(settled),"wins":wins,"losses":len(settled)-wins,"profit_status":"SAMPLED-QUOTE PAPER SIMULATION — NOT ACTUAL RETURNS","recent":recent,"source":ORACLE,"data_branch":DATA_BRANCH,"run_url":state.get("run_url"),"periods":[{"hours":h,"elapsed_ready":elapsed>=h*3600} for h in (12,24,36)]}
 
 def run(args):
     sink=Sink(args.directory,args.github)
     state=sink.read("state.json") or new_state()
+    if args.continuous:
+        state.setdefault("original_study_stop",state.get("study_stop"))
+        state.update(study_stop=None,mode="rolling",finished=False)
     state.setdefault("fee_sources",["https://kalshi.com/docs/kalshi-fee-schedule.pdf","https://docs.kalshi.com/getting_started/fee_rounding"])
     now=time.time()
     segment={"segment":str(args.segment),"start":now,"end":None,"errors":0}
@@ -137,9 +142,15 @@ def run(args):
     if os.environ.get("GITHUB_RUN_ID"):
         state["run_url"]="https://github.com/"+sink.repo+"/actions/runs/"+os.environ["GITHUB_RUN_ID"]
     sink.write("state.json",state); sink.write("status.json",status(state,True)); sink.flush()
-    deadline=min(now+args.seconds,state["study_stop"]+1800)
-    next_flush=time.monotonic()+120; next_metadata=0; next_fees=0
+    deadline=now+args.seconds
+    if state.get("study_stop"):
+        deadline=min(deadline,state["study_stop"]+1800)
+    next_flush=time.monotonic()+60; next_metadata=0; next_fees=0
     pool=concurrent.futures.ThreadPoolExecutor(max_workers=4)
+    analysis_pool=None; analysis_future=None; next_analysis=0
+    if args.continuous:
+        from live_analysis import build_input
+        analysis_pool=concurrent.futures.ProcessPoolExecutor(max_workers=1,mp_context=multiprocessing.get_context("spawn"))
     while not STOP and time.time()<deadline:
         cycle=time.monotonic()
         try:
@@ -149,7 +160,7 @@ def run(args):
                 raise ValueError("Unexpected or missing BTC15 market identifier")
             now=time.time(); open_ts=float(w["open_ts"]); close_ts=float(w["close_ts"])
             if close_ts<=open_ts or close_ts-open_ts>901: raise ValueError("Invalid round times")
-            if now>=state["study_stop"] and open_ts>=state["study_stop"]:
+            if state.get("study_stop") and now>=state["study_stop"] and open_ts>=state["study_stop"]:
                 book=None; book_meta=None
             else:
                 try:
@@ -158,6 +169,8 @@ def run(args):
                     if not isinstance(book,dict): raise ValueError("Missing fixed-point book")
                 except Exception as e:
                     book=None;book_meta={"received_at":time.time(),"error":type(e).__name__+": "+str(e)[:180]}
+            if ticker not in state["rounds"]:
+                next_analysis=0
             r=state["rounds"].setdefault(ticker,{"ticker":ticker,"open_ts":open_ts,"close_ts":close_ts,"first_observed_at":fetch["received_at"],"samples":0})
             r["samples"]+=1;r["last_observed_at"]=fetch["received_at"]
             if c.get("sealed") and c.get("side") in ("UP","DOWN","SITOUT"):
@@ -177,30 +190,52 @@ def run(args):
                     sink.append("data/errors/"+str(args.segment)+".jsonl",{"ts":time.time(),"source":"series","error":str(e)[:180]});next_fees=time.time()+60
             keys=("ticker","open_ts","close_ts","secs_left","spot","strike","yes_ask","no_ask","yes_bid","no_bid","p_up")
             row={"ts":fetch["received_at"],"oracle_fetch":fetch,"window":{k:w.get(k) for k in keys},"call":c,"metrics":w.get("metrics"),"book_fetch":book_meta,"book":book}
-            if open_ts<state["study_stop"]:
+            if not state.get("study_stop") or open_ts<state["study_stop"]:
                 sink.append("data/rounds/"+ticker+".jsonl",row)
             state["samples"]+=1;state["last_observation"]=fetch["received_at"]
             if time.time()>=next_metadata:
                 pending=[x for x in state["rounds"].values() if not (x.get("official",{}).get("market",{}).get("status")=="finalized" and x["official"]["market"].get("result") in ("yes","no"))]
                 jobs={pool.submit(market,x["ticker"]):x for x in pending[-10:]}
                 for f,x in jobs.items():
-                    try:x["official"]=f.result()
+                    try:
+                        result=f.result()
+                        old=x.get('official',{}).get('market',{})
+                        fresh=result.get('market',{})
+                        if (old.get('status'),old.get('result')) != (fresh.get('status'),fresh.get('result')):
+                            next_analysis=0
+                        x["official"]=result
                     except Exception as e:sink.append("data/errors/"+str(args.segment)+".jsonl",{"ts":time.time(),"source":"market","ticker":x["ticker"],"error":str(e)[:180]})
-                next_metadata=time.time()+60
+                next_metadata=time.time()+15
         except Exception as e:
             state["error_count"]+=1;segment["errors"]+=1
             sink.append("data/errors/"+str(args.segment)+".jsonl",{"ts":time.time(),"source":"poll","error":type(e).__name__+": "+str(e)[:250]})
+        if analysis_future is not None and analysis_future.done():
+            try:
+                sink.write("reports/rolling.json",analysis_future.result())
+                next_flush=0
+            except Exception as e:
+                print(compact({"analysis_error":str(e)[:200]}),flush=True)
+            analysis_future=None
+        if analysis_pool is not None and analysis_future is None and time.monotonic()>=next_analysis:
+            # Isolate numerical work from the five-second acquisition loop.
+            analysis_future=analysis_pool.submit(build_input,sink.root,json.loads(compact(state)))
+            next_analysis=time.monotonic()+60
         if time.monotonic()>=next_flush:
             sink.write("state.json",state);sink.write("status.json",status(state,True))
             try:
                 sink.flush();print(compact({"checkpoint":utc(),"samples":state["samples"],"rounds":len(state["rounds"]),"errors":state["error_count"]}),flush=True)
             except Exception as e:
                 print(compact({"checkpoint_error":type(e).__name__+": "+str(e)[:200]}),flush=True)
-            next_flush=time.monotonic()+120
+            next_flush=time.monotonic()+60
         wait=max(0,INTERVAL-(time.monotonic()-cycle))
         if wait:time.sleep(min(wait,max(0,deadline-time.time())))
     segment["end"]=time.time()
-    state["finished"]=time.time()>=state["study_stop"]
+    state["finished"]=bool(state.get("study_stop") and time.time()>=state["study_stop"])
+    if analysis_pool is not None:
+        if analysis_future is not None:
+            try:sink.write("reports/rolling.json",analysis_future.result(timeout=60))
+            except Exception as e:print(compact({"analysis_error":str(e)[:200]}),flush=True)
+        analysis_pool.shutdown(wait=True)
     sink.write("state.json",state);sink.write("status.json",status(state,False));sink.flush()
     pool.shutdown(wait=True)
     print(compact(status(state,False)),flush=True)
@@ -210,7 +245,7 @@ def interrupted(*_):
     STOP=True
 
 if __name__=="__main__":
-    p=argparse.ArgumentParser();p.add_argument("--seconds",type=int,default=18000);p.add_argument("--segment",default="local");p.add_argument("--directory",default="observations");p.add_argument("--github",action="store_true")
+    p=argparse.ArgumentParser();p.add_argument("--seconds",type=int,default=18000);p.add_argument("--segment",default="local");p.add_argument("--directory",default="observations");p.add_argument("--github",action="store_true");p.add_argument("--continuous",action="store_true")
     a=p.parse_args()
     signal.signal(signal.SIGTERM,interrupted);signal.signal(signal.SIGINT,interrupted)
     run(a)

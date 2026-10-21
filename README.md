@@ -1,14 +1,14 @@
 # Oracle public-call paper study
 
-This is a bounded, read-only observation and software-validation study. It places no orders and uses no Oracle or Kalshi account credentials. It records Oracle's public feed and public Kalshi books and settlements. It does not claim to reproduce Oracle's private order engine.
+This is a continuous, read-only observation and software-validation study. It places no orders and uses no Oracle or Kalshi account credentials. It records Oracle's public feed and public Kalshi books and settlements. It does not claim to reproduce Oracle's private order engine.
 
 ## Study protocol
 
 - Record every 5 seconds, subject to response times and outages. Preserve acquisition times, errors, call revisions, quoted prices and displayed book depth.
 - Use the first **observed locked** UP/DOWN call for a contract; never reconstruct missing calls from winners or aggregate accuracy. Preserve SITOUTs.
 - Verify outcomes against Kalshi's finalized market result. Pending settlements stay pending.
-- Start the study at the first full quarter-hour after collection begins; stop accepting rounds after 40 hours. Allow a settlement-only tail.
-- Evaluate rolling 12/24/36-hour windows only when their full elapsed duration exists. Report missing rounds and exclude incomplete quote paths from the primary sample; do not describe an incomplete sample as the whole period.
+- Resume the original recorded history, with no 40-hour stop in continuous mode.
+- Evaluate rolling 12/24/36-hour windows ending at the current second, including rounds by closing time (start exclusive, end inclusive), only when their full elapsed duration exists. Report missing rounds and exclude incomplete quote paths from the primary sample; do not describe an incomplete sample as the whole period.
 - Paper entry: first usable Kalshi book observed within 15 seconds of the call's seal, on the called side. The first qualifying quote is the entry opportunity; a cap that rejects it skips that call (no hindsight waiting for a cheaper entry).
 - Hypothetical stake: up to $1 of contracts per call, **whole contracts**, with entry fees additional. Cap quantity at displayed best-ask depth. Actual fills and the bot's sizing rules remain unverified.
 - Buy caps: 1–99 cents in 1-cent steps, plus OFF. Actual quotes may be sub-cent; the cap itself is a whole-cent setting.
@@ -21,8 +21,10 @@ This is a bounded, read-only observation and software-validation study. It place
 
 ## Operation
 
-The workflow lives on an isolated branch and is limited to eight sequential observation segments, each under GitHub's six-hour job limit. Checkpoints are written about every two minutes to the dedicated data branch, with no account data or secrets. Runner handoff gaps are measured and affected observations are excluded.
+The default branch workflow `.github/workflows/oracle-call-study-live.yml` runs five sequential five-hour segments and restarts daily. Its shared concurrency group replaces the former bounded run without allowing two recorders. Each segment resumes the saved data branch, validates calculations, and runs `collect.py --continuous --seconds 18000 --github --directory observations`. Public feeds only; no account or trading credentials.
 
-`collect.py --seconds 18000 --segment 1 --github` runs one hosted segment. `collect.py --seconds 30 --segment local --directory ./local-data` performs a local smoke check. `analyze.py --data ./data-checkout` runs the paper grid on downloaded observations. The workflow does not use any trading credentials.
+The recorder samples every five seconds, checks settlements every fifteen seconds and publishes checkpoints about every minute. Every new session and newly verified result triggers an immediate recalculation. A separate process computes `reports/rolling.json` without blocking acquisition. It supplies per-round integer cash flows for the same complete buy-cap/TP/SL grid. The dashboard checks for new checkpoints every thirty seconds and uses a worker to recalculate exact rolling membership every second. The last five newly beneficial distinct settings from the rolling top-five rankings are retained with their identification time and original results. Repeated refreshes do not create duplicates. The all-time best setup (since study inception) is ranked across the full recorded history, with ties and exclusions disclosed. All-time results include older recorded sessions outside the rolling windows. The displayed source timestamps remain separate from the live window clock. Stale data and missing or excluded rounds remain visible.
 
-Data endpoints, fee documents and run links are included in `state.json`/`status.json`. Never call a successful workflow launch proof that 36 hours were collected; verify the timestamps and coverage in the saved data.
+Runner handoff gaps are measured; affected paths are excluded. Historical files stay on the data branch. Turning off the live workflow stops new observations; the page will flag stale source data.
+
+`collect.py --seconds 30 --segment local --directory ./local-data` performs a bounded local smoke check. `analyze.py --data ./data-checkout` independently calculates the same grid for the current rolling window. `test_live.py` checks time boundaries and future-data exclusion; the Site's `test-rolling.mjs` checks the browser ranking against Python on saved real observations.
