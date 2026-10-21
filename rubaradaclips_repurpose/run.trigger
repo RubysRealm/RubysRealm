@@ -1,1 +1,1 @@
-2026-10-20 recover current His Story queue without restarting completed stories
+2026-10-21T04:10:00Z recover the overdue second His Story upload through the production queue; preserve the six-hour cadence, exact-source verification, centered Inter titles, and duplicate protection.
