@@ -67,7 +67,7 @@ jobs:
           RES="$(cat /tmp/resolve.json 2>/dev/null | head -c 3000 || true)"
           if [ -f /tmp/sample.bin ]; then SIZE="$(wc -c < /tmp/sample.bin | tr -d ' ')"; else SIZE=0; fi
           BODY="RUBYCLIPS_COBALT_PROBE
-root: $ROOT
-resolve: $RES
-sample_bytes: $SIZE"
+          root: $ROOT
+          resolve: $RES
+          sample_bytes: $SIZE"
           if [ -n "${ISSUE:-}" ]; then gh issue comment "$ISSUE" --body "$BODY"; fi
