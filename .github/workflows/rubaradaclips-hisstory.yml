@@ -1,7 +1,9 @@
 name: Rubarataclips His Story Spotify repurpose
 on:
   schedule:
-    - cron: '17 * * * *'
+    # Check eligibility every 15 minutes. The durable queue still enforces
+    # six hours between confirmed deliveries and reconciles pending posts first.
+    - cron: '7,22,37,52 * * * *'
   workflow_dispatch:
   push:
     paths:
@@ -62,7 +64,7 @@ jobs:
               exit 0
             fi
           done
-          echo 'Delivery remains pending. The next hourly check will reconcile this same attempt before preparing media.'
+          echo 'Delivery remains pending. The next eligibility check will reconcile this same attempt before preparing media.'
 
       - name: Save queue and source diagnostics
         if: always()
