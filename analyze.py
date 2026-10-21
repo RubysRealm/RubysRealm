@@ -88,6 +88,8 @@ def describe_setup(config, selected, spends, counts, returned, wins):
         bucket=hours.setdefault(key,{"purchases":0,"profitable":0,"net_profit":0.0})
         bucket["purchases"]+=1;bucket["profitable"]+=int(trade_profit>1e-9);bucket["net_profit"]+=trade_profit
     result["break_even_purchases"]=n-result["profitable_purchases"]-result["losing_purchases"]
+    result["average_entry_cents"]=round(sum(t['price']*100 for t in result['trades'])/n,6) if n else None
+    result["skipped_by_cap"]=len(selected)-n
     return result,hours
 
 def prepare_round(r,root,budget):

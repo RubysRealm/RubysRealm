@@ -34,6 +34,8 @@ def rank_summary(items, start, now, limit=1, expected=None):
         lose=sum(t['returned_units'][j]<t['spent_units'] for t in chosen)
         result={'rank':config['rank'],'tied_configurations':config['tied_configurations'],
             'max_buy_cents':CAPS[cap],'take_profit_gain_pct':TP[pi],'stop_loss_pct':SL[si],
+            'average_entry_cents':round(sum(t['price']*100 for t in chosen)/len(chosen),6),
+            'skipped_by_cap':len(selected)-len(chosen),
             'purchases':int(counts[cap]),'profitable_purchases':win,'losing_purchases':lose,
             'break_even_purchases':int(counts[cap])-win-lose,'spent':float(spends[cap])/10000,
             'returned':float(receipts[cap,j])/10000,'net_profit':float(profit[cap,j])/10000,
@@ -100,6 +102,17 @@ def build_input(root, state, now=None):
     prior=root/'reports/rolling.json'
     if prior.exists():previous=json.loads(prior.read_text())
     history,active=recent_beneficial(periods,previous,now)
+    # Upgrade older saved history only when its original cash flows reproduce.
+    for saved in history:
+        if 'average_entry_cents' in saved:continue
+        eligible=[r for r in rounds if not r.get('excluded') and saved['start']<r['close_ts']<=saved['end']]
+        chosen=[r for r in eligible if saved['max_buy_cents'] is None or r['price']<=saved['max_buy_cents']/100+1e-10]
+        j=TP.index(saved['take_profit_gain_pct'])*len(SL)+SL.index(saved['stop_loss_pct'])
+        if (chosen and len(chosen)==saved['purchases']
+                and abs(sum(r['spent_units'] for r in chosen)/10000-saved['spent'])<1e-6
+                and abs(sum(r['returned_units'][j] for r in chosen)/10000-saved['returned'])<1e-6):
+            saved['average_entry_cents']=round(sum(r['price']*100 for r in chosen)/len(chosen),6)
+            saved['skipped_by_cap']=len(eligible)-len(chosen)
     return {"schema_version":1, "mode":"rolling", "generated_at":dt.datetime.now(dt.timezone.utc).isoformat(),
         "as_of":now, "study_start":state["study_start"], "last_observation":state.get("last_observation"),
         "settlements_through":max((r["close_ts"] for r in state["rounds"].values()

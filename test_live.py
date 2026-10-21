@@ -5,10 +5,23 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from analyze import run
-from live_analysis import build_input, recent_beneficial
+from live_analysis import build_input, recent_beneficial, rank_summary, TP, SL
 from collect import status
 
 class RollingTests(unittest.TestCase):
+    def test_profit_optimal_cap_skips_loss_and_average_uses_only_purchases(self):
+        items=[{'price':price,'spent_units':spent,
+                'returned_units':[returned]*(len(TP)*len(SL))}
+            for price,spent,returned in ((.2,10200,20000),(.3,9300,15000),(.9,9200,0))]
+        best=rank_summary(items,0,900)['best']
+        self.assertEqual(best['max_buy_cents'],30)
+        self.assertEqual(best['average_entry_cents'],25)
+        self.assertEqual(best['skipped_by_cap'],1)
+        self.assertEqual(best['purchases'],2)
+        self.assertEqual(best['net_profit'],1.55)
+        # Taking only the 20-cent entry has higher ROI but less total profit.
+        self.assertLess(best['roi_pct'],(20000-10200)/10200*100)
+
     def state(self):
         return {"study_start":0,"study_stop":144000,"last_observation":159990,
             "rounds":{},"samples":0,"error_count":0}
