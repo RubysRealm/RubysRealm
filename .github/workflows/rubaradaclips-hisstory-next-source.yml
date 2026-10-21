@@ -76,7 +76,8 @@ jobs:
               assert float(media[key]) >= duration - 0.2, key
               assert float(actual[key]) >= duration - 0.2, key
           assert source['sourceAccessMethod'] in (
-              'spotify-native', 'verified-creator-transport', 'verified-public-copy',
+              'spotify-native', 'spotify-complete-public-video',
+              'verified-creator-transport', 'verified-public-copy',
           )
           if source['sourceAccessMethod'] != 'spotify-native':
               proof = source['sourceVerification']
@@ -84,7 +85,15 @@ jobs:
               assert proof['rssGuid'] == guid
               assert proof['fullCoverage'] is True
               assert proof['audioCorrelation'] >= 0.90
-              assert proof['previewFrameVerified'] is True
+              if source['sourceAccessMethod'] == 'spotify-complete-public-video':
+                  assert duration <= 60
+                  assert proof['fullNativeVideoVerified'] is True
+                  assert proof['nativeEpisodeId'] == episode['id']
+                  assert proof['showId'] == SPOTIFY_SHOW_ID
+                  assert proof['nativeEmbedUrl'] == f"https://open.spotify.com/embed/episode/{episode['id']}"
+                  assert proof['fullAudioCorrelation'] >= 0.95
+              else:
+                  assert proof['previewFrameVerified'] is True
               assert float(proof['audioVerifiedDurationSeconds']) >= duration - 0.2
           assert STATE_PATH.read_bytes() == original_state, 'Source verification must not change queue state'
           print(json.dumps({

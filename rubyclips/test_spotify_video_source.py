@@ -122,6 +122,132 @@ class SpotifySourceGuards(unittest.TestCase):
             "His Mother Made Him Kneel On Broken Glass | His Story"))
         self.assertTrue(source.creator_title_matches("Bad Roommates | Full Compilation", "14K views | Bad Roommates | Full Compilation | His Story"))
 
+    def preview_with_padding(self, *, reference_samples=20002, padding_samples=20, codec="aac", wrong_sound=False):
+        import numpy as np
+        rng = np.random.default_rng(5)
+        reference = rng.normal(size=reference_samples).astype(np.float32)
+        declared = 20000
+        preview = np.r_[reference[:declared], rng.normal(size=padding_samples)].astype(np.float32)
+        if wrong_sound:
+            preview = rng.normal(size=declared + padding_samples).astype(np.float32)
+        frames = np.eye(4, dtype=np.float32)
+        info = {"durationSeconds": 10.0, "audioDurationSeconds": 10.0,
+                "audioCodec": codec, "audio": {"sample_rate": "48000"}}
+        with (patch.object(source, "probe", return_value=info),
+              patch.object(source, "audio_samples", side_effect=[reference, preview]),
+              patch.object(source, "gray_frames", return_value=frames)):
+            return source.verify_preview_frames(Path("video"), Path("audio"), Path("preview"), 10.0)
+
+    def test_full_length_preview_allows_only_aac_padding_beyond_declared_end(self):
+        proof = self.preview_with_padding()
+        self.assertGreater(proof["previewAudioCorrelation"], 0.999)
+        self.assertEqual(proof["previewAudioDecoderPaddingSeconds"], 0.01)
+        self.assertEqual(proof["previewAudioComparedSeconds"], 10.0)
+        self.assertEqual(proof["previewFramesCompared"], 4)
+
+    def test_preview_padding_cannot_hide_reference_missing_declared_audio(self):
+        with self.assertRaises(source.SourceValidationError):
+            self.preview_with_padding(reference_samples=19999)
+
+    def test_preview_padding_beyond_one_codec_frame_is_rejected(self):
+        with self.assertRaises(source.SourceValidationError):
+            self.preview_with_padding(padding_samples=400)
+
+    def test_preview_padding_exception_does_not_apply_to_other_codecs(self):
+        with self.assertRaises(source.SourceValidationError):
+            self.preview_with_padding(codec="mp3")
+
+    def test_padded_preview_with_different_sound_is_still_rejected(self):
+        with self.assertRaises(source.SourceValidationError):
+            self.preview_with_padding(wrong_sound=True)
+
+    def test_public_sixty_second_clip_cannot_complete_a_longer_episode(self):
+        episode = {"id": source.FIRST_EPISODE_ID, "durationMs": 60100}
+        with patch.object(source, "probe") as probe:
+            self.assertIsNone(source.acquire_complete_public_video(
+                episode, Path("unused"), Path("catalog"), {}, {}, Path("audio"), Path("video")))
+            probe.assert_not_called()
+
+    def public_video_fixture(self):
+        episode = {"id": source.FIRST_EPISODE_ID, "durationMs": 10000}
+        asset = "a" * 32
+        metadata = {"episodeId": episode["id"], "showId": source.SHOW_ID,
+                    "embedUrl": f"https://open.spotify.com/embed/episode/{episode['id']}",
+                    "url": f"https://smart-preview-clips.spotifycdn.com/previews/{asset}/0/{asset}.mp4"}
+        media = {"durationSeconds": 10.0, "videoDurationSeconds": 10.0, "audioDurationSeconds": 10.0,
+                 "video": {"start_time": "0"}, "audio": {"start_time": "0"}}
+        rss = {"guid": "matched-guid", "audioUrl": "https://anchor.fm/s/10ff75318/podcast/play/example/audio.mp3"}
+        return episode, metadata, media, rss
+
+    def test_short_native_clip_cannot_substitute_for_complete_short_episode(self):
+        episode, metadata, media, rss = self.public_video_fixture()
+        media["videoDurationSeconds"] = media["audioDurationSeconds"] = 5.0
+        with (patch.object(source, "probe", return_value=media),
+              patch.object(source, "verify_full_audio") as verify):
+            self.assertIsNone(source.acquire_complete_public_video(
+                episode, Path("unused"), Path("catalog"), metadata, rss, Path("audio"), Path("video")))
+            verify.assert_not_called()
+
+    def test_complete_native_video_requires_the_exact_episode_and_show(self):
+        episode, metadata, media, rss = self.public_video_fixture()
+        for replacement in ({"episodeId": "different"}, {"showId": "different"},
+                            {"url": metadata["url"].replace("spotifycdn.com", "spotifycdn.com.evil.example")}):
+            with self.subTest(replacement=replacement), patch.object(source, "probe", return_value=media):
+                with self.assertRaises(source.SourceValidationError):
+                    source.acquire_complete_public_video(episode, Path("unused"), Path("catalog"),
+                        {**metadata, **replacement}, rss, Path("audio"), Path("video"))
+
+    def test_complete_public_video_does_not_invent_a_transport_preview_match(self):
+        episode, metadata, media, rss = self.public_video_fixture()
+        catalog = {"episodes": [dict(episode)]}
+        sound = {"audioCorrelation": 0.999, "fullAudioCorrelation": 0.999,
+                 "audioVerifiedDurationSeconds": 10.0}
+        with (patch.object(source, "probe", return_value=media),
+              patch.object(source, "verify_full_audio", return_value=sound) as verify,
+              patch.object(source, "command"), patch.object(source, "sha256", return_value="0" * 64),
+              patch.object(source, "load_catalog", return_value=catalog),
+              patch.object(source, "atomic_json") as save):
+            full, evidence = source.acquire_complete_public_video(episode, Path("unused"), Path("catalog"),
+                metadata, rss, Path("audio"), Path("video"))
+        verify.assert_called_once_with(Path("video"), Path("audio"), 10.0)
+        self.assertEqual(full, Path("unused/full-source.mp4"))
+        self.assertEqual(evidence["sourceAccessMethod"], "spotify-complete-public-video")
+        proof = evidence["sourceVerification"]
+        self.assertTrue(proof["fullNativeVideoVerified"])
+        self.assertEqual(proof["nativeEmbedUrl"], metadata["embedUrl"])
+        self.assertNotIn("previewFrameVerified", proof)
+        self.assertIn("verifiedPublicVideo", catalog["episodes"][0])
+        save.assert_called_once()
+
+    def test_complete_native_video_with_wrong_sound_does_not_mux_or_cache(self):
+        episode, metadata, media, rss = self.public_video_fixture()
+        with (patch.object(source, "probe", return_value=media),
+              patch.object(source, "verify_full_audio", side_effect=source.SourceValidationError("Different sound")),
+              patch.object(source, "command") as mux, patch.object(source, "atomic_json") as save):
+            with self.assertRaises(source.SourceValidationError):
+                source.acquire_complete_public_video(episode, Path("unused"), Path("catalog"),
+                    metadata, rss, Path("audio"), Path("video"))
+            mux.assert_not_called()
+            save.assert_not_called()
+
+    def test_complete_native_video_cannot_start_in_the_middle(self):
+        episode, metadata, media, rss = self.public_video_fixture()
+        media["video"]["start_time"] = "0.5"
+        with patch.object(source, "probe", return_value=media):
+            with self.assertRaises(source.SourceValidationError):
+                source.acquire_complete_public_video(episode, Path("unused"), Path("catalog"),
+                    metadata, rss, Path("audio"), Path("video"))
+
+    def test_spotify_embed_must_link_to_the_pinned_show(self):
+        episode = {"id": source.FIRST_EPISODE_ID, "durationMs": 10000}
+        entity = {"type": "episode", "id": episode["id"], "uri": f"spotify:episode:{episode['id']}",
+                  "relatedEntityUri": "spotify:show:another-show", "duration": 10000,
+                  "hasVideo": True, "videoPreview": {"url": "https://smart-preview-clips.spotifycdn.com/test.mp4"}}
+        page = ('<script id="__NEXT_DATA__">' + json.dumps({"entity": entity}) + '</script>').encode()
+        with patch.object(source, "download_bytes", return_value=page):
+            with self.assertRaises(source.SourceValidationError):
+                source.spotify_preview(episode)
+
 
 if __name__ == "__main__":
     unittest.main()

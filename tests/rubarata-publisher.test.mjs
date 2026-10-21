@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { validateSpotifyVideoManifest, validatePendingSource, SPOTIFY_SHOW_ID, SPOTIFY_FEED, postMatchesMedia } from '../lib/rubarata-video.js';
 import handler from '../api/rubyclips-post.js';
 
@@ -22,6 +23,36 @@ const fixture = () => ({
   outputVideoCodec: 'h264', outputAudioCodec: 'aac', file: 'episode-part-01.mp4',
   caption: 'His Mom Made Him Kneel On Broken Glass | Part 1 of 1'
 });
+
+const completePublicFixture = () => {
+  const id = '3XpQTdjxaKPEpHRKV5J8Ir';
+  const rssGuid = '1fd9ad80-376a-48d4-a47b-b30d062c5b1b';
+  const seriesId = 'hisstory-' + createHash('sha256').update(rssGuid).digest('hex').slice(0, 16);
+  const visualUrl = 'https://smart-preview-clips.spotifycdn.com/previews/32b6d7f01eba11f1a1520b994db71638/0/32b6d7f01eba11f1a1520b994db71638.mp4';
+  const manifest = {
+    ...fixture(), sourceAccessMethod: 'spotify-complete-public-video',
+    sourceSeriesId: seriesId, sourceEpisodeGuid: rssGuid, spotifyEpisodeId: id,
+    logicalPostKey: `rubyclips:${seriesId}:r16:p1`,
+    sourceDurationSeconds: 56.917, segmentDurationSeconds: 56.9175, segmentEndSeconds: 56.917,
+    sourceMedia: { fullEpisode: true, videoCodec: 'h264', audioCodec: 'aac', videoDurationSeconds: 56.9, audioDurationSeconds: 56.9175 },
+    mediaVideo: { durationSeconds: 56.9 }, mediaAudio: { durationSeconds: 56.9175 },
+    caption: "My Neighbor's Husband Broke Down My Door | Part 1 of 1",
+    transportUrl: visualUrl, transportAudioUsed: false,
+    sourceVerification: {
+      spotifyEpisodeId: id, showId: SPOTIFY_SHOW_ID, rssGuid, rssFeedUrl: SPOTIFY_FEED,
+      sourceAccessMethod: 'spotify-complete-public-video', fullCoverage: true, fullNativeVideoVerified: true,
+      nativeEpisodeId: id, nativeEmbedUrl: `https://open.spotify.com/embed/episode/${id}`,
+      visualUrl, audioUrl: 'https://anchor.fm/s/10ff75318/podcast/play/116923624/source.mp3',
+      nativeVideoStartSeconds: 0, nativeAudioStartSeconds: 0,
+      nativeVideoDurationSeconds: 56.9, nativeAudioDurationSeconds: 56.917,
+      fullAudioCorrelation: 0.999730, audioCorrelation: 0.997329,
+      audioWindowCorrelations: [0.998, 0.999, 0.997329], audioOffsetsSeconds: [0, 0, 0],
+      audioVerifiedDurationSeconds: 56.9175,
+      visualSha256: 'a'.repeat(64), audioSha256: 'b'.repeat(64)
+    }
+  };
+  return { manifest, releaseTag: `rubyclips-tt-${seriesId}-r16-p1` };
+};
 
 test('accepts a complete verified original episode with normal codec padding', () => {
   assert.deepEqual(validateSpotifyVideoManifest(fixture(), tag), { seriesId: series, index: 1, total: 1 });
@@ -55,6 +86,69 @@ test('requires actual matching evidence for the creator video copy', () => {
   validateSpotifyVideoManifest(paired, tag);
   assert.throws(() => validateSpotifyVideoManifest({ ...paired, sourceVerification: { ...paired.sourceVerification, audioCorrelation: 0.3 } }, tag), /audio identity/);
   assert.throws(() => validateSpotifyVideoManifest({ ...paired, sourceVerification: { ...paired.sourceVerification, previewFrameVerified: false } }, tag), /visuals/);
+  assert.throws(() => validateSpotifyVideoManifest({ ...paired, sourceAccessMethod: 'verified-public-copy', sourceVerification: { ...paired.sourceVerification, previewFrameVerified: false } }, tag), /visuals/);
+});
+
+test('accepts a complete short episode directly from its Spotify CDN without claiming preview frame comparison', () => {
+  const { manifest, releaseTag } = completePublicFixture();
+  assert.equal(manifest.sourceVerification.previewFrameVerified, undefined);
+  assert.equal(validateSpotifyVideoManifest(manifest, releaseTag).index, 1);
+});
+
+test('a 60-second public excerpt cannot stand in for a longer Spotify episode', () => {
+  const { manifest, releaseTag } = completePublicFixture();
+  for (const duration of [60.1, 168.874]) {
+    const excerpt = { ...manifest, sourceDurationSeconds: duration, segmentEndSeconds: duration, segmentDurationSeconds: duration,
+      sourceMedia: { ...manifest.sourceMedia, videoDurationSeconds: duration, audioDurationSeconds: duration },
+      mediaVideo: { durationSeconds: duration }, mediaAudio: { durationSeconds: duration },
+      sourceVerification: { ...manifest.sourceVerification, nativeVideoDurationSeconds: 60, nativeAudioDurationSeconds: 60, audioVerifiedDurationSeconds: duration }
+    };
+    assert.throws(() => validateSpotifyVideoManifest(excerpt, releaseTag), /at most 60 seconds/);
+  }
+  assert.throws(() => validateSpotifyVideoManifest({ ...manifest, sourceVerification: { ...manifest.sourceVerification, nativeVideoDurationSeconds: 40 } }, releaseTag), /complete Spotify episode/);
+});
+
+test('complete public Spotify video must bind the episode, show, RSS item, and exact embed', () => {
+  const { manifest, releaseTag } = completePublicFixture();
+  for (const proofPatch of [
+    { spotifyEpisodeId: episode }, { nativeEpisodeId: episode }, { showId: '2lxmtcbizlC4eKhEa5HZ4I' },
+    { rssGuid: guid }, { rssFeedUrl: 'https://anchor.fm/s/different/podcast/rss' },
+    { nativeEmbedUrl: `https://open.spotify.com/embed/episode/${episode}` },
+    { sourceAccessMethod: 'spotify-native' }, { fullCoverage: false }, { fullNativeVideoVerified: false }
+  ]) assert.throws(() => validateSpotifyVideoManifest({ ...manifest, sourceVerification: { ...manifest.sourceVerification, ...proofPatch } }, releaseTag), /Blocked:/);
+});
+
+test('complete public video rejects spoofed Spotify hosts, unsupported paths, credentials, and transport substitutions', () => {
+  const { manifest, releaseTag } = completePublicFixture();
+  const original = manifest.transportUrl;
+  for (const visualUrl of [
+    original.replace('https:', 'http:'), original.replace('spotifycdn.com/', 'spotifycdn.com.evil.example/'),
+    original.replace('smart-preview-clips.spotifycdn.com', 'other.spotifycdn.com'),
+    original.replace('https://', 'https://user:secret@'), original.replace('.com/', '.com:444/'),
+    original.replace('/0/', '/1/'), original.replace(/\.mp4$/, 'a.mp4'), original + '?different=1'
+  ]) assert.throws(() => validateSpotifyVideoManifest({ ...manifest, transportUrl: visualUrl, sourceVerification: { ...manifest.sourceVerification, visualUrl } }, releaseTag), /Spotify CDN/);
+  assert.throws(() => validateSpotifyVideoManifest({ ...manifest, transportUrl: original + '?other' }, releaseTag), /URL must agree/);
+  assert.throws(() => validateSpotifyVideoManifest({ ...manifest, transportAudioUsed: true }, releaseTag), /RSS sound/);
+  assert.throws(() => validateSpotifyVideoManifest({ ...manifest, sourceVerification: { ...manifest.sourceVerification, audioUrl: 'https://anchor.fm.evil.example/s/10ff75318/podcast/play/123/audio.mp3' } }, releaseTag), /official RSS sound/);
+});
+
+test('complete public video requires measured whole soundtrack identity and timing', () => {
+  const { manifest, releaseTag } = completePublicFixture();
+  for (const proofPatch of [
+    { audioCorrelation: 0.94 }, { fullAudioCorrelation: 0.94 },
+    { audioWindowCorrelations: [0.99, 0.6, 0.99] }, { audioWindowCorrelations: [0.99] },
+    { audioOffsetsSeconds: [0, 0.126, 0] }, { audioOffsetsSeconds: [0, Number.NaN, 0] },
+    { audioVerifiedDurationSeconds: 40 }, { visualSha256: '' }, { audioSha256: '' }
+  ]) assert.throws(() => validateSpotifyVideoManifest({ ...manifest, sourceVerification: { ...manifest.sourceVerification, ...proofPatch } }, releaseTag), /Blocked:/);
+});
+
+test('both complete native streams must start at zero and retain the ending', () => {
+  const { manifest, releaseTag } = completePublicFixture();
+  for (const proofPatch of [
+    { nativeVideoStartSeconds: 0.002 }, { nativeAudioStartSeconds: -0.002 },
+    { nativeVideoStartSeconds: undefined }, { nativeAudioStartSeconds: Number.NaN },
+    { nativeAudioDurationSeconds: 56.5 }, { nativeVideoDurationSeconds: 57.3 }
+  ]) assert.throws(() => validateSpotifyVideoManifest({ ...manifest, sourceVerification: { ...manifest.sourceVerification, ...proofPatch } }, releaseTag), /native public video streams/);
 });
 
 test('only the next durably saved pending part can be created', () => {

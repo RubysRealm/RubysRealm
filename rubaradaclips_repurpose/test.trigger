@@ -1,1 +1,1 @@
-inter-centered-v1 full video and title alignment verification
+2026-10-21: verify full native Spotify short episodes and AAC comparison padding; keep queue state unchanged

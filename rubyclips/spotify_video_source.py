@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Prepare verified original video and audio for the pinned Rubarata show.
 
-Public Spotify metadata is sufficient for cataloguing, never for pretending an
-audio preview or cover image is the original video. Media acquisition is either
-native unencrypted Spotify media or an independently verified exact public copy.
+Public metadata and cover images never substitute for original video. Media is
+native unencrypted Spotify video or an independently verified exact public copy.
+A public Spotify clip is usable only when it contains the entire short episode,
+with complete video and audio coverage independently checked against the feed.
 This module never publishes or advances queue state and never stores cookies.
 """
 from __future__ import annotations
@@ -520,9 +521,13 @@ def spotify_preview(episode: dict) -> dict:
     if not usable:
         raise SourceAccessRequired("This episode has no accessible original Spotify video preview to verify its creator transport.")
     entity = usable[0]
+    if (entity.get("uri") != f"spotify:episode:{episode['id']}"
+            or entity.get("relatedEntityUri") != f"spotify:show:{SHOW_ID}"):
+        raise SourceValidationError("Spotify video metadata belongs to a different episode or show.")
     if abs(finite_positive(entity.get("duration"), "Spotify preview episode duration") - episode["durationMs"]) > 300:
         raise SourceValidationError("Spotify preview metadata no longer matches the pinned episode duration.")
-    return {"url": checked_url(entity["videoPreview"]["url"], ("spotifycdn.com",)), "episodeId": episode["id"]}
+    return {"url": checked_url(entity["videoPreview"]["url"], ("spotifycdn.com",)),
+            "episodeId": episode["id"], "showId": SHOW_ID, "embedUrl": url}
 
 
 def _canonical_facebook_path(url: str, kinds: tuple[str, ...]) -> str | None:
@@ -786,6 +791,19 @@ def verify_preview_frames(creator: Path, spotify_audio: Path, preview: Path, dur
     rate = 2000
     original_sound = audio_samples(spotify_audio, rate=rate)
     preview_sound = audio_samples(preview, rate=rate)
+    decoder_padding = 0
+    if len(preview_sound) > len(original_sound):
+        # A full-length AAC preview can decode a partial final codec frame
+        # beyond its declared timeline. Remove only that measured padding,
+        # never actual preview content or samples from the reference audio.
+        declared_samples = math.ceil(preview_info["audioDurationSeconds"] * rate - 1e-9)
+        sample_rate = finite_positive(preview_info["audio"].get("sample_rate"), "Preview audio sample rate")
+        decoder_padding = len(preview_sound) - declared_samples
+        padding_limit = math.ceil(1024 * rate / sample_rate) + 1
+        if (preview_info["audioCodec"] != "aac" or len(original_sound) < declared_samples
+                or not 0 < decoder_padding <= padding_limit):
+            raise SourceValidationError("The audio reference does not cover the declared Spotify preview.")
+        preview_sound = preview_sound[:declared_samples]
     offset, audio_correlation = best_audio_match(original_sound, preview_sound, rate)
     if audio_correlation < 0.95 or offset + preview_info["durationSeconds"] > duration + 0.3:
         raise SourceValidationError("The Spotify video preview does not match the full episode's sound.")
@@ -802,9 +820,62 @@ def verify_preview_frames(creator: Path, spotify_audio: Path, preview: Path, dur
     if median < 0.80 or passing < 0.75:
         raise SourceValidationError("The creator video's image does not match the original Spotify video preview.")
     return {"previewAudioCorrelation": audio_correlation, "previewOffsetSeconds": offset,
+            "previewAudioDecoderPaddingSeconds": decoder_padding / rate,
+            "previewAudioComparedSeconds": len(preview_sound) / rate,
             "previewFrameCorrelation": median, "previewFramesPassingFraction": passing,
             "previewFramesCompared": len(scores), "previewFrameVerified": True,
             "previewFrameAlignment": "exact-spotify-audio-offset"}
+
+
+def acquire_complete_public_video(episode: dict, temp: Path, catalog_path: Path,
+                                  metadata: dict, rss: dict, spotify_audio: Path,
+                                  video: Path) -> tuple[Path, dict] | None:
+    """Use a native public clip only when it is the complete short episode."""
+    duration = source_duration(episode)
+    # An ordinary 60-second preview of a longer story must never qualify,
+    # including episodes just beyond 60 seconds within codec tolerances.
+    if duration > 60.0:
+        return None
+    native = probe(video)
+    if min(native["videoDurationSeconds"], native["audioDurationSeconds"]) < duration - 0.2:
+        return None
+    validate_full_coverage(native, duration)
+    embed_url = f"https://open.spotify.com/embed/episode/{episode['id']}"
+    parsed = urllib.parse.urlparse(metadata["url"])
+    if (metadata.get("episodeId") != episode["id"] or metadata.get("showId") != SHOW_ID
+            or metadata.get("embedUrl") != embed_url
+            or parsed.scheme != "https" or parsed.hostname != "smart-preview-clips.spotifycdn.com"
+            or parsed.username or parsed.password or parsed.port not in (None, 443)
+            or parsed.query or parsed.fragment
+            or not re.fullmatch(r"/previews/([a-f0-9]{32})/0/\1\.mp4", parsed.path)):
+        raise SourceValidationError("The complete public video is not bound to this Spotify episode.")
+    starts = [float(native[k].get("start_time") or 0) for k in ("video", "audio")]
+    if any(not math.isfinite(start) or abs(start) > 0.001 for start in starts):
+        raise SourceValidationError("The complete Spotify video must start at the beginning of the episode.")
+    full_audio = verify_full_audio(video, spotify_audio, duration)
+    full = temp / "full-source.mp4"
+    command(["ffmpeg", "-y", "-v", "error", "-i", str(video), "-i", str(spotify_audio),
+             "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
+             "-ar", "48000", "-movflags", "+faststart", str(full)], timeout=1800)
+    media = probe(full)
+    validate_full_coverage(media, duration)
+    method = "spotify-complete-public-video"
+    verification = {"spotifyEpisodeId": episode["id"], "showId": SHOW_ID,
+                    "rssGuid": rss["guid"], "rssFeedUrl": SPOTIFY_RSS,
+                    "visualUrl": metadata["url"], "audioUrl": rss["audioUrl"],
+                    "sourceAccessMethod": method, "fullCoverage": True,
+                    "fullNativeVideoVerified": True, "nativeEpisodeId": episode["id"],
+                    "nativeEmbedUrl": embed_url,
+                    "nativeVideoDurationSeconds": native["videoDurationSeconds"],
+                    "nativeAudioDurationSeconds": native["audioDurationSeconds"],
+                    "nativeVideoStartSeconds": starts[0], "nativeAudioStartSeconds": starts[1],
+                    **full_audio, "visualSha256": sha256(video), "audioSha256": sha256(spotify_audio)}
+    catalog = load_catalog(catalog_path)
+    row = next(row for row in catalog["episodes"] if row["id"] == episode["id"])
+    row["verifiedPublicVideo"] = {**verification, "verifiedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}
+    atomic_json(catalog_path, catalog)
+    return full, {"sourceAccessMethod": method, "sourceMedia": media,
+                  "sourceSha256": sha256(full), "sourceVerification": verification, "fullCoverage": True}
 
 
 def acquire_verified_creator(episode: dict, temp: Path, catalog_path: Path) -> tuple[Path, dict]:
@@ -815,6 +886,10 @@ def acquire_verified_creator(episode: dict, temp: Path, catalog_path: Path) -> t
     spotify_audio.write_bytes(download_bytes(rss["audioUrl"], SPOTIFY_MEDIA_DOMAINS))
     preview = temp / "spotify-reference-preview.mp4"
     preview.write_bytes(download_bytes(preview_metadata["url"], ("spotifycdn.com",)))
+    complete_native = acquire_complete_public_video(episode, temp, catalog_path, preview_metadata,
+                                                     rss, spotify_audio, preview)
+    if complete_native is not None:
+        return complete_native
     duration = source_duration(episode)
     last_error = None
     for candidate in candidates:
@@ -984,12 +1059,15 @@ def main() -> int:
             if args.catalog.exists():
                 existing = load_catalog(args.catalog)
                 verified = {row["id"]: row.get("verifiedTransport") for row in existing["episodes"]}
+                public_video = {row["id"]: row.get("verifiedPublicVideo") for row in existing["episodes"]}
                 candidates = {row["id"]: row.get("sourceDiscoveryCandidates") for row in existing["episodes"]}
                 transport_candidates = {row["id"]: row.get("transportCandidates") for row in existing["episodes"]}
                 rss_guids = {row["id"]: row.get("rssGuid") for row in existing["episodes"]}
                 for row in catalog["episodes"]:
                     if verified.get(row["id"]):
                         row["verifiedTransport"] = verified[row["id"]]
+                    if public_video.get(row["id"]):
+                        row["verifiedPublicVideo"] = public_video[row["id"]]
                     if candidates.get(row["id"]):
                         row["sourceDiscoveryCandidates"] = candidates[row["id"]]
                     if transport_candidates.get(row["id"]):
