@@ -1,0 +1,44 @@
+name: Oracle Call Study — continuous rolling data
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/oracle-call-study-live.yml']
+  schedule:
+    - cron: '17 0 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: oracle-public-paper-study-20261020
+  cancel-in-progress: true
+jobs:
+  record:
+    name: Rolling recorder segment ${{ matrix.segment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        segment: [1, 2, 3, 4, 5]
+    steps:
+      - name: Check out the study code
+        uses: actions/checkout@v4
+        with:
+          ref: oracle-paper-study-20261020
+          persist-credentials: false
+      - name: Resume saved observations
+        uses: actions/checkout@v4
+        with:
+          ref: oracle-public-study-data-20261020
+          path: observations
+          persist-credentials: false
+      - name: Install numerical dependency
+        run: python -m pip install numpy
+      - name: Validate paper calculations and rolling windows
+        run: python -m unittest -v test_study.py test_live.py
+      - name: Record and publish continuously
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SEGMENT: ${{ matrix.segment }}
+        run: python -u collect.py --continuous --seconds 18000 --segment "${GITHUB_RUN_ID}-${SEGMENT}" --directory observations --github
