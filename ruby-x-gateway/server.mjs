@@ -1,6 +1,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import {pathToFileURL} from 'node:url';
+import {startAutoRoles} from './autoroles.mjs';
 
 // The existing chart and database remain the sole source of market data.
 // No credentials, cookies, response cache, or prediction engine live here.
@@ -50,5 +51,6 @@ if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
   if(!upstream?.startsWith('https://') || !publicOrigin?.startsWith('https://'))throw Error('HTTPS origins required');
   const server=createGateway({upstream,publicOrigin,discordOrigin:process.env.DISCORD_ORIGIN});
   server.listen(Number(process.env.PORT||10000),'0.0.0.0');
+  startAutoRoles(process.env.DISCORD_BOT_TOKEN);
   process.on('SIGTERM',()=>{server.close();setTimeout(()=>process.exit(0),5000).unref();});
 }
