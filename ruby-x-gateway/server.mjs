@@ -3,18 +3,25 @@ import https from 'node:https';
 import {pathToFileURL} from 'node:url';
 import {startAutoRoles} from './autoroles.mjs';
 
-// The existing chart and database remain the sole source of market data.
-// No credentials, cookies, response cache, or prediction engine live here.
+// The chart owns predictions, credentials and durable statistics.
+// A bounded public Coinbase cache shares market-data requests across viewers.
 export function createGateway({upstream, publicOrigin, discordOrigin}) {
   const base = new URL(upstream);
   const transport = base.protocol === 'https:' ? https : http;
   const agent = new transport.Agent({keepAlive:true});
+  const coinbase=createCoinbaseSource();
   const reads = new Set(['market','candles','short-candles','ticker','time','settlements','kalshi-stream','kalshi-connection','worker-state','round-study']);
   return http.createServer((req,res) => {
     const fail = (code,message) => { if(!res.headersSent)res.writeHead(code,{'content-type':'application/json','cache-control':'no-store'});res.end(JSON.stringify({error:message})); };
     let path;
     try { path = new URL(req.url,publicOrigin); } catch { return fail(400,'Invalid request'); }
     if(path.origin !== publicOrigin)return fail(400,'Invalid request');
+    if(path.pathname === '/api/coinbase-source'){
+      if(req.method!=='GET')return fail(405,'Read-only public feed');
+      if([...path.searchParams.keys()].some(k=>k!=='path')||path.searchParams.getAll('path').length!==1)return fail(400,'Invalid request');
+      void coinbase(path.searchParams.get('path')).then(value=>{if(res.destroyed)return;res.writeHead(value.status,{'cache-control':'no-store',...value.headers});res.end(value.body);}).catch(()=>fail(503,'Feed unavailable'));
+      return;
+    }
     if(path.pathname === '/healthz'){res.writeHead(200,{'cache-control':'no-store'});return res.end('ok');}
     const method=req.method;
     const interaction=path.pathname === '/api/discord/interactions';
@@ -45,6 +52,44 @@ export function createGateway({upstream, publicOrigin, discordOrigin}) {
     res.on('close',()=>proxy.destroy());
   });
 }
+
+export function createCoinbaseSource({fetcher=fetch,clock=Date.now,pause=ms=>new Promise(r=>setTimeout(r,ms))}={}){
+  const cache=new Map(),pending=new Map();let nextStart=0,retryAt=0;
+  function validate(raw){
+    const u=new URL(raw,'https://api.exchange.coinbase.com');
+    if(u.origin!=='https://api.exchange.coinbase.com'||!/^\/products\/(BTC|ETH|XRP|SOL)-USD\/(ticker|candles|trades)$/.test(u.pathname))throw Error('Unsupported feed');
+    const kind=u.pathname.split('/').at(-1),allowed=kind==='candles'?['start','end','granularity']:kind==='trades'?['limit','after']:[];
+    for(const key of u.searchParams.keys())if(!allowed.includes(key)||u.searchParams.getAll(key).length!==1)throw Error('Invalid parameters');
+    if(kind==='candles'){
+      const start=Date.parse(u.searchParams.get('start')),end=Date.parse(u.searchParams.get('end'));
+      if(u.searchParams.get('granularity')!=='60'||!Number.isFinite(start)||!Number.isFinite(end)||start>=end||end-start>299*60000||start<clock()-7*3600000||end>clock()+1000)throw Error('Invalid candle window');
+    }
+    if(kind==='trades'&&(u.searchParams.get('limit')!=='1000'||(u.searchParams.has('after')&&!/^\d{1,25}$/.test(u.searchParams.get('after')))))throw Error('Invalid trade page');
+    u.searchParams.sort();return {url:u.href,kind};
+  }
+  return async raw=>{
+    let url,kind;try{({url,kind}=validate(raw));}catch{return {status:400,body:'{"error":"Unsupported public feed request"}',headers:{}};}
+    const hit=cache.get(url);if(hit&&hit.until>clock())return hit.value;
+    if(pending.has(url))return pending.get(url);
+    if(retryAt>clock())return {status:429,body:'{"error":"Coinbase cooldown"}',headers:{'retry-after':String(Math.ceil((retryAt-clock())/1000))}};
+    if(pending.size>=16)return {status:503,body:'{"error":"Feed refresh queued"}',headers:{'retry-after':'1'}};
+    const slot=Math.max(clock(),nextStart);nextStart=slot+220;
+    const job=(async()=>{
+      if(slot>clock())await pause(slot-clock());
+      if(retryAt>clock())return {status:429,body:'{"error":"Coinbase cooldown"}',headers:{'retry-after':String(Math.ceil((retryAt-clock())/1000))}};
+      try{
+        const r=await fetcher(url,{headers:{Accept:'application/json','User-Agent':'RUBY-X-Market-Data/1.0'},signal:AbortSignal.timeout(4000)}),body=await r.text();
+        const headers={'content-type':'application/json'};
+        for(const k of ['date','age','retry-after','cb-after'])if(r.headers.has(k))headers[k]=r.headers.get(k);
+        const value={status:r.status,body,headers};
+        if(r.status===429){const raw=r.headers.get('retry-after'),n=Number(raw);retryAt=clock()+Math.max(1000,raw&&Number.isFinite(n)?n*1000:30000);}
+        if(r.ok){if(cache.size>=256)cache.delete(cache.keys().next().value);cache.set(url,{value,until:clock()+(kind==='ticker'?1000:kind==='candles'?5000:1500)});}
+        return value;
+      }catch{return {status:503,body:'{"error":"Coinbase feed unavailable"}',headers:{'retry-after':'2'}};}
+    })();pending.set(url,job);try{return await job;}finally{pending.delete(url);}
+  };
+}
+
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
   const upstream=process.env.CHART_ORIGIN;
   const publicOrigin=process.env.PUBLIC_ORIGIN;
