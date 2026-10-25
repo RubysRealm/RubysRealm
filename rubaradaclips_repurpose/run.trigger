@@ -1,1 +1,1 @@
-2026-10-21T04:10:00Z recover the overdue second His Story upload through the production queue; preserve the six-hour cadence, exact-source verification, centered Inter titles, and duplicate protection.
+2026-10-25T20:30Z one-time guarded restart after verified TikTok spam rejection. Use production duplicate protection, quarantine rejected attempt, honor moderation cooldown and six-hour send spacing; do not resubmit blocked video.
