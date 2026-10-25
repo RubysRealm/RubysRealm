@@ -19,16 +19,17 @@
       "tied_configurations": 1
     },
     "elapsed_ready": true,
-    "end": 1792966452.0713303,
+    "end": 1792966512.0231447,
     "excluded": {
       "no_affordable_entry_depth": 1,
       "no_locked_call": 84,
-      "quote_gap_over_20s": 14
+      "quote_gap_over_20s": 14,
+      "unverified_settlement": 1
     },
-    "expected_rounds": 474,
+    "expected_rounds": 475,
     "included_call_opportunities": 355,
     "missing_rounds": 20,
-    "observed_rounds": 454,
+    "observed_rounds": 455,
     "start": 1792539000,
     "status": "partial_sample",
     "top_setups": [
@@ -52,7 +53,7 @@
       }
     ]
   },
-  "as_of": 1792966452.0713303,
+  "as_of": 1792966512.0231447,
   "beneficial_active_keys": [
     "[62, 98, 95]",
     "[62, 99, 95]",
@@ -168,8 +169,8 @@
     99,
     null
   ],
-  "generated_at": "2026-10-25T22:14:12.249548+00:00",
-  "last_observation": 1792966452.0150118,
+  "generated_at": "2026-10-25T22:15:12.200316+00:00",
+  "last_observation": 1792966511.7142916,
   "mode": "rolling",
   "money_scale": 10000,
   "period_hours": [
@@ -295,12 +296,6 @@
     }
   ],
   "rounds": [
-    {
-      "close_ts": 1792833300.0,
-      "excluded": "no_locked_call",
-      "open_ts": 1792832400.0,
-      "ticker": "KXBTC15M-26OCT240515-15"
-    },
     {
       "close_ts": 1792834200.0,
       "excluded": "no_locked_call",
@@ -277491,6 +277486,12 @@
       ],
       "spent_units": 9993,
       "ticker": "KXBTC15M-26OCT251800-00"
+    },
+    {
+      "close_ts": 1792966500.0,
+      "excluded": "unverified_settlement",
+      "open_ts": 1792965600.0,
+      "ticker": "KXBTC15M-26OCT251815-15"
     }
   ],
   "schema_version": 1,
