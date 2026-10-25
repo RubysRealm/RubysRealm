@@ -34,6 +34,8 @@ BUFFER_ORG_ID='6a909de43dfa01f80e2d23c6'
 REPO='RubysRealm/RubysRealm'
 UNKNOWN_GRACE=timedelta(minutes=15)
 ABSENT_INTERVAL=timedelta(minutes=5)
+MODERATION_COOLDOWN=timedelta(hours=24)
+MODERATION_CIRCUIT_WINDOW=timedelta(hours=48)
 
 def run(args,timeout=1200,capture=False):
     print('+',' '.join(map(str,args)),flush=True)
@@ -100,16 +102,35 @@ def load_state():
         raise RuntimeError('State points to the wrong Spotify show')
     return s
 
+def verified_source_guids():
+    """Only prioritize sources previously verified as complete; acquire rechecks them."""
+    if not CATALOG_PATH.exists():
+        return set()
+    try:
+        catalog=json.loads(CATALOG_PATH.read_text())
+    except (OSError,ValueError):
+        return set()
+    return {row.get('rssGuid') for row in catalog.get('episodes',[])
+            if row.get('rssGuid') and (row.get('verifiedTransport') or row.get('verifiedPublicVideo'))}
+
+
 def selected(state,entries):
     completed=set(state.get('completed') or [])
+    rejected={r.get('guid') for r in (state.get('rejected_posts') or [])
+              if isinstance(r,dict)}
+    excluded=completed|rejected
     cur=state.get('current') or {}
-    if cur.get('guid'):
+    if cur.get('guid') and cur['guid'] not in excluded:
         ep=next((e for e in entries if e['guid']==cur['guid']),None)
         if ep is None: raise RuntimeError('Locked current episode disappeared from RSS')
-        if ep['guid'] in completed: raise RuntimeError('Locked current episode is already completed')
         return ep,int(cur.get('next_part') or 1)
-    ep=next((e for e in entries if e['guid'] not in completed),None)
-    if ep is None:return None,1
+    remaining=[e for e in entries if e['guid'] not in excluded]
+    verified=verified_source_guids()
+    # Keep the complete story intact, but allow source gaps to be filled later;
+    # missing original video must not stop every other fully verified episode.
+    ep=next((e for e in remaining if e['guid'] in verified),None)
+    if ep is None:
+        ep=next(iter(remaining),None)
     return ep,1
 
 def segment_plan(duration):
@@ -312,7 +333,7 @@ def build_verified(state):
     if verification:
         manifest['sourceVerification']=verification
     done=set(state.get('completed') or [])|{ep['guid']}
-    next_episode=next((row for row in entries if row['guid'] not in done),None)
+    next_episode,_=selected({**state,'completed':list(done),'current':None},entries)
     info={'guid':ep['guid'],'spotifyEpisodeId':evidence['episodeId'],'title':ep['title'],
           'date':ep['date'],'part':part,'totalParts':len(segments),'startSeconds':start,'endSeconds':end,
           'sourceDurationSeconds':source_duration,'duration':round(duration,6),
@@ -512,6 +533,8 @@ class DurableQueue:
 
     def tick(self,prepare=False):
         if self.state.get('pending'):
+            if self.state['pending'].get('phase')=='blocked':
+                return self.quarantine_spam_rejection()
             return self.reconcile()
         current=self.state.get('current') or {}
         if current.get('guid'):
@@ -546,6 +569,55 @@ class DurableQueue:
         pending['failure']={'reason':str(reason)[:700],'at':iso(self.clock())}
         self.save('Preserve rejected His Story attempt without automatic resubmission')
         return self.result('blocked',reason=str(reason)[:700])
+
+    def quarantine_spam_rejection(self):
+        """Advance past one *confirmed* content rejection; never retry its Buffer post."""
+        pending=self.state['pending']
+        reason=(pending.get('failure') or {}).get('reason') or ''
+        # Connection errors, unclear submission states and moderation decisions
+        # other than this known terminal rejection remain safely blocked.
+        if 'TikTok flagged this post as potential spam' not in reason:
+            return self.result('blocked',reason=reason)
+        try:
+            lookup=self.io.lookup(pending)  # read-only, exact release tag
+            require(lookup.get('ok') is True and lookup.get('videoUrl')==pending['videoUrl'],
+                    'Could not reconfirm the rejected immutable release')
+            post=lookup.get('post')
+            require(isinstance(post,dict),'Rejected Buffer post is missing')
+            self.validate_post(post)  # exact post ID, channel, text and video asset
+        except (APIError,QueueError) as exc:
+            return self.result('blocked',reason='Rejection verification unavailable: '+str(exc))
+        if str(post.get('status') or '').lower()=='sent' and not post.get('error'):
+            return self.observe(post)
+        error=post.get('error') or {}
+        message=error.get('message') if isinstance(error,dict) else str(error)
+        if (str(post.get('status') or '').lower() not in ('error','failed','rejected')
+                or 'flagged this post as potential spam' not in str(message).lower()):
+            return self.result('blocked',reason='TikTok rejection is not confirmed as terminal')
+        rejected_at=parse_time((pending.get('failure') or {}).get('at'))
+        if not rejected_at or self.clock()-rejected_at<MODERATION_COOLDOWN:
+            return self.result('blocked',reason='TikTok rejected this video; preserving a 24-hour moderation cooldown')
+        previous=self.state.get('rejected_posts') or []
+        recent=[item for item in previous if isinstance(item,dict)
+                and parse_time(item.get('quarantinedAt'))
+                and self.clock()-parse_time(item['quarantinedAt'])<MODERATION_CIRCUIT_WINDOW]
+        if recent:
+            self.state['hold']=True
+            self.state['hold_reason']='Repeated TikTok spam blocks require account review'
+            self.save('Safely halt posting after repeated TikTok moderation blocks')
+            return self.result('blocked',reason=self.state['hold_reason'])
+        rejected_record={'guid':pending['guid'],'title':pending['title'],'part':pending['part'],
+                         'releaseTag':pending['releaseTag'],'logicalPostKey':pending['logicalPostKey'],
+                         'postId':pending['postId'],'channelId':TARGET_CHANNEL_ID,
+                         'reason':str(message)[:700],'rejectedAt':iso(rejected_at),
+                         'quarantinedAt':iso(self.clock())}
+        self.state['rejected_posts']=[*previous,rejected_record]
+        self.state['pending']=None
+        self.state['current']=None
+        self.state.pop('source_blocked',None)
+        self.save('Quarantine verified rejected TikTok content; never resubmit the same attempt')
+        return self.result('needs_prepare' if self.due() else 'idle',
+                           reason='Rejected part quarantined; select next verified full episode')
 
     def validate_post(self,post):
         pending=self.state['pending']
