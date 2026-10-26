@@ -32,7 +32,7 @@ export function createGateway({upstream, publicOrigin, discordOrigin}) {
     const read=method === 'GET' || method === 'HEAD';
     if(!read && !update && !memberWrite && !(interaction && method==='POST'))return fail(405,'Read-only public chart');
     if(path.pathname.startsWith('/api/') && !reads.has(path.pathname.slice(5)) && !interaction && !memberApi)return fail(404,'Unknown endpoint');
-    if(!path.pathname.startsWith('/api/') && !memberAuth && path.pathname!=='/members' && !(/^\/(?:$|assets\/|_next\/|discord\/|favicon|icon|robots\.txt)/.test(path.pathname)))return fail(404,'Unknown resource');
+    if(!path.pathname.startsWith('/api/') && !memberAuth && !['/members','/auto-trading'].includes(path.pathname) && !(/^\/(?:$|assets\/|_next\/|discord\/|favicon|icon|robots\.txt)/.test(path.pathname)))return fail(404,'Unknown resource');
     const origin=req.headers.origin;
     if(update && origin && origin!==publicOrigin && origin!==discordOrigin)return fail(403,'Origin not allowed');
     if(memberWrite && origin!==publicOrigin)return fail(403,'Origin not allowed');
