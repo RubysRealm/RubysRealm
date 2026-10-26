@@ -26,8 +26,8 @@ export function createGateway({upstream, publicOrigin, discordOrigin}) {
     const method=req.method;
     const interaction=path.pathname === '/api/discord/interactions';
     const memberAuth=['/auth/discord/start','/auth/discord/callback','/auth/discord/logout','/auth/discord/redeem','/auth/discord/link-preview'].includes(path.pathname);
-    const memberApi=['/api/member/session','/api/member/connection'].includes(path.pathname);
-    const memberWrite=(path.pathname==='/api/member/connection'&&['POST','DELETE'].includes(method))||(['/auth/discord/logout','/auth/discord/redeem','/auth/discord/link-preview'].includes(path.pathname)&&method==='POST');
+    const memberApi=['/api/member/session','/api/member/connection','/api/member/trading'].includes(path.pathname);
+    const memberWrite=(path.pathname==='/api/member/trading'&&method==='POST')||(path.pathname==='/api/member/connection'&&['POST','DELETE'].includes(method))||(['/auth/discord/logout','/auth/discord/redeem','/auth/discord/link-preview'].includes(path.pathname)&&method==='POST');
     const update=path.pathname === '/api/round-study' && method === 'POST';
     const read=method === 'GET' || method === 'HEAD';
     if(!read && !update && !memberWrite && !(interaction && method==='POST'))return fail(405,'Read-only public chart');
@@ -116,6 +116,13 @@ if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
   const server=createGateway({upstream,publicOrigin,discordOrigin:process.env.DISCORD_ORIGIN});
   server.listen(Number(process.env.PORT||10000),'0.0.0.0');
   startAutoRoles(process.env.DISCORD_BOT_TOKEN);
+  startTradingRunner(upstream,process.env.TRADING_WORKER_KEY);
   process.on('SIGTERM',()=>{server.close();setTimeout(()=>process.exit(0),5000).unref();});
 }
 
+
+export function startTradingRunner(upstream,key,{fetcher=fetch,schedule=setTimeout}={}){
+ if(!key)return;const origin=new URL(upstream);if(origin.protocol!=='https:')throw Error('HTTPS worker origin required');
+ const run=async()=>{try{const response=await fetcher(origin.origin+'/api/trading/worker',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:'{}',signal:AbortSignal.timeout(50000),redirect:'error'});if(!response.ok)console.warn('Trading worker cycle unavailable',response.status);await response.arrayBuffer();}catch{console.warn('Trading worker cycle interrupted');}finally{schedule(run,5000).unref?.();}};
+ schedule(run,1000).unref?.();
+}
