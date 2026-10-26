@@ -25,22 +25,39 @@ export function createGateway({upstream, publicOrigin, discordOrigin}) {
     if(path.pathname === '/healthz'){res.writeHead(200,{'cache-control':'no-store'});return res.end('ok');}
     const method=req.method;
     const interaction=path.pathname === '/api/discord/interactions';
+    const memberAuth=['/auth/discord/start','/auth/discord/callback','/auth/discord/logout'].includes(path.pathname);
+    const memberApi=['/api/member/session','/api/member/connection'].includes(path.pathname);
+    const memberWrite=(path.pathname==='/api/member/connection'&&['POST','DELETE'].includes(method))||(path.pathname==='/auth/discord/logout'&&method==='POST');
     const update=path.pathname === '/api/round-study' && method === 'POST';
     const read=method === 'GET' || method === 'HEAD';
-    if(!read && !update && !(interaction && method==='POST'))return fail(405,'Read-only public chart');
-    if(path.pathname.startsWith('/api/') && !reads.has(path.pathname.slice(5)) && !interaction)return fail(404,'Unknown endpoint');
-    if(!path.pathname.startsWith('/api/') && !(/^\/(?:$|assets\/|_next\/|discord\/|favicon|icon|robots\.txt)/.test(path.pathname)))return fail(404,'Unknown resource');
+    if(!read && !update && !memberWrite && !(interaction && method==='POST'))return fail(405,'Read-only public chart');
+    if(path.pathname.startsWith('/api/') && !reads.has(path.pathname.slice(5)) && !interaction && !memberApi)return fail(404,'Unknown endpoint');
+    if(!path.pathname.startsWith('/api/') && !memberAuth && path.pathname!=='/members' && !(/^\/(?:$|assets\/|_next\/|discord\/|favicon|icon|robots\.txt)/.test(path.pathname)))return fail(404,'Unknown resource');
     const origin=req.headers.origin;
     if(update && origin && origin!==publicOrigin && origin!==discordOrigin)return fail(403,'Origin not allowed');
+    if(memberWrite && origin!==publicOrigin)return fail(403,'Origin not allowed');
     const headers={'accept-encoding':'identity'};
+    // Forward only our opaque session/state cookies; never spoofed identity headers.
+    const cookies=(req.headers.cookie??'').split(';').map(x=>x.trim()).filter(x=>/^__Host-ruby-(session|oauth)=[A-Za-z0-9_-]{43}$/.test(x));
+    if(cookies.length)headers.cookie=cookies.join('; ');
+    if(memberWrite)headers.origin=origin;
     for(const key of ['accept','content-type','last-event-id','x-signature-ed25519','x-signature-timestamp'])if(req.headers[key])headers[key]=req.headers[key];
     if(update && origin)headers.origin=base.origin;
     // Build the path against a fixed origin, never a caller-supplied target.
     const target=new URL(base.origin); target.pathname=path.pathname;target.search=path.search;
     const proxy=transport.request(target,{method,headers,agent},up=>{
-      if(up.statusCode>=300 && up.statusCode<400){up.resume();return fail(502,'Chart temporarily unavailable');}
+      if(up.statusCode>=300 && up.statusCode<400){
+        const location=up.headers.location;let destination;
+        try{destination=new URL(location,base.origin);}catch{up.resume();return fail(502,'Invalid redirect');}
+        const local=destination.origin===base.origin||destination.origin===publicOrigin;
+        const oauth=memberAuth&&destination.origin==='https://discord.com'&&destination.pathname==='/oauth2/authorize';
+        if(!local&&!oauth){up.resume();return fail(502,'Invalid redirect');}
+        const redirect=local?publicOrigin+destination.pathname+destination.search:destination.href;
+        const cookies=(up.headers['set-cookie']??[]).filter(x=>/^__Host-ruby-(session|oauth)=/.test(x));
+        up.resume();res.writeHead(up.statusCode,{'location':redirect,'cache-control':'private, no-store','referrer-policy':'no-referrer',...(cookies.length?{'set-cookie':cookies}:{})});return res.end();
+      }
       const out={'cache-control':'no-store, max-age=0','x-accel-buffering':'no','referrer-policy':'no-referrer'};
-      for(const key of ['content-type','content-length','content-encoding','vary'])if(up.headers[key])out[key]=up.headers[key];
+      for(const key of ['content-type','content-length','content-encoding','vary','x-frame-options','x-content-type-options'])if(up.headers[key])out[key]=up.headers[key];
       res.writeHead(up.statusCode||502,out);res.flushHeaders();up.pipe(res);
       up.on('error',()=>res.destroy());
     });
@@ -99,3 +116,4 @@ if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
   startAutoRoles(process.env.DISCORD_BOT_TOKEN);
   process.on('SIGTERM',()=>{server.close();setTimeout(()=>process.exit(0),5000).unref();});
 }
+
