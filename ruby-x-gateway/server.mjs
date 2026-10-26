@@ -25,9 +25,9 @@ export function createGateway({upstream, publicOrigin, discordOrigin}) {
     if(path.pathname === '/healthz'){res.writeHead(200,{'cache-control':'no-store'});return res.end('ok');}
     const method=req.method;
     const interaction=path.pathname === '/api/discord/interactions';
-    const memberAuth=['/auth/discord/start','/auth/discord/callback','/auth/discord/logout'].includes(path.pathname);
+    const memberAuth=['/auth/discord/start','/auth/discord/callback','/auth/discord/logout','/auth/discord/redeem','/auth/discord/link-preview'].includes(path.pathname);
     const memberApi=['/api/member/session','/api/member/connection'].includes(path.pathname);
-    const memberWrite=(path.pathname==='/api/member/connection'&&['POST','DELETE'].includes(method))||(path.pathname==='/auth/discord/logout'&&method==='POST');
+    const memberWrite=(path.pathname==='/api/member/connection'&&['POST','DELETE'].includes(method))||(['/auth/discord/logout','/auth/discord/redeem','/auth/discord/link-preview'].includes(path.pathname)&&method==='POST');
     const update=path.pathname === '/api/round-study' && method === 'POST';
     const read=method === 'GET' || method === 'HEAD';
     if(!read && !update && !memberWrite && !(interaction && method==='POST'))return fail(405,'Read-only public chart');
@@ -58,6 +58,8 @@ export function createGateway({upstream, publicOrigin, discordOrigin}) {
       }
       const out={'cache-control':'no-store, max-age=0','x-accel-buffering':'no','referrer-policy':'no-referrer'};
       for(const key of ['content-type','content-length','content-encoding','vary','x-frame-options','x-content-type-options'])if(up.headers[key])out[key]=up.headers[key];
+      const sessionCookies=(up.headers['set-cookie']??[]).filter(x=>/^__Host-ruby-(session|oauth)=/.test(x));
+      if(sessionCookies.length)out['set-cookie']=sessionCookies;
       res.writeHead(up.statusCode||502,out);res.flushHeaders();up.pipe(res);
       up.on('error',()=>res.destroy());
     });
