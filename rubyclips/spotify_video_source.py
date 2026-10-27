@@ -879,24 +879,58 @@ def acquire_complete_public_video(episode: dict, temp: Path, catalog_path: Path,
 
 
 def acquire_verified_creator(episode: dict, temp: Path, catalog_path: Path) -> tuple[Path, dict]:
+    """Acquire the complete original animation with its exact Spotify soundtrack.
+
+    An episode may have a full video on its creator's account while Spotify
+    exposes no *public video preview*. In that case rely on the original RSS
+    audio across the entire runtime, a title/duration exact-match, authenticated
+    source-page metadata and an actual moving video, rather than treating the
+    missing preview as proof no original video exists. Keep that different
+    identity evidence explicit in the saved manifest.
+    """
     candidates = discover_transport_urls(episode)
     rss = spotify_rss_episode(episode)
-    preview_metadata = spotify_preview(episode)
     spotify_audio = temp / "spotify-full-audio.mp3"
     spotify_audio.write_bytes(download_bytes(rss["audioUrl"], SPOTIFY_MEDIA_DOMAINS))
-    preview = temp / "spotify-reference-preview.mp4"
-    preview.write_bytes(download_bytes(preview_metadata["url"], ("spotifycdn.com",)))
-    complete_native = acquire_complete_public_video(episode, temp, catalog_path, preview_metadata,
-                                                     rss, spotify_audio, preview)
-    if complete_native is not None:
-        return complete_native
+    preview_metadata = None
+    try:
+        preview_metadata = spotify_preview(episode)
+    except SourceAccessRequired:
+        # Missing public Spotify preview is NOT missing source media; original
+        # creator video may still be independently matched end-to-end.
+        pass
+    preview = None
+    if preview_metadata:
+        preview = temp / "spotify-reference-preview.mp4"
+        preview.write_bytes(download_bytes(preview_metadata["url"], ("spotifycdn.com",)))
+        complete_native = acquire_complete_public_video(episode, temp, catalog_path, preview_metadata,
+                                                         rss, spotify_audio, preview)
+        if complete_native is not None:
+            return complete_native
     duration = source_duration(episode)
     last_error = None
     for candidate in candidates:
         try:
             visual, creator = acquire_creator_video(episode, candidate, temp)
             full_audio = verify_full_audio(visual, spotify_audio, duration)
-            preview_match = verify_preview_frames(visual, spotify_audio, preview, duration)
+            if preview_metadata:
+                video_match = verify_preview_frames(visual, spotify_audio, preview, duration)
+            else:
+                # Without original Spotify frames, enforce STRICT independent
+                # identity proof from the full soundtrack at multiple points,
+                # uploader metadata, exact title and uncut full runtime.
+                # Merely matching a title or using a static podcast image is
+                # never enough, nor is a short Facebook story excerpt.
+                if (full_audio["fullAudioCorrelation"] < 0.985
+                        or min(full_audio["audioWindowCorrelations"]) < 0.97
+                        or max(abs(v) for v in full_audio["audioOffsetsSeconds"]) > 0.06):
+                    raise SourceValidationError(
+                        "Creator video cannot be proven identical to the complete Spotify narration.")
+                video_match = {"previewFrameVerified": False,
+                               "spotifyPublicVideoPreviewAvailable": False,
+                               "videoIdentityMethod": "exact-title-duration-and-full-spotify-soundtrack",
+                               "fullSoundtrackIdentityVerified": True,
+                               "creatorAccountVerified": creator["uploaderId"] == CREATOR_ID}
             full = temp / "full-source.mp4"
             command(["ffmpeg", "-y", "-v", "error", "-i", str(visual), "-i", str(spotify_audio),
                      "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
@@ -908,8 +942,11 @@ def acquire_verified_creator(episode: dict, temp: Path, catalog_path: Path) -> t
                             "uploaderId": creator["uploaderId"], "uploaderName": creator["uploaderName"],
                             "sourceAccessMethod": creator["sourceAccessMethod"],
                             "rssGuid": rss["guid"], "rssFeedUrl": SPOTIFY_RSS,
-                            **full_audio, **preview_match, "previewUrl": preview_metadata["url"],
-                            "fullCoverage": True, "visualSha256": sha256(visual), "audioSha256": sha256(spotify_audio)}
+                            **full_audio, **video_match,
+                            "fullCoverage": True, "visualSha256": sha256(visual),
+                            "audioSha256": sha256(spotify_audio)}
+            if preview_metadata:
+                verification["previewUrl"] = preview_metadata["url"]
             if creator["uploaderId"] == CREATOR_ID:
                 verification["creatorId"] = CREATOR_ID
             # Cache only exact canonical provenance and measured results. All
@@ -924,14 +961,18 @@ def acquire_verified_creator(episode: dict, temp: Path, catalog_path: Path) -> t
             last_error = exc
     if last_error is not None:
         raise last_error
-    raise SourceAccessRequired("No exact full video transport could be verified for this Spotify episode; it remains queued.")
+    raise SourceAccessRequired("No complete original video could be verified against this Spotify episode; it stays queued.")
 
 
 def acquire_source(episode: dict, temp: Path, catalog_path: Path) -> tuple[Path, dict]:
     if os.environ.get("RUBARATA_SPOTIFY_SP_DC") or os.environ.get("RUBARATA_SPOTIFY_COOKIES_FILE"):
-        # A configured native source remains preferred. Invalid or encrypted
-        # native media is a visible block, never silently replaced.
-        return acquire_native(episode, temp)
+        # Native Spotify media is preferred whenever a valid session is
+        # configured. Public creator transport is still independently verified
+        # if Spotify declines access; we never bypass media identity checks.
+        try:
+            return acquire_native(episode, temp)
+        except SourceAccessRequired:
+            pass
     return acquire_verified_creator(episode, temp, catalog_path)
 
 
