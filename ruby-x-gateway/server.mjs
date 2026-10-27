@@ -5,7 +5,7 @@ import {startAutoRoles} from './autoroles.mjs';
 
 // The chart owns predictions, credentials and durable statistics.
 // A bounded public Coinbase cache shares market-data requests across viewers.
-export function createGateway({upstream, publicOrigin, discordOrigin}) {
+export function createGateway({upstream, publicOrigin, discordOrigin, spotStream=null}) {
   const base = new URL(upstream);
   const transport = base.protocol === 'https:' ? https : http;
   const agent = new transport.Agent({keepAlive:true});
@@ -16,6 +16,14 @@ export function createGateway({upstream, publicOrigin, discordOrigin}) {
     let path;
     try { path = new URL(req.url,publicOrigin); } catch { return fail(400,'Invalid request'); }
     if(path.origin !== publicOrigin)return fail(400,'Invalid request');
+    if(path.pathname === '/api/spot-stream'){
+      if(req.method!=='GET')return fail(405,'Read-only public feed');
+      const product=path.searchParams.get('product');
+      if(!['BTC-USD','ETH-USD','SOL-USD','XRP-USD'].includes(product)||[...path.searchParams.keys()].some(k=>k!=='product')||path.searchParams.getAll('product').length!==1)return fail(400,'Unknown product');
+      const quote=spotStream?.read(product);
+      if(!quote)return fail(503,'Live spot stream reconnecting');
+      res.writeHead(200,{'content-type':'application/json','cache-control':'no-store'});return res.end(JSON.stringify(quote));
+    }
     if(path.pathname === '/api/coinbase-source'){
       if(req.method!=='GET')return fail(405,'Read-only public feed');
       if([...path.searchParams.keys()].some(k=>k!=='path')||path.searchParams.getAll('path').length!==1)return fail(400,'Invalid request');
@@ -113,11 +121,12 @@ if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href){
   const upstream=process.env.CHART_ORIGIN;
   const publicOrigin=process.env.PUBLIC_ORIGIN;
   if(!upstream?.startsWith('https://') || !publicOrigin?.startsWith('https://'))throw Error('HTTPS origins required');
-  const server=createGateway({upstream,publicOrigin,discordOrigin:process.env.DISCORD_ORIGIN});
+  const spotStream=createSpotStream();
+  const server=createGateway({upstream,publicOrigin,discordOrigin:process.env.DISCORD_ORIGIN,spotStream});
   server.listen(Number(process.env.PORT||10000),'0.0.0.0');
   startAutoRoles(process.env.DISCORD_BOT_TOKEN);
   startTradingRunner(upstream,process.env.TRADING_WORKER_KEY);
-  process.on('SIGTERM',()=>{server.close();setTimeout(()=>process.exit(0),5000).unref();});
+  process.on('SIGTERM',()=>{spotStream.close();server.close();setTimeout(()=>process.exit(0),5000).unref();});
 }
 
 
@@ -125,4 +134,34 @@ export function startTradingRunner(upstream,key,{fetcher=fetch,schedule=setTimeo
  if(!key)return;const origin=new URL(upstream);if(origin.protocol!=='https:')throw Error('HTTPS worker origin required');
  const run=async()=>{try{const response=await fetcher(origin.origin+'/api/trading/worker',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:'{}',signal:AbortSignal.timeout(50000),redirect:'error'});if(!response.ok)console.warn('Trading worker cycle unavailable',response.status);await response.arrayBuffer();}catch{console.warn('Trading worker cycle interrupted');}finally{schedule(run,5000).unref?.();}};
  schedule(run,1000).unref?.();
+}
+
+// One public market-data connection serves all viewers and background collectors.
+// REST cooldowns cannot freeze it; the exchange trade time is never rewritten.
+export function createSpotStream({socketFactory=url=>new WebSocket(url),clock=Date.now,schedule=setTimeout,repeat=setInterval,cancel=clearTimeout,cancelRepeat=clearInterval}={}){
+ const products=['BTC-USD','ETH-USD','SOL-USD','XRP-USD'],quotes=new Map();
+ let socket=null,retry=null,stopped=false,lastMessage=clock(),failures=0;
+ const connect=()=>{
+  if(stopped)return;quotes.clear();lastMessage=clock();
+  let ws;try{ws=socketFactory('wss://advanced-trade-ws.coinbase.com');}catch{reconnect();return;}
+  socket=ws;
+  const lost=()=>{if(socket!==ws)return;socket=null;quotes.clear();try{ws.close();}catch{}reconnect();};
+  ws.addEventListener('open',()=>{if(socket!==ws)return;for(const channel of ['market_trades','heartbeats'])ws.send(JSON.stringify({type:'subscribe',channel,product_ids:products}));});
+  ws.addEventListener('message',event=>{
+   if(socket!==ws)return;let d;try{d=JSON.parse(event.data);}catch{return;}
+   lastMessage=clock();if(d.type==='error'){lost();return;}
+   if(d.channel!=='market_trades')return;
+   for(const event of Array.isArray(d.events)?d.events:[])for(const t of Array.isArray(event.trades)?event.trades:[]){
+    const price=Number(t.price),time=Date.parse(t.time),product=t.product_id;
+    if(!products.includes(product)||!Number.isFinite(price)||price<=0||!Number.isFinite(time)||time>clock()+1000||clock()-time>3000)continue;
+    const prior=quotes.get(product);if(prior&&time<prior.time)continue;
+    quotes.set(product,{productId:product,price,time,source:'Coinbase '+product,transport:'Shared WebSocket',bid:null,ask:null});failures=0;
+   }
+  });
+  ws.addEventListener('error',lost);ws.addEventListener('close',lost);
+ };
+ const reconnect=()=>{if(stopped||retry)return;retry=schedule(()=>{retry=null;connect();},Math.min(30000,1000*2**Math.min(failures++,5)));retry?.unref?.();};
+ const watchdog=repeat(()=>{if(!socket||clock()-lastMessage<=15000)return;const old=socket;socket=null;quotes.clear();try{old.close();}catch{}reconnect();},2000);watchdog?.unref?.();
+ connect();
+ return {read(product){const q=quotes.get(product);return q&&q.time<=clock()+1000&&clock()-q.time<=3000?{...q}:null;},close(){stopped=true;cancel(retry);cancelRepeat(watchdog);const old=socket;socket=null;quotes.clear();try{old?.close();}catch{}}};
 }
