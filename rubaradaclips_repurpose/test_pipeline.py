@@ -191,6 +191,43 @@ class DurableQueueTests(unittest.TestCase):
         self.assertEqual(self.io.create_count,0)
         self.assertIn('moderation',self.io.saved[-1]['pending']['failure']['reason'])
 
+    def test_confirmed_spam_rejection_recovers_after_cooldown_without_duplicate(self):
+        queue=self.queue()
+        self.value['pending']=pending(phase='blocked')
+        self.value['pending']['failure']={
+            'reason':'TikTok/Buffer rejected this attempt: TikTok flagged this post as potential spam',
+            'at':pipeline.iso(T0)}
+        self.io.lookup_post=post(self.value['pending'],status='error')
+        self.io.lookup_post['error']={
+            'message':'TikTok flagged this post as potential spam and blocked it from publishing.'}
+        self.time=T0+timedelta(hours=23,minutes=59)
+        self.assertEqual(queue.tick(prepare=True)['status'],'blocked')
+        self.assertEqual(self.io.create_count,0)
+        self.time=T0+timedelta(hours=24)
+        result=queue.tick()
+        self.assertEqual(result['status'],'needs_prepare')
+        self.assertIsNone(self.value.get('pending'))
+        self.assertIsNone(self.value.get('current'))
+        self.assertEqual(self.value['rejected_posts'][-1]['guid'],SECOND)
+        self.assertEqual(self.value['completed'],[FIRST])
+        self.assertEqual(self.io.create_count,0)
+        self.assertEqual(queue.tick()['status'],'needs_prepare')
+
+    def test_second_spam_rejection_opens_account_review_circuit(self):
+        queue=self.queue()
+        self.value['pending']=pending(phase='blocked')
+        self.value['pending']['failure']={
+            'reason':'TikTok flagged this post as potential spam','at':pipeline.iso(T0)}
+        self.io.lookup_post=post(self.value['pending'],status='error')
+        self.io.lookup_post['error']={'message':'TikTok flagged this post as potential spam'}
+        self.value['rejected_posts']=[{'guid':'different-story',
+            'quarantinedAt':pipeline.iso(T0-timedelta(hours=1))}]
+        self.time=T0+timedelta(hours=24)
+        self.assertEqual(queue.tick()['status'],'blocked')
+        self.assertTrue(self.value['hold'])
+        self.assertIsNotNone(self.value['pending'])
+        self.assertEqual(self.io.create_count,0)
+
     def test_create_intent_and_id_are_saved_before_followup(self):
         queue=self.queue()
         result=queue.tick(prepare=True)
