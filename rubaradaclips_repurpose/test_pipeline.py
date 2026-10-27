@@ -194,6 +194,7 @@ class DurableQueueTests(unittest.TestCase):
     def test_confirmed_spam_rejection_recovers_after_cooldown_without_duplicate(self):
         queue=self.queue()
         self.value['pending']=pending(phase='blocked')
+        self.value['pending']['postId']=POST_ID
         self.value['pending']['failure']={
             'reason':'TikTok/Buffer rejected this attempt: TikTok flagged this post as potential spam',
             'at':pipeline.iso(T0)}
