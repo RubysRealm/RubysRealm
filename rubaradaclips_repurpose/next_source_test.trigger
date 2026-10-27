@@ -1,1 +1,1 @@
-2026-10-26 diagnose HOA episode full original Spotify video via dedicated read-only source verification workflow; no publishing.
+2026-10-27T00:36Z source-only validation after creator-without-preview fix; never publish from this run.
