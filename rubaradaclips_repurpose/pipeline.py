@@ -829,7 +829,7 @@ def main():
     if summary:
         with open(summary,'a') as file:
             file.write('## Rubaradaclips His Story queue\n\n'+json.dumps(result,indent=2)+'\n\n')
-    return 3 if result['status']=='source_blocked' else 2 if result['status']=='blocked' else 0
+    return 3 if result['status'] in ('source_blocked','source_wait') else 2 if result['status']=='blocked' else 0
 
 
 if __name__=='__main__':
