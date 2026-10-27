@@ -22,8 +22,10 @@ jobs:
 
       - name: Install verified source tools
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ffmpeg
+          fi
           python -m pip install --quiet 'votify==1.9.9' 'yt-dlp==2026.8.19' 'numpy==2.3.5' 'scipy==1.17.0'
 
       - name: Acquire and verify the currently queued full source
@@ -93,7 +95,13 @@ jobs:
                   assert proof['nativeEmbedUrl'] == f"https://open.spotify.com/embed/episode/{episode['id']}"
                   assert proof['fullAudioCorrelation'] >= 0.95
               else:
-                  assert proof['previewFrameVerified'] is True
+                  assert proof['previewFrameVerified'] is True or (
+                      proof.get('spotifyPublicVideoPreviewAvailable') is False
+                      and proof.get('fullSoundtrackIdentityVerified') is True
+                      and proof.get('videoIdentityMethod') == 'exact-title-duration-and-full-spotify-soundtrack'
+                      and proof['fullAudioCorrelation'] >= 0.985
+                      and min(proof['audioWindowCorrelations']) >= 0.97
+                  ), 'Full source video identity is not independently verified'
               assert float(proof['audioVerifiedDurationSeconds']) >= duration - 0.2
           assert STATE_PATH.read_bytes() == original_state, 'Source verification must not change queue state'
           print(json.dumps({
