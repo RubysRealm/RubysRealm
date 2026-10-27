@@ -1,1 +1,1 @@
-2026-10-25T20:30Z one-time guarded restart after verified TikTok spam rejection. Use production duplicate protection, quarantine rejected attempt, honor moderation cooldown and six-hour send spacing; do not resubmit blocked video.
+2026-10-27T00:41Z one guarded production wakeup after source-only full creator+Spotify audio verification; preserve exact order, TikTok destination and six-hour spacing.
