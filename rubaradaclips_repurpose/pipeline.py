@@ -34,6 +34,8 @@ BUFFER_ORG_ID='6a909de43dfa01f80e2d23c6'
 REPO='RubysRealm/RubysRealm'
 UNKNOWN_GRACE=timedelta(minutes=15)
 ABSENT_INTERVAL=timedelta(minutes=5)
+SOURCE_RETRY_HOURS=24
+SOURCE_TRIES_PER_WAKE=3
 MODERATION_COOLDOWN=timedelta(hours=24)
 MODERATION_CIRCUIT_WINDOW=timedelta(hours=48)
 
@@ -119,15 +121,22 @@ def selected(state,entries):
     rejected={r.get('guid') for r in (state.get('rejected_posts') or [])
               if isinstance(r,dict)}
     excluded=completed|rejected
+    deferred=state.get('source_deferred') or {}
+    clock=now()
+    def can_prepare(guid):
+        item=deferred.get(guid) or {}
+        retry=parse_time(item.get('retryAt'))
+        return not retry or retry<=clock
     cur=state.get('current') or {}
-    if cur.get('guid') and cur['guid'] not in excluded:
+    if cur.get('guid') and cur['guid'] not in excluded and (
+            cur.get('segments') or can_prepare(cur['guid'])):
         ep=next((e for e in entries if e['guid']==cur['guid']),None)
         if ep is None: raise RuntimeError('Locked current episode disappeared from RSS')
         return ep,int(cur.get('next_part') or 1)
-    remaining=[e for e in entries if e['guid'] not in excluded]
+    # A source gap is temporary, never a completed episode. Do not reattempt
+    # an unavailable source every 15 minutes when other stories can be proven.
+    remaining=[e for e in entries if e['guid'] not in excluded and can_prepare(e['guid'])]
     verified=verified_source_guids()
-    # Keep the complete story intact, but allow source gaps to be filled later;
-    # missing original video must not stop every other fully verified episode.
     ep=next((e for e in remaining if e['guid'] in verified),None)
     if ep is None:
         ep=next(iter(remaining),None)
@@ -201,6 +210,11 @@ class QueueError(RuntimeError):
     pass
 
 
+class SourceUnavailable(QueueError):
+    """A particular original video is temporarily inaccessible, never a sent part."""
+    pass
+
+
 class APIError(QueueError):
     def __init__(self,message,status=None):
         super().__init__(message)
@@ -242,6 +256,10 @@ def build_verified(state):
     ep,part=selected(state,entries)
     if ep is None:
         return None
+    if not (state.get('current') or {}).get('guid'):
+        # Persist this exact attempted GUID if source acquisition fails; it is
+        # never marked completed or submitted until full media verification.
+        state['current']={'guid':ep['guid'],'title':ep['title'],'next_part':part}
     ensure_catalog_guid(ep['guid'])
     WORK.mkdir(parents=True,exist_ok=True)
     OUT.mkdir(parents=True,exist_ok=True)
@@ -257,7 +275,7 @@ def build_verified(state):
             message=json.loads(message).get('error',message)
         except (ValueError,AttributeError):
             pass
-        raise QueueError(str(message)[:700])
+        raise SourceUnavailable(str(message)[:700])
     evidence=json.loads((source_dir/'source-info.json').read_text())
     require(evidence.get('ok') is True and evidence.get('spotifyShowId')==SPOTIFY_SHOW_ID,
             'Source adapter returned a different show')
@@ -529,6 +547,7 @@ class DurableQueue:
             pending['submittedAt']=iso(self.clock())
         self.state['pending']=pending
         self.state.pop('source_blocked',None)
+        (self.state.get('source_deferred') or {}).pop(guid,None)
         self.save('Persist current His Story release before any publish request')
 
     def tick(self,prepare=False):
@@ -550,18 +569,43 @@ class DurableQueue:
             return self.result('idle',reason='manual hold' if self.state.get('hold') else '6-hour cadence')
         if not prepare:
             return self.result('needs_prepare')
-        try:
-            built=self.io.build(self.state)
-            if built is None:
-                return self.result('idle',reason='All currently available Spotify episodes are completed')
-            manifest,info=built
-            release,created=self.io.ensure_release(manifest,info)
-        except (QueueError,RuntimeError,OSError,ValueError,subprocess.SubprocessError) as exc:
-            self.state['source_blocked']={'reason':str(exc)[:700],'at':iso(self.clock())}
-            self.save('Keep His Story part queued while original media is unavailable')
-            return self.result('source_blocked',reason=str(exc)[:700])
-        self.adopt(release,info['releaseTag'],known_new=created)
-        return self.reconcile()
+        latest_source_error=None
+        for attempt in range(SOURCE_TRIES_PER_WAKE):
+            try:
+                built=self.io.build(self.state)
+                if built is None:
+                    if latest_source_error or self.state.get('source_deferred'):
+                        return self.result('source_wait',reason='All currently eligible episodes have unavailable full video sources')
+                    return self.result('idle',reason='All currently available Spotify episodes are completed')
+                manifest,info=built
+                release,created=self.io.ensure_release(manifest,info)
+            except SourceUnavailable as exc:
+                current=self.state.get('current') or {}
+                if not current.get('guid') or current.get('segments'):
+                    self.state['source_blocked']={'reason':str(exc)[:700],'at':iso(self.clock())}
+                    self.save('Keep partially started story locked while original media is unavailable')
+                    return self.result('source_blocked',reason=str(exc)[:700])
+                guid=current['guid']
+                history=self.state.setdefault('source_deferred',{})
+                previous=history.get(guid) or {}
+                history[guid]={'reason':str(exc)[:700],'attemptedAt':iso(self.clock()),
+                               'retryAt':iso(self.clock()+timedelta(hours=SOURCE_RETRY_HOURS)),
+                               'failedAttempts':int(previous.get('failedAttempts') or 0)+1,
+                               'title':current.get('title')}
+                self.state['source_blocked']={'reason':str(exc)[:700],'at':iso(self.clock()),
+                                              'deferredGuid':guid}
+                self.state['current']=None
+                self.save('Defer missing full-video source without marking the story sent or complete')
+                latest_source_error=str(exc)[:700]
+                continue
+            except (QueueError,RuntimeError,OSError,ValueError,subprocess.SubprocessError) as exc:
+                self.state['source_blocked']={'reason':str(exc)[:700],'at':iso(self.clock())}
+                self.save('Keep His Story part queued while original media is unavailable')
+                return self.result('source_blocked',reason=str(exc)[:700])
+            self.adopt(release,info['releaseTag'],known_new=created)
+            return self.reconcile()
+        return self.result('source_wait',reason='Deferred inaccessible originals; next wakeup tries other episodes',
+                           lastSourceError=latest_source_error)
 
     def block(self,reason):
         pending=self.state['pending']
