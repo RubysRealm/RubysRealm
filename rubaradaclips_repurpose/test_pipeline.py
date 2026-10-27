@@ -256,6 +256,44 @@ class DurableQueueTests(unittest.TestCase):
         self.assertEqual(self.io.create_count,0)
         self.assertIsNone(self.value.get('pending'))
 
+    def test_new_unavailable_original_is_deferred_without_faking_delivery(self):
+        queue=self.queue()
+        self.io.build_error=pipeline.SourceUnavailable('Full original animation is temporarily unavailable')
+        result=queue.tick(prepare=True)
+        self.assertEqual(result['status'],'source_blocked')
+        self.assertEqual(self.value['completed'],[FIRST])
+        self.assertIsNone(self.value.get('pending'))
+        self.assertIsNone(self.value.get('current'))
+        self.assertIn(SECOND,self.value.get('source_deferred') or {})
+        deferred=self.value['source_deferred'][SECOND]
+        self.assertGreater(pipeline.parse_time(deferred['retryAt']),self.time)
+        self.assertEqual(self.io.create_count,0)
+
+    def test_source_deferral_allows_later_episodes_without_marking_missing_complete(self):
+        self.value['source_deferred']={
+            SECOND:{'retryAt':'2099-01-01T00:00:00Z','reason':'Full original video inaccessible'}
+        }
+        entries=[
+            {'guid':SECOND,'title':'Story still awaiting verification'},
+            {'guid':THIRD,'title':'Another story with an accessible source'}
+        ]
+        with patch.object(pipeline,'verified_source_guids',return_value=set()):
+            episode,part=pipeline.selected(self.value,entries)
+        self.assertEqual(episode['guid'],THIRD)
+        self.assertEqual(part,1)
+        self.assertEqual(self.value['completed'],[FIRST])
+
+    def test_started_story_is_not_deferred_even_if_video_source_disappears(self):
+        queue=self.queue()
+        self.value['current']['segments']=[[0,180],[180,280]]
+        self.value['current']['next_part']=2
+        self.io.build_error=pipeline.SourceUnavailable('Original source offline mid-story')
+        result=queue.tick(prepare=True)
+        self.assertEqual(result['status'],'source_blocked')
+        self.assertEqual(self.value['current']['guid'],SECOND)
+        self.assertEqual(self.value['current']['next_part'],2)
+        self.assertNotIn(SECOND,self.value.get('source_deferred') or {})
+
     def test_receipt_failure_does_not_lose_accepted_post_identity(self):
         queue=self.queue()
         self.io.receipt_error=pipeline.QueueError('GitHub release temporarily unavailable')
