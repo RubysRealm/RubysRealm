@@ -60,13 +60,19 @@ jobs:
       - name: Install verified source and media tools
         if: steps.gate.outputs.allowed == 'true'
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          if ! command -v ffmpeg >/dev/null || ! test -f /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          fi
           python -m pip install --quiet 'votify==1.9.9' 'yt-dlp==2026.8.19' 'numpy==2.3.5' 'scipy==1.17.0' 'pillow==12.3.0'
 
       - name: Build and submit exactly the current complete story part
         if: steps.gate.outputs.allowed == 'true'
         id: publish
+        env:
+          # Prefer the native media path if a valid authorized session becomes available.
+          # The independent verified creator transport remains available otherwise.
+          RUBARATA_SPOTIFY_SP_DC: ${{ secrets.RUBARATA_SPOTIFY_SP_DC }}
         run: python3 rubaradaclips_repurpose/pipeline.py run --persist
 
       - name: Confirm actual TikTok delivery without rebuilding source
