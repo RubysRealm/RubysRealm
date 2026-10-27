@@ -1,0 +1,61 @@
+name: Rubarataclips Spotify native source diagnostic
+on:
+  push:
+    paths:
+      - '.github/workflows/rubaradaclips-native-diagnostic.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Spotify web client
+        run: python -m pip install --quiet 'votify==1.9.9'
+      - name: Inspect full original video manifest WITHOUT publishing or downloading media
+        env:
+          RUBARATA_SPOTIFY_SP_DC: ${{ secrets.RUBARATA_SPOTIFY_SP_DC }}
+        run: |
+          python - <<'PY'
+          import asyncio, json, os
+          from rubyclips.spotify_video_source import create_api, native_manifest_selection
+          from rubyclips.spotify_video_source import SourceAccessRequired, SourceValidationError
+          episode_id = "2nkmpx8oYBK4fRIAVeslXq"
+          expected_seconds = 72.981
+          print("Configured Spotify session:", bool(os.environ.get("RUBARATA_SPOTIFY_SP_DC")))
+          async def inspect(authenticated):
+              api = None
+              try:
+                  api = await create_api(authenticated=authenticated)
+                  data = await api.get_playback_info(episode_id, 'episode', ['manifest_ids_video'])
+                  media = data.get('media') or {}
+                  entry = media.get('spotify:episode:' + episode_id) or {}
+                  entry = entry.get('item') or entry
+                  if entry.get('video_version_uri'):
+                      entry = media.get(entry['video_version_uri']) or {}
+                  entry = entry.get('item') or entry
+                  candidates = (entry.get('manifest') or {}).get('manifest_ids_video') or []
+                  if not candidates or not candidates[0].get('file_id'):
+                      print(('AUTH' if authenticated else 'ANON') + ': no video manifest identity')
+                      return
+                  manifest = await api.get_video_manifest(str(candidates[0]['file_id']))
+                  content, video, audio = native_manifest_selection(manifest, expected_seconds)
+                  print(('AUTH' if authenticated else 'ANON') + ': VERIFIED unencrypted complete Spotify video and audio manifest; video height:', video.get('video_height'))
+              except (SourceAccessRequired, SourceValidationError) as e:
+                  print(('AUTH' if authenticated else 'ANON') + ': ' + str(e))
+              except Exception as e:
+                  print(('AUTH' if authenticated else 'ANON') + ': playback blocked, error type: ' + type(e).__name__)
+              finally:
+                  if api:
+                      await api.client.aclose()
+          if os.environ.get("RUBARATA_SPOTIFY_SP_DC"):
+              asyncio.run(inspect(True))
+          asyncio.run(inspect(False))
+          PY
