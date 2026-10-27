@@ -111,7 +111,8 @@ export default async function handler(req, res) {
   if (String(req.query?.health || '') === '1') return res.status(200).json({
     ok: true, version: PUBLISHER_VERSION, channelName: RUBARATA_CHANNEL,
     spotifyShowId: SPOTIFY_SHOW_ID, originalVideoRequired: true,
-    originalAudioRequired: true, confirmedSendRequired: true
+    originalAudioRequired: true, confirmedSendRequired: true,
+    sourceProofModes: ['spotify-preview-frames', 'full-spotify-soundtrack']
   });
   try {
     const lookupTag = String(req.query?.lookupTag || '').trim();
