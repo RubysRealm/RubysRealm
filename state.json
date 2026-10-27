@@ -2,7 +2,7 @@
   "created_at": 1792538908.7005496,
   "created_at_utc": "2026-10-20T23:28:28.700550+00:00",
   "data_branch": "oracle-public-study-data-20261020",
-  "error_count": 2121,
+  "error_count": 2122,
   "fee_sources": [
     "https://kalshi.com/docs/kalshi-fee-schedule.pdf",
     "https://docs.kalshi.com/getting_started/fee_rounding"
@@ -870,7 +870,7 @@
     }
   ],
   "finished": false,
-  "last_observation": 1793137498.0553703,
+  "last_observation": 1793137525.6041908,
   "market_source": "https://api.elections.kalshi.com/trade-api/v2",
   "mode": "rolling",
   "original_study_stop": 1792683000,
@@ -40125,17 +40125,65 @@
       "official": {
         "fetch": {
           "age": null,
-          "date": "Tue, 27 Oct 2026 21:44:43 GMT",
-          "received_at": 1793137483.5547771,
-          "requested_at": 1793137483.3765001,
-          "sha256": "003cef454c739ade4ef70d08c1cd9c73d389e714f8882b36c4832a5d272b4bd2"
+          "date": "Tue, 27 Oct 2026 21:45:25 GMT",
+          "received_at": 1793137525.9288418,
+          "requested_at": 1793137525.8525581,
+          "sha256": "7b6111449f4efcfb8d7a392d2d4a6826f5e23ed50a11a2f5c9c41602357fc17f"
         },
         "market": {
           "close_time": "2026-10-27T21:45:00Z",
           "expiration_time": "2026-11-03T21:45:00Z",
-          "no_ask_dollars": "0.0010",
+          "no_ask_dollars": "1.0000",
           "no_bid_dollars": "0.0000",
           "open_time": "2026-10-27T21:30:00Z",
+          "price_level_structure": "tapered_deci_cent",
+          "price_ranges": [
+            {
+              "end": "0.1000",
+              "start": "0.0000",
+              "step": "0.0010"
+            },
+            {
+              "end": "0.9000",
+              "start": "0.1000",
+              "step": "0.0100"
+            },
+            {
+              "end": "1.0000",
+              "start": "0.9000",
+              "step": "0.0010"
+            }
+          ],
+          "result": "yes",
+          "settlement_ts": "2026-10-27T21:45:05.03906Z",
+          "status": "finalized",
+          "ticker": "KXBTC15M-26OCT271745-45",
+          "yes_ask_dollars": "1.0000",
+          "yes_bid_dollars": "0.0000"
+        }
+      },
+      "open_ts": 1793136600.0,
+      "samples": 166,
+      "ticker": "KXBTC15M-26OCT271745-45"
+    },
+    "KXBTC15M-26OCT271800-00": {
+      "close_ts": 1793138400.0,
+      "first_observed_at": 1793137525.6041908,
+      "last_observed_at": 1793137525.6041908,
+      "official": {
+        "fetch": {
+          "age": null,
+          "date": "Tue, 27 Oct 2026 21:45:26 GMT",
+          "received_at": 1793137526.0281274,
+          "requested_at": 1793137525.8526766,
+          "sha256": "a34a00c9815c9e57b4e09428d1c2ace8bbab2f39baaa492df64727c8fc462ce1"
+        },
+        "market": {
+          "close_time": "2026-10-27T22:00:00Z",
+          "expiration_time": "2026-11-03T22:00:00Z",
+          "no_ask_dollars": "0.4400",
+          "no_bid_dollars": "0.4300",
+          "open_time": "2026-10-27T21:45:00Z",
           "price_level_structure": "tapered_deci_cent",
           "price_ranges": [
             {
@@ -40157,18 +40205,18 @@
           "result": "",
           "settlement_ts": null,
           "status": "active",
-          "ticker": "KXBTC15M-26OCT271745-45",
-          "yes_ask_dollars": "1.0000",
-          "yes_bid_dollars": "0.9990"
+          "ticker": "KXBTC15M-26OCT271800-00",
+          "yes_ask_dollars": "0.5700",
+          "yes_bid_dollars": "0.5600"
         }
       },
-      "open_ts": 1793136600.0,
-      "samples": 166,
-      "ticker": "KXBTC15M-26OCT271745-45"
+      "open_ts": 1793137500.0,
+      "samples": 1,
+      "ticker": "KXBTC15M-26OCT271800-00"
     }
   },
   "run_url": "https://github.com/RubysRealm/RubysRealm/actions/runs/40453950918",
-  "samples": 114247,
+  "samples": 114248,
   "schema_version": 1,
   "segments": [
     {
@@ -40401,7 +40449,7 @@
     },
     {
       "end": null,
-      "errors": 97,
+      "errors": 98,
       "segment": "40453950918-4",
       "start": 1793132070.0380557
     }
