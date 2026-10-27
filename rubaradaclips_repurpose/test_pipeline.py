@@ -270,6 +270,7 @@ class DurableQueueTests(unittest.TestCase):
         self.assertEqual(self.io.create_count,0)
 
     def test_source_deferral_allows_later_episodes_without_marking_missing_complete(self):
+        self.queue()
         self.value['source_deferred']={
             SECOND:{'retryAt':'2099-01-01T00:00:00Z','reason':'Full original video inaccessible'}
         }
