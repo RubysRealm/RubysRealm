@@ -27,6 +27,57 @@ async function bufferQuery(query, variables) {
   return data?.data;
 }
 
+// Diagnostic reads never participate in creation or change the delivery result.
+// Expose only service codes, not raw provider payloads, headers, tokens or URLs.
+export function publishingErrorCodes(rawError) {
+  const codes = new Set();
+  const add = value => {
+    const code = String(value ?? '').trim();
+    if (/^[A-Za-z0-9_.:-]{1,100}$/.test(code) && !/^(?:0|ok|success)$/i.test(code)) codes.add(code);
+  };
+  const visit = (value, depth = 0) => {
+    if (depth > 5 || !value || typeof value !== 'object') return;
+    for (const [key, item] of Object.entries(value)) {
+      if (/^(?:code|error_code|errorCode|status_code|error_subcode|fail_reason)$/.test(key) && ['string', 'number'].includes(typeof item)) add(item);
+      if (/^(?:error|data|response|body|details)$/.test(key)) {
+        if (typeof item === 'string') {
+          try { visit(JSON.parse(item), depth + 1); } catch { /* Not structured diagnostics. */ }
+        } else visit(item, depth + 1);
+      }
+    }
+  };
+  try { visit(typeof rawError === 'string' ? JSON.parse(rawError) : rawError); } catch { /* Plain-text provider errors are common. */ }
+  for (const match of String(rawError || '').matchAll(/\b(?:spam_risk(?:_[a-z0-9_]+)*|auth_removed|access_token_invalid|scope_not_authorized|rate_limit_exceeded|video_pull_failed|file_format_check_failed|duration_check_failed)\b/gi)) add(match[0].toLowerCase());
+  return [...codes].slice(0, 12);
+}
+
+async function readPublishingDiagnostics(post) {
+  try {
+    const data = await bufferQuery(`query RubarataPublishingError($id: PostId!) {
+      post(input: { id: $id }) {
+        id channel { id } error { rawError supportUrl }
+      }
+    }`, { id: post.id });
+    const found = data?.post;
+    if (found?.id !== post.id || found?.channel?.id !== RUBARATA_CHANNEL_ID) throw new Error('Diagnostic identity mismatch');
+    let supportUrl = null;
+    try {
+      const url = new URL(found.error?.supportUrl);
+      if (url.protocol === 'https:' && ['support.buffer.com', 'support.tiktok.com', 'developers.tiktok.com'].includes(url.hostname)) supportUrl = url.origin + url.pathname;
+    } catch { /* Optional help-center URL. */ }
+    return {
+      available: true,
+      rawErrorAvailable: Boolean(found.error?.rawError),
+      serviceCodes: publishingErrorCodes(found.error?.rawError),
+      supportUrl
+    };
+  } catch {
+    // rawError can be unavailable to a Buffer API key. Keep the independently
+    // verified post/error intact rather than breaking recovery or allowing retry.
+    return { available: false, serviceCodes: [], reason: 'Buffer did not expose publishing diagnostics; the verified post status is unchanged.' };
+  }
+}
+
 async function exactChannel() {
   const found = await getBufferTikTokChannel({ channelId: RUBARATA_CHANNEL_ID, channelName: RUBARATA_CHANNEL, allowDisabled: true });
   if (String(found?.channel?.id || '') !== RUBARATA_CHANNEL_ID ||
@@ -112,7 +163,8 @@ export default async function handler(req, res) {
     ok: true, version: PUBLISHER_VERSION, channelName: RUBARATA_CHANNEL,
     spotifyShowId: SPOTIFY_SHOW_ID, originalVideoRequired: true,
     originalAudioRequired: true, confirmedSendRequired: true,
-    sourceProofModes: ['spotify-preview-frames', 'full-spotify-soundtrack']
+    sourceProofModes: ['spotify-preview-frames', 'full-spotify-soundtrack'],
+    diagnosticsVersion: 'publishing-codes-v1'
   });
   try {
     const lookupTag = String(req.query?.lookupTag || '').trim();
@@ -120,7 +172,11 @@ export default async function handler(req, res) {
     if (!tag) return res.status(400).json({ ok: false, error: 'A current Spotify video release tag is required.' });
     const { manifest, numbering, videoUrl } = await readRelease(tag);
     const existing = await findExistingPost(videoUrl, manifest, tag);
-    if (lookupTag) return res.status(200).json({ ok: true, post: existing, videoUrl, channelName: RUBARATA_CHANNEL });
+    if (lookupTag) {
+      const result = { ok: true, post: existing, videoUrl, channelName: RUBARATA_CHANNEL };
+      if (String(req.query?.diagnostics || '') === '1' && existing?.error) result.publishingDiagnostics = await readPublishingDiagnostics(existing);
+      return res.status(200).json(result);
+    }
     if (existing) return res.status(200).json({
       ok: true, postId: existing.id, post: existing, status: existing.status,
       deduplicated: true, channelId: RUBARATA_CHANNEL_ID, channelName: RUBARATA_CHANNEL,
