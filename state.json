@@ -2,7 +2,7 @@
   "created_at": 1792538908.7005496,
   "created_at_utc": "2026-10-20T23:28:28.700550+00:00",
   "data_branch": "oracle-public-study-data-20261020",
-  "error_count": 2433,
+  "error_count": 2434,
   "fee_sources": [
     "https://kalshi.com/docs/kalshi-fee-schedule.pdf",
     "https://docs.kalshi.com/getting_started/fee_rounding"
@@ -895,7 +895,7 @@
     }
   ],
   "finished": false,
-  "last_observation": 1793154601.2881055,
+  "last_observation": 1793154646.819542,
   "market_source": "https://api.elections.kalshi.com/trade-api/v2",
   "mode": "rolling",
   "original_study_stop": 1792683000,
@@ -41347,17 +41347,65 @@
       "official": {
         "fetch": {
           "age": null,
-          "date": "Wed, 28 Oct 2026 02:29:56 GMT",
-          "received_at": 1793154596.3825111,
-          "requested_at": 1793154596.347057,
-          "sha256": "4729c5a936545c434ff25c55b9d0c2aee6def2a208a9374a3f481cc4314524f9"
+          "date": "Wed, 28 Oct 2026 02:30:42 GMT",
+          "received_at": 1793154642.7717433,
+          "requested_at": 1793154642.7315876,
+          "sha256": "892843a876e4032a9b3e6e56ab7212f631448dd151dd1def7d2bdabd890506a7"
         },
         "market": {
           "close_time": "2026-10-28T02:30:00Z",
           "expiration_time": "2026-11-04T02:30:00Z",
           "no_ask_dollars": "1.0000",
-          "no_bid_dollars": "0.9990",
+          "no_bid_dollars": "0.0000",
           "open_time": "2026-10-28T02:15:00Z",
+          "price_level_structure": "tapered_deci_cent",
+          "price_ranges": [
+            {
+              "end": "0.1000",
+              "start": "0.0000",
+              "step": "0.0010"
+            },
+            {
+              "end": "0.9000",
+              "start": "0.1000",
+              "step": "0.0100"
+            },
+            {
+              "end": "1.0000",
+              "start": "0.9000",
+              "step": "0.0010"
+            }
+          ],
+          "result": "no",
+          "settlement_ts": "2026-10-28T02:30:05.306422Z",
+          "status": "finalized",
+          "ticker": "KXBTC15M-26OCT272230-30",
+          "yes_ask_dollars": "1.0000",
+          "yes_bid_dollars": "0.0000"
+        }
+      },
+      "open_ts": 1793153700.0,
+      "samples": 158,
+      "ticker": "KXBTC15M-26OCT272230-30"
+    },
+    "KXBTC15M-26OCT272245-45": {
+      "close_ts": 1793155500.0,
+      "first_observed_at": 1793154642.4480023,
+      "last_observed_at": 1793154646.819542,
+      "official": {
+        "fetch": {
+          "age": null,
+          "date": "Wed, 28 Oct 2026 02:30:42 GMT",
+          "received_at": 1793154642.774764,
+          "requested_at": 1793154642.7317472,
+          "sha256": "cbf56bd921283ae76da42816f1d9efb9e56eb0005d2f7e67b5d4949745bbe081"
+        },
+        "market": {
+          "close_time": "2026-10-28T02:45:00Z",
+          "expiration_time": "2026-11-04T02:45:00Z",
+          "no_ask_dollars": "0.3900",
+          "no_bid_dollars": "0.3800",
+          "open_time": "2026-10-28T02:30:00Z",
           "price_level_structure": "tapered_deci_cent",
           "price_ranges": [
             {
@@ -41379,18 +41427,18 @@
           "result": "",
           "settlement_ts": null,
           "status": "active",
-          "ticker": "KXBTC15M-26OCT272230-30",
-          "yes_ask_dollars": "0.0010",
-          "yes_bid_dollars": "0.0000"
+          "ticker": "KXBTC15M-26OCT272245-45",
+          "yes_ask_dollars": "0.6200",
+          "yes_bid_dollars": "0.6100"
         }
       },
-      "open_ts": 1793153700.0,
-      "samples": 158,
-      "ticker": "KXBTC15M-26OCT272230-30"
+      "open_ts": 1793154600.0,
+      "samples": 2,
+      "ticker": "KXBTC15M-26OCT272245-45"
     }
   },
   "run_url": "https://github.com/RubysRealm/RubysRealm/actions/runs/40453950918",
-  "samples": 117063,
+  "samples": 117065,
   "schema_version": 1,
   "segments": [
     {
@@ -41629,7 +41677,7 @@
     },
     {
       "end": null,
-      "errors": 70,
+      "errors": 71,
       "segment": "40453950918-5",
       "start": 1793150096.5781898
     }
