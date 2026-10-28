@@ -2,7 +2,7 @@
   "created_at": 1792538908.7005496,
   "created_at_utc": "2026-10-20T23:28:28.700550+00:00",
   "data_branch": "oracle-public-study-data-20261020",
-  "error_count": 2493,
+  "error_count": 2495,
   "fee_sources": [
     "https://kalshi.com/docs/kalshi-fee-schedule.pdf",
     "https://docs.kalshi.com/getting_started/fee_rounding"
@@ -900,7 +900,7 @@
     }
   ],
   "finished": false,
-  "last_observation": 1793159101.6647983,
+  "last_observation": 1793159128.4433591,
   "market_source": "https://api.elections.kalshi.com/trade-api/v2",
   "mode": "rolling",
   "original_study_stop": 1792683000,
@@ -41667,17 +41667,65 @@
       "official": {
         "fetch": {
           "age": null,
-          "date": "Wed, 28 Oct 2026 03:44:46 GMT",
-          "received_at": 1793159086.7317758,
-          "requested_at": 1793159086.7026424,
-          "sha256": "a16d864aae2db97386a7b1b4a4c8e6dfaf3811a80e0e26b1e00c346eb5af3be9"
+          "date": "Wed, 28 Oct 2026 03:45:24 GMT",
+          "received_at": 1793159124.9242303,
+          "requested_at": 1793159124.89748,
+          "sha256": "15577e1a6206315a161455d54338bc2652d776d1a1fe720b29b604506a008ffd"
         },
         "market": {
           "close_time": "2026-10-28T03:45:00Z",
           "expiration_time": "2026-11-04T03:45:00Z",
-          "no_ask_dollars": "0.0010",
+          "no_ask_dollars": "1.0000",
           "no_bid_dollars": "0.0000",
           "open_time": "2026-10-28T03:30:00Z",
+          "price_level_structure": "tapered_deci_cent",
+          "price_ranges": [
+            {
+              "end": "0.1000",
+              "start": "0.0000",
+              "step": "0.0010"
+            },
+            {
+              "end": "0.9000",
+              "start": "0.1000",
+              "step": "0.0100"
+            },
+            {
+              "end": "1.0000",
+              "start": "0.9000",
+              "step": "0.0010"
+            }
+          ],
+          "result": "yes",
+          "settlement_ts": "2026-10-28T03:45:05.035637Z",
+          "status": "finalized",
+          "ticker": "KXBTC15M-26OCT272345-45",
+          "yes_ask_dollars": "1.0000",
+          "yes_bid_dollars": "0.0000"
+        }
+      },
+      "open_ts": 1793158200.0,
+      "samples": 161,
+      "ticker": "KXBTC15M-26OCT272345-45"
+    },
+    "KXBTC15M-26OCT280000-00": {
+      "close_ts": 1793160000.0,
+      "first_observed_at": 1793159124.5499773,
+      "last_observed_at": 1793159128.4433591,
+      "official": {
+        "fetch": {
+          "age": null,
+          "date": "Wed, 28 Oct 2026 03:45:24 GMT",
+          "received_at": 1793159124.9245663,
+          "requested_at": 1793159124.8976235,
+          "sha256": "1dbcc6138b0f0a1bad68141a21b49a570186e449daa8d91e5281b08527471e86"
+        },
+        "market": {
+          "close_time": "2026-10-28T04:00:00Z",
+          "expiration_time": "2026-11-04T04:00:00Z",
+          "no_ask_dollars": "0.5200",
+          "no_bid_dollars": "0.5100",
+          "open_time": "2026-10-28T03:45:00Z",
           "price_level_structure": "tapered_deci_cent",
           "price_ranges": [
             {
@@ -41699,18 +41747,18 @@
           "result": "",
           "settlement_ts": null,
           "status": "active",
-          "ticker": "KXBTC15M-26OCT272345-45",
-          "yes_ask_dollars": "1.0000",
-          "yes_bid_dollars": "0.9990"
+          "ticker": "KXBTC15M-26OCT280000-00",
+          "yes_ask_dollars": "0.4900",
+          "yes_bid_dollars": "0.4800"
         }
       },
-      "open_ts": 1793158200.0,
-      "samples": 161,
-      "ticker": "KXBTC15M-26OCT272345-45"
+      "open_ts": 1793159100.0,
+      "samples": 2,
+      "ticker": "KXBTC15M-26OCT280000-00"
     }
   },
   "run_url": "https://github.com/RubysRealm/RubysRealm/actions/runs/40453950918",
-  "samples": 117844,
+  "samples": 117846,
   "schema_version": 1,
   "segments": [
     {
@@ -41949,7 +41997,7 @@
     },
     {
       "end": null,
-      "errors": 130,
+      "errors": 132,
       "segment": "40453950918-5",
       "start": 1793150096.5781898
     }
