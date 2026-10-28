@@ -1,0 +1,43 @@
+name: Rubarata recovery regression tests
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/rubarata-recovery-regression.yml'
+      - '.github/workflows/rubaradaclips-hisstory.yml'
+      - 'api/rubyclips-post.js'
+      - 'tests/rubarata-recovery.test.mjs'
+permissions:
+  contents: read
+concurrency:
+  group: rubarata-recovery-regression
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test read-only recovery with mocked providers only
+        run: |
+          node --check api/rubyclips-post.js
+          node --test tests/rubarata-recovery.test.mjs
+      - name: Verify scheduler fallback and untouched durable queue
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          workflow = Path('.github/workflows/rubaradaclips-hisstory.yml').read_text()
+          assert '      - "Ruby\'s Realm podcast repurpose to YouTube Shorts"' in workflow
+          assert 'group: rubaradaclips-hisstory-production' in workflow
+          assert 'cancel-in-progress: false' in workflow
+          assert 'pipeline.py check --persist' in workflow
+          assert "if: steps.gate.outputs.allowed == 'true'" in workflow
+          print('Existing backup completion uses the same guarded, serialized production queue.')
+          PY
+          git diff --exit-code -- rubaradaclips_repurpose/state.json
