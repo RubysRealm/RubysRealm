@@ -19,18 +19,19 @@
       "tied_configurations": 23
     },
     "elapsed_ready": true,
-    "end": 1793402939.8941593,
+    "end": 1793403004.6413403,
     "excluded": {
       "late_or_missing_entry": 3,
       "no_affordable_entry_depth": 2,
       "no_locked_call": 94,
       "quote_gap_over_20s": 101,
-      "sitout": 67
+      "sitout": 67,
+      "unverified_settlement": 1
     },
-    "expected_rounds": 959,
+    "expected_rounds": 960,
     "included_call_opportunities": 664,
     "missing_rounds": 28,
-    "observed_rounds": 931,
+    "observed_rounds": 932,
     "start": 1792539000,
     "status": "partial_sample",
     "top_setups": [
@@ -54,7 +55,7 @@
       }
     ]
   },
-  "as_of": 1793402939.8941593,
+  "as_of": 1793403004.6413403,
   "beneficial_active_keys": [
     "[45, null, 95]",
     "[46, null, 95]",
@@ -62,10 +63,10 @@
     "[45, null, 100]",
     "[46, null, null]",
     "[84, null, 95]",
-    "[82, null, 95]",
-    "[83, null, 95]",
     "[84, null, null]",
     "[84, null, 100]",
+    "[82, null, 95]",
+    "[83, null, 95]",
     "[71, 68, null]",
     "[71, 68, 100]",
     "[69, 68, null]",
@@ -174,8 +175,8 @@
     99,
     null
   ],
-  "generated_at": "2026-10-30T23:29:00.583689+00:00",
-  "last_observation": 1793402939.6944556,
+  "generated_at": "2026-10-30T23:30:05.331277+00:00",
+  "last_observation": 1793403004.5365155,
   "mode": "rolling",
   "money_scale": 10000,
   "period_hours": [
@@ -301,12 +302,6 @@
     }
   ],
   "rounds": [
-    {
-      "close_ts": 1793269800.0,
-      "excluded": "quote_gap_over_20s",
-      "open_ts": 1793268900.0,
-      "ticker": "KXBTC15M-26OCT290630-30"
-    },
     {
       "close_ts": 1793270700.0,
       "excluded": "quote_gap_over_20s",
@@ -268581,6 +268576,12 @@
       ],
       "spent_units": 9111,
       "ticker": "KXBTC15M-26OCT301915-15"
+    },
+    {
+      "close_ts": 1793403000.0,
+      "excluded": "unverified_settlement",
+      "open_ts": 1793402100.0,
+      "ticker": "KXBTC15M-26OCT301930-30"
     }
   ],
   "schema_version": 1,
