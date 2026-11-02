@@ -565,8 +565,12 @@ class DurableQueue:
             if release:
                 self.adopt(release,tag)
                 return self.reconcile()
+        if self.state.get('hold'):
+            # Reconcile existing attempts above, but never report an indefinite
+            # moderation stop as a successful cadence check or clear it on age.
+            return self.result('blocked',reason=self.state.get('hold_reason') or 'manual hold')
         if not self.due():
-            return self.result('idle',reason='manual hold' if self.state.get('hold') else '6-hour cadence')
+            return self.result('idle',reason='6-hour cadence')
         if not prepare:
             return self.result('needs_prepare')
         latest_source_error=None

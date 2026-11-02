@@ -85,8 +85,8 @@ test('requires actual matching evidence for the creator video copy', () => {
   } };
   validateSpotifyVideoManifest(paired, tag);
   assert.throws(() => validateSpotifyVideoManifest({ ...paired, sourceVerification: { ...paired.sourceVerification, audioCorrelation: 0.3 } }, tag), /audio identity/);
-  assert.throws(() => validateSpotifyVideoManifest({ ...paired, sourceVerification: { ...paired.sourceVerification, previewFrameVerified: false } }, tag), /visuals/);
-  assert.throws(() => validateSpotifyVideoManifest({ ...paired, sourceAccessMethod: 'verified-public-copy', sourceVerification: { ...paired.sourceVerification, previewFrameVerified: false } }, tag), /visuals/);
+  assert.throws(() => validateSpotifyVideoManifest({ ...paired, sourceVerification: { ...paired.sourceVerification, previewFrameVerified: false } }, tag), /full-video proof/);
+  assert.throws(() => validateSpotifyVideoManifest({ ...paired, sourceAccessMethod: 'verified-public-copy', sourceVerification: { ...paired.sourceVerification, previewFrameVerified: false } }, tag), /full-video proof/);
 });
 
 test('accepts a complete short episode directly from its Spotify CDN without claiming preview frame comparison', () => {

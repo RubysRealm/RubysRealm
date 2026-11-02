@@ -152,6 +152,36 @@ class DurableQueueTests(unittest.TestCase):
         self.assertEqual(queue.tick()['status'],'sent')
         self.assertEqual(self.io.build_count,0)
 
+    def test_persistent_moderation_hold_is_blocked_without_queue_changes(self):
+        queue=self.queue()
+        self.value.update(hold=True, current=None, pending=None,
+                          hold_reason='Repeated TikTok spam blocks require account review')
+        original=copy.deepcopy(self.value)
+        self.time+=timedelta(days=30)
+        for prepare in (False,True):
+            result=queue.tick(prepare=prepare)
+            self.assertEqual(result['status'],'blocked')
+            self.assertEqual(result['reason'],original['hold_reason'])
+            self.assertFalse(result['allowed'])
+        self.assertEqual(self.value,original)
+        self.assertEqual(self.io.events,[])
+        self.assertEqual(self.io.create_count,0)
+        self.assertEqual(self.io.build_count,0)
+
+    def test_hold_exits_unsuccessfully_and_records_reason_for_workflow(self):
+        value=state()
+        value.update(hold=True,current=None,hold_reason='Account review required')
+        with tempfile.TemporaryDirectory() as directory:
+            output=Path(directory)/'output'
+            summary=Path(directory)/'summary'
+            with patch.object(pipeline,'load_state',return_value=value), \
+                 patch.object(pipeline,'RepositoryIO',return_value=FakeIO()), \
+                 patch.object(pipeline.sys,'argv',['pipeline.py','check']), \
+                 patch.dict(pipeline.os.environ,{'GITHUB_OUTPUT':str(output),'GITHUB_STEP_SUMMARY':str(summary)}):
+                self.assertEqual(pipeline.main(),2)
+            self.assertIn('allowed=false',output.read_text())
+            self.assertIn('Account review required',summary.read_text())
+
     def test_six_hours_from_actual_sent_time(self):
         queue=self.queue()
         self.time=pipeline.parse_time(self.value['last_post_at'])+timedelta(hours=5,minutes=59)

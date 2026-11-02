@@ -61,6 +61,7 @@ jobs:
           assert not state.get('hold'), 'Rubarata queue is on hold'
           PY
       - name: Exercise cadence, restarts, pending recovery and progression with fake APIs only
+        if: always()
         run: python3 -m unittest discover -s rubaradaclips_repurpose -p 'test_*.py' -v
       - name: Save scheduler evidence
         if: always()
