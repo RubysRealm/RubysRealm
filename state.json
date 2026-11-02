@@ -2,7 +2,7 @@
   "created_at": 1792538908.7005496,
   "created_at_utc": "2026-10-20T23:28:28.700550+00:00",
   "data_branch": "oracle-public-study-data-20261020",
-  "error_count": 8264,
+  "error_count": 8267,
   "fee_sources": [
     "https://kalshi.com/docs/kalshi-fee-schedule.pdf",
     "https://docs.kalshi.com/getting_started/fee_rounding"
@@ -1540,7 +1540,7 @@
     }
   ],
   "finished": false,
-  "last_observation": 1793615346.6467633,
+  "last_observation": 1793615416.087421,
   "market_source": "https://api.elections.kalshi.com/trade-api/v2",
   "mode": "rolling",
   "original_study_stop": 1792683000,
@@ -9252,20 +9252,20 @@
         "fee_type": "quadratic"
       },
       "first_observed_at": 1793614525.1392238,
-      "last_observed_at": 1793615346.6467633,
+      "last_observed_at": 1793615391.6511216,
       "official": {
         "fetch": {
           "age": null,
-          "date": "Mon, 02 Nov 2026 10:29:01 GMT",
-          "received_at": 1793615341.887667,
-          "requested_at": 1793615341.8205175,
-          "sha256": "01499c90b1d099e49e29c3941f6c06a7b5c713c7aa9fa8141952e74d13429033"
+          "date": "Mon, 02 Nov 2026 10:30:07 GMT",
+          "received_at": 1793615407.1430848,
+          "requested_at": 1793615407.0685248,
+          "sha256": "b99a3c0078d7f6c3656992f379cf09b9a36c6b752332572d317e1f72c9f475b0"
         },
         "market": {
           "close_time": "2026-11-02T10:30:00Z",
           "expiration_time": "2026-11-09T10:30:00Z",
-          "no_ask_dollars": "0.3500",
-          "no_bid_dollars": "0.3400",
+          "no_ask_dollars": "1.0000",
+          "no_bid_dollars": "0.9990",
           "open_time": "2026-11-02T10:15:00Z",
           "price_level_structure": "tapered_deci_cent",
           "price_ranges": [
@@ -9287,15 +9287,63 @@
           ],
           "result": "",
           "settlement_ts": null,
-          "status": "active",
+          "status": "closed",
           "ticker": "KXBTC15M-26NOV020530-30",
-          "yes_ask_dollars": "0.6600",
-          "yes_bid_dollars": "0.6500"
+          "yes_ask_dollars": "0.0010",
+          "yes_bid_dollars": "0.0000"
         }
       },
       "open_ts": 1793614500.0,
-      "samples": 138,
+      "samples": 146,
       "ticker": "KXBTC15M-26NOV020530-30"
+    },
+    "KXBTC15M-26NOV020545-45": {
+      "close_ts": 1793616300.0,
+      "first_observed_at": 1793615406.775157,
+      "last_observed_at": 1793615416.087421,
+      "official": {
+        "fetch": {
+          "age": null,
+          "date": "Mon, 02 Nov 2026 10:30:07 GMT",
+          "received_at": 1793615407.132646,
+          "requested_at": 1793615407.0686731,
+          "sha256": "d8dcea01cbc82b9a2546a73756db1375915c980ad4f749d33a11882791f9c261"
+        },
+        "market": {
+          "close_time": "2026-11-02T10:45:00Z",
+          "expiration_time": "2026-11-09T10:45:00Z",
+          "no_ask_dollars": "1.0000",
+          "no_bid_dollars": "1.0000",
+          "open_time": "2026-11-02T10:30:00Z",
+          "price_level_structure": "tapered_deci_cent",
+          "price_ranges": [
+            {
+              "end": "0.1000",
+              "start": "0.0000",
+              "step": "0.0010"
+            },
+            {
+              "end": "0.9000",
+              "start": "0.1000",
+              "step": "0.0100"
+            },
+            {
+              "end": "1.0000",
+              "start": "0.9000",
+              "step": "0.0010"
+            }
+          ],
+          "result": "",
+          "settlement_ts": null,
+          "status": "active",
+          "ticker": "KXBTC15M-26NOV020545-45",
+          "yes_ask_dollars": "0.0000",
+          "yes_bid_dollars": "0.0000"
+        }
+      },
+      "open_ts": 1793615400.0,
+      "samples": 2,
+      "ticker": "KXBTC15M-26NOV020545-45"
     },
     "KXBTC15M-26OCT201930-30": {
       "call": {
@@ -73772,7 +73820,7 @@
     }
   },
   "run_url": "https://github.com/RubysRealm/RubysRealm/actions/runs/41398939161",
-  "samples": 201248,
+  "samples": 201258,
   "schema_version": 1,
   "segments": [
     {
@@ -74167,7 +74215,7 @@
     },
     {
       "end": null,
-      "errors": 499,
+      "errors": 502,
       "segment": "41398939161-1",
       "start": 1793600267.324874
     }
