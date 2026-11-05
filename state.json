@@ -2,7 +2,7 @@
   "created_at": 1792538908.7005496,
   "created_at_utc": "2026-10-20T23:28:28.700550+00:00",
   "data_branch": "oracle-public-study-data-20261020",
-  "error_count": 20430,
+  "error_count": 20433,
   "fee_sources": [
     "https://kalshi.com/docs/kalshi-fee-schedule.pdf",
     "https://docs.kalshi.com/getting_started/fee_rounding"
@@ -1870,7 +1870,7 @@
     }
   ],
   "finished": false,
-  "last_observation": 1793853009.3176596,
+  "last_observation": 1793853042.5480971,
   "market_source": "https://api.elections.kalshi.com/trade-api/v2",
   "mode": "rolling",
   "original_study_stop": 1792683000,
@@ -26173,15 +26173,15 @@
       "official": {
         "fetch": {
           "age": null,
-          "date": "Thu, 05 Nov 2026 04:30:04 GMT",
-          "received_at": 1793853004.4788902,
-          "requested_at": 1793853004.4439015,
-          "sha256": "ac09f10f0d0d5964d77d4e25d9e8365fae71c5f9893605be0379dc0b76790d84"
+          "date": "Thu, 05 Nov 2026 04:30:38 GMT",
+          "received_at": 1793853038.0473814,
+          "requested_at": 1793853038.015275,
+          "sha256": "ddec32d0a3401fa7c97696b4ec1070db0554a3e9df53176a002d56f5532519af"
         },
         "market": {
           "close_time": "2026-11-05T04:30:00Z",
           "expiration_time": "2026-11-12T04:30:00Z",
-          "no_ask_dollars": "0.0010",
+          "no_ask_dollars": "1.0000",
           "no_bid_dollars": "0.0000",
           "open_time": "2026-11-05T04:15:00Z",
           "price_level_structure": "tapered_deci_cent",
@@ -26202,17 +26202,65 @@
               "step": "0.0010"
             }
           ],
-          "result": "",
-          "settlement_ts": null,
-          "status": "closed",
+          "result": "yes",
+          "settlement_ts": "2026-11-05T04:30:02.756152Z",
+          "status": "finalized",
           "ticker": "KXBTC15M-26NOV042330-30",
           "yes_ask_dollars": "1.0000",
-          "yes_bid_dollars": "0.9990"
+          "yes_bid_dollars": "0.0000"
         }
       },
       "open_ts": 1793852100.0,
       "samples": 136,
       "ticker": "KXBTC15M-26NOV042330-30"
+    },
+    "KXBTC15M-26NOV042345-45": {
+      "close_ts": 1793853900.0,
+      "first_observed_at": 1793853037.8396735,
+      "last_observed_at": 1793853042.5480971,
+      "official": {
+        "fetch": {
+          "age": null,
+          "date": "Thu, 05 Nov 2026 04:30:38 GMT",
+          "received_at": 1793853038.0487797,
+          "requested_at": 1793853038.0153713,
+          "sha256": "29860f516064551d4b3c823a1a3d612c5c8ea1b58b55ece6fd860185cc0104ff"
+        },
+        "market": {
+          "close_time": "2026-11-05T04:45:00Z",
+          "expiration_time": "2026-11-12T04:45:00Z",
+          "no_ask_dollars": "0.5400",
+          "no_bid_dollars": "0.5300",
+          "open_time": "2026-11-05T04:30:00Z",
+          "price_level_structure": "tapered_deci_cent",
+          "price_ranges": [
+            {
+              "end": "0.1000",
+              "start": "0.0000",
+              "step": "0.0010"
+            },
+            {
+              "end": "0.9000",
+              "start": "0.1000",
+              "step": "0.0100"
+            },
+            {
+              "end": "1.0000",
+              "start": "0.9000",
+              "step": "0.0010"
+            }
+          ],
+          "result": "",
+          "settlement_ts": null,
+          "status": "active",
+          "ticker": "KXBTC15M-26NOV042345-45",
+          "yes_ask_dollars": "0.4700",
+          "yes_bid_dollars": "0.4600"
+        }
+      },
+      "open_ts": 1793853000.0,
+      "samples": 2,
+      "ticker": "KXBTC15M-26NOV042345-45"
     },
     "KXBTC15M-26OCT201930-30": {
       "call": {
@@ -90689,7 +90737,7 @@
     }
   },
   "run_url": "https://github.com/RubysRealm/RubysRealm/actions/runs/41786386073",
-  "samples": 235707,
+  "samples": 235709,
   "schema_version": 1,
   "segments": [
     {
@@ -91168,7 +91216,7 @@
     },
     {
       "end": null,
-      "errors": 473,
+      "errors": 476,
       "segment": "41786386073-5",
       "start": 1793846192.0015013
     }
