@@ -19,18 +19,19 @@
       "tied_configurations": 5
     },
     "elapsed_ready": true,
-    "end": 1794989640.663534,
+    "end": 1794989705.57055,
     "excluded": {
       "late_or_missing_entry": 56,
       "no_affordable_entry_depth": 6,
       "no_locked_call": 136,
       "quote_gap_over_20s": 811,
-      "sitout": 67
+      "sitout": 67,
+      "unverified_settlement": 1
     },
-    "expected_rounds": 2722,
+    "expected_rounds": 2723,
     "included_call_opportunities": 1601,
     "missing_rounds": 45,
-    "observed_rounds": 2677,
+    "observed_rounds": 2678,
     "start": 1792539000,
     "status": "partial_sample",
     "top_setups": [
@@ -54,13 +55,13 @@
       }
     ]
   },
-  "as_of": 1794989640.663534,
+  "as_of": 1794989705.57055,
   "beneficial_active_keys": [
-    "[46, null, 80]",
     "[91, null, 95]",
     "[92, null, 95]",
     "[91, null, null]",
     "[91, null, 100]",
+    "[92, null, null]",
     "[89, null, 85]",
     "[89, null, 95]",
     "[88, null, 85]",
@@ -171,8 +172,8 @@
     99,
     null
   ],
-  "generated_at": "2026-11-18T08:14:03.596721+00:00",
-  "last_observation": 1794989640.3877058,
+  "generated_at": "2026-11-18T08:15:08.570923+00:00",
+  "last_observation": 1794989705.4204738,
   "mode": "rolling",
   "money_scale": 10000,
   "period_hours": [
@@ -181,6 +182,29 @@
     36
   ],
   "recent_beneficial": [
+    {
+      "average_entry_cents": 63.407692,
+      "beats_no_trade": true,
+      "break_even_purchases": 0,
+      "end": 1794989705.57055,
+      "identified_at": 1794989705.57055,
+      "key": "[92, null, null]",
+      "lookback_hours": 12,
+      "losing_purchases": 9,
+      "max_buy_cents": 92,
+      "net_profit": 12.2584,
+      "profitable_purchases": 30,
+      "purchases": 39,
+      "rank": 3,
+      "returned": 44.0,
+      "roi_pct": 38.619351261436094,
+      "skipped_by_cap": 6,
+      "spent": 31.7416,
+      "start": 1794946505.57055,
+      "stop_loss_pct": null,
+      "take_profit_gain_pct": null,
+      "tied_configurations": 4
+    },
     {
       "average_entry_cents": 35.272727,
       "beats_no_trade": true,
@@ -224,29 +248,6 @@
       "spent": 33.3041,
       "start": 1794944704.1956081,
       "stop_loss_pct": 100,
-      "take_profit_gain_pct": null,
-      "tied_configurations": 4
-    },
-    {
-      "average_entry_cents": 62.802439,
-      "beats_no_trade": true,
-      "break_even_purchases": 0,
-      "end": 1794987904.1956081,
-      "identified_at": 1794987904.1956081,
-      "key": "[92, null, null]",
-      "lookback_hours": 12,
-      "losing_purchases": 10,
-      "max_buy_cents": 92,
-      "net_profit": 11.6959,
-      "profitable_purchases": 31,
-      "purchases": 41,
-      "rank": 3,
-      "returned": 45.0,
-      "roi_pct": 35.118498923555954,
-      "skipped_by_cap": 5,
-      "spent": 33.3041,
-      "start": 1794944704.1956081,
-      "stop_loss_pct": null,
       "take_profit_gain_pct": null,
       "tied_configurations": 4
     },
@@ -298,12 +299,6 @@
     }
   ],
   "rounds": [
-    {
-      "close_ts": 1794856500.0,
-      "excluded": "quote_gap_over_20s",
-      "open_ts": 1794855600.0,
-      "ticker": "KXBTC15M-26NOV161415-15"
-    },
     {
       "close_ts": 1794857400.0,
       "open_ts": 1794856500.0,
@@ -311265,6 +311260,12 @@
       ],
       "spent_units": 9599,
       "ticker": "KXBTC15M-26NOV180300-00"
+    },
+    {
+      "close_ts": 1794989700.0,
+      "excluded": "unverified_settlement",
+      "open_ts": 1794988800.0,
+      "ticker": "KXBTC15M-26NOV180315-15"
     }
   ],
   "schema_version": 1,
