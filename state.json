@@ -3650,7 +3650,7 @@
     }
   ],
   "finished": false,
-  "last_observation": 1795122017.3127646,
+  "last_observation": 1795122027.3388016,
   "market_source": "https://api.elections.kalshi.com/trade-api/v2",
   "mode": "rolling",
   "original_study_stop": 1792683000,
@@ -114638,17 +114638,65 @@
       "official": {
         "fetch": {
           "age": "1",
-          "date": "Thu, 19 Nov 2026 21:00:06 GMT",
-          "received_at": 1795122007.1983724,
-          "requested_at": 1795122007.142604,
-          "sha256": "8fc0e0e3e3646168cace3b4ba5e1796a0b266711bada46300ae2a4f6b1892a1d"
+          "date": "Thu, 19 Nov 2026 21:00:21 GMT",
+          "received_at": 1795122022.43286,
+          "requested_at": 1795122022.3799176,
+          "sha256": "5ff8d3542f2d76cc49a8af9ba6336dd7e46cf447e405c14643dad3d362a6bd05"
         },
         "market": {
           "close_time": "2026-11-19T21:00:00Z",
           "expiration_time": null,
           "no_ask_dollars": "1.0000",
-          "no_bid_dollars": "0.9990",
+          "no_bid_dollars": "0.0000",
           "open_time": "2026-11-19T20:45:00Z",
+          "price_level_structure": "tapered_deci_cent",
+          "price_ranges": [
+            {
+              "end": "0.1000",
+              "start": "0.0000",
+              "step": "0.0010"
+            },
+            {
+              "end": "0.9000",
+              "start": "0.1000",
+              "step": "0.0100"
+            },
+            {
+              "end": "1.0000",
+              "start": "0.9000",
+              "step": "0.0010"
+            }
+          ],
+          "result": "no",
+          "settlement_ts": "2026-11-19T21:00:04.171405Z",
+          "status": "finalized",
+          "ticker": "KXBTC15M-26NOV191600-00",
+          "yes_ask_dollars": "1.0000",
+          "yes_bid_dollars": "0.0000"
+        }
+      },
+      "open_ts": 1795121100.0,
+      "samples": 178,
+      "ticker": "KXBTC15M-26NOV191600-00"
+    },
+    "KXBTC15M-26NOV191615-15": {
+      "close_ts": 1795122900.0,
+      "first_observed_at": 1795122012.1585028,
+      "last_observed_at": 1795122027.3388016,
+      "official": {
+        "fetch": {
+          "age": "2",
+          "date": "Thu, 19 Nov 2026 21:00:20 GMT",
+          "received_at": 1795122022.439903,
+          "requested_at": 1795122022.37979,
+          "sha256": "e2792c92969dce15bd22208b9c8b10d91a836afc0f0ef6495a8206d0571d9522"
+        },
+        "market": {
+          "close_time": "2026-11-19T21:15:00Z",
+          "expiration_time": null,
+          "no_ask_dollars": "0.4100",
+          "no_bid_dollars": "0.4000",
+          "open_time": "2026-11-19T21:00:00Z",
           "price_level_structure": "tapered_deci_cent",
           "price_ranges": [
             {
@@ -114669,22 +114717,14 @@
           ],
           "result": "",
           "settlement_ts": null,
-          "status": "closed",
-          "ticker": "KXBTC15M-26NOV191600-00",
-          "yes_ask_dollars": "0.0010",
-          "yes_bid_dollars": "0.0000"
+          "status": "active",
+          "ticker": "KXBTC15M-26NOV191615-15",
+          "yes_ask_dollars": "0.6000",
+          "yes_bid_dollars": "0.5900"
         }
       },
-      "open_ts": 1795121100.0,
-      "samples": 178,
-      "ticker": "KXBTC15M-26NOV191600-00"
-    },
-    "KXBTC15M-26NOV191615-15": {
-      "close_ts": 1795122900.0,
-      "first_observed_at": 1795122012.1585028,
-      "last_observed_at": 1795122017.3127646,
       "open_ts": 1795122000.0,
-      "samples": 2,
+      "samples": 4,
       "ticker": "KXBTC15M-26NOV191615-15"
     },
     "KXBTC15M-26OCT201930-30": {
@@ -179162,7 +179202,7 @@
     }
   },
   "run_url": "https://github.com/RubysRealm/RubysRealm/actions/runs/44480448984",
-  "samples": 457496,
+  "samples": 457498,
   "schema_version": 1,
   "segments": [
     {
